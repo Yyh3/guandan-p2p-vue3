@@ -469,14 +469,14 @@ function startTimer() {
     if (turnTimeLeft.value <= 0) {
       stopTimer()
       urgent.value = false
-      if (myTurn.value) {
-        if (myHand.value.length > 0) {
-          // 自动出最小单张
-          const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-          game.value.playerPlay(0, [sorted[0]])
-        } else {
-          game.value.playerPass(0)
-        }
+       if (myTurn.value) {
+         if (myHand.value.length > 0) {
+           // 自动出最小单张
+           const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
+           game.value.playerPlay(selfSeat.value, [sorted[0]])
+         } else {
+           game.value.playerPass(selfSeat.value)
+         }
       }
     }
   }, 1000)
@@ -726,18 +726,18 @@ function onAutoFindBest() {
     const remove = new Set(cards.map(c => cardKey(c)))
     const actual = myHand.value.filter(c => remove.has(cardKey(c)))
     if (actual.length === cards.length) {
-      const pr = game.value.playerPlay(0, actual)
+      const pr = game.value.playerPlay(selfSeat.value, actual)
       if (!pr.ok) alert(pr.error || '出牌失败')
     } else {
       // 部分牌没找到(鬼牌)→ 给出提示
       alert('无可出的牌型组合')
     }
   } else if (lastPlay.value) {
-    game.value.playerPass(0)
+    game.value.playerPass(selfSeat.value)
   } else {
     // 首家无可凑,出最小单张
     const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-    game.value.playerPlay(0, [sorted[0]])
+    game.value.playerPlay(selfSeat.value, [sorted[0]])
   }
   hintCards.value = []
   mainActionsRef.value?.setShowing(false)
@@ -804,7 +804,7 @@ function onAutoPlay() {
   if (hintCards.value.length === 0) { mainActionsRef.value?.setShowing(false); return }
   const cards = myHand.value.filter(c => hintCards.value.includes(cardKey(c)))
   if (cards.length === 0) { hintCards.value = []; return }
-  const r = game.value.playerPlay(0, cards)
+  const r = game.value.playerPlay(selfSeat.value, cards)
   if (!r.ok) alert(r.error || '出牌失败')
   hintCards.value = []
   mainActionsRef.value?.setShowing(false)
@@ -979,11 +979,23 @@ function onP2PDeal(payload, from, msg) {
 
 /**
  * ★ v3.8 P1:收到广播的 PLAY,本地 applyPlay(不校验)
+ * 修法:不简单按 seat === selfSeat 跳过(那只对 selfSeat==payload.seat 的本机有效),
+ * 而是检查"本地 game.state.currentPlayer 是否已经被自己推进过"
+ *   - 自己刚出的:本机 onPlay 调了 playerPlay → state 推进 → currentPlayer !== payload.seat → 跳过
+ *   - 别人出的:state.currentPlayer === payload.seat → 没推进 → apply
  */
 function onP2PPlay(payload) {
   if (!payload || !game.value) return
-  if (payload.seat === selfSeat.value) return  // 自己刚出的,本地 onPlay 已经 apply 过了
-  try { game.value.applyPlay(payload.seat, payload.cards) } catch (e) { console.warn('applyPlay err', e) }
+  try {
+    // 检查本机 state:如果 currentPlayer 还指向 payload.seat,说明本机还没推进(remote 消息)
+    // 如果 currentPlayer 已经是别的 seat,说明本机已推进(本地 onPlay 跑过了),跳过
+    const st = game.value.getState()
+    if (st.currentPlayer === payload.seat) {
+      // 本机没推进 → apply
+      game.value.applyPlay(payload.seat, payload.cards)
+    }
+    // else: 本机已推进 → 本地 onPlay 跑过了,跳过避免双重 nextTurn
+  } catch (e) { console.warn('applyPlay err', e) }
 }
 
 /**
@@ -1063,20 +1075,13 @@ function onP2PAITakeover(payload) {
     next[seat] = { ...next[seat], isAI: true, name: (next[seat].name || '玩家') + ' (AI)' }
     players.value = next
   }
-  // 如果当前轮就是 AI seat,触发 AI 出牌
+  // 如果当前轮就是 AI seat,host 触发 AI 出牌(只有 host 触发,避免所有 tab 都跑 AI 逻辑)
   const cur = game.value.getState().currentPlayer
-  if (cur === seat) {
-    // 调一次 scheduleAI(通过 emit turn 触发)
-    // 实际上 addAIPlayer 后,scheduleAI 在 nextTurn 时会触发
-    // 但如果 AI seat 当前就是 currentPlayer,需要手动触发
-    // 直接调 game 的 applyPlay 不可(没有牌),用 scheduleAI 路径
-    // 这里通过 emit 一个 turn 事件触发
+  if (cur === seat && selfSeat.value === 0) {
     const st = game.value.getState()
     if (st.phase === 'playing') {
-      // 触发 AI 决策:等待 1s 让 UI 看到通知
+      // 触发 AI 决策:500ms 让 UI 看到通知
       setTimeout(() => {
-        // 重新调一次 scheduleAI(通过 turn 事件)
-        // 直接调 game 的内部方法
         const hand = st.hands[seat]
         if (hand && hand.length > 0) {
           const ctx = {
@@ -1087,10 +1092,9 @@ function onP2PAITakeover(payload) {
           import_AI().then(AI => {
             const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx)
             if (r.type === 'play') {
-              net.broadcast({ type: 'PLAY', payload: { seat, cards: r.cards } })
+              // host 自己先 apply,再 broadcast(aiBroadcast 已经注入了,会自动 broadcast)
               game.value.playerPlay(seat, r.cards)
             } else {
-              net.broadcast({ type: 'PASS', payload: { seat } })
               game.value.playerPass(seat)
             }
           })
@@ -1098,6 +1102,9 @@ function onP2PAITakeover(payload) {
       }, 500)
     }
   }
+  // 其他 tab(selfSeat !== 0)只 addAIPlayer,等 nextTurn 自动调度 AI
+  // (因为 host 调 playerPlay → nextTurn → scheduleAI → AI seat 自己跑)
+  // 或者等本 tab 的 currentPlayer 轮到 AI seat 时,game.js 内部 scheduleAI 会触发
 }
 
 // 动态 import AI module(避免循环依赖)

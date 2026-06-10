@@ -194,6 +194,16 @@ function initNetwork() {
       router.push('/game?roomNo=' + roomNo.value)
     }
   })
+  // ★ v3.8 P1 修复:joiner 收到 host 的 SEAT_SWAP 也本地交换(否则 joiner 还看到旧的 seat 名字)
+  net.on('message:SEAT_SWAP', (payload) => {
+    if (!payload || !Array.isArray(payload.between) || payload.between.length !== 2) return
+    const [a, b] = payload.between
+    if (a == null || b == null) return
+    const infoA = peers.get(a)
+    const infoB = peers.get(b)
+    if (infoA) peers.set(b, infoA)
+    if (infoB) peers.set(a, infoB)
+  })
 
   if (isHost.value) {
     // ★ v3.8 P0 修复：必须先 setRoomId 再 startAsHost
@@ -275,7 +285,12 @@ function onSwapWithTeammate() {
   peers.set(2, me)
   storage.setNickname(myName.value)
   storage.setAvatar(myAvatar.value)
+  // ★ v3.8 P1 修复:swap 后广播 SEAT_SWAP(joiner 调本机 listener 互换 peers),
+  // 同时广播 NICK_UPDATE 让 joiner 更新 seat 0 的新昵称(SEAT_SWAP 互换 entries
+  // 也能更新,但 NICK_UPDATE 是更直接的"自己改了自己名"信号,防 NICK_UPDATE
+  // 监听器依赖 from 字段的逻辑漏掉)
   net.broadcast({ type: 'SEAT_SWAP', payload: { between: [0, 2] } })
+  net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
 }
 function onCut() { alert('切牌完成') }
 </script>
