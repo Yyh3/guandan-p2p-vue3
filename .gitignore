@@ -1,0 +1,20 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+*.log
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+
+# 测试/调试临时文件
+/tmp/
+/playwright-report/
+/playwright/.cache/
+
+# Mavis 内部
+.mavis/
+.opencode/

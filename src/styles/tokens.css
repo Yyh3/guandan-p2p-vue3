@@ -1,0 +1,127 @@
+/* ============================================================
+ * v3 UI 设计 Token
+ * 商业掼蛋游戏配色 + 动效 + 间距统一变量
+ * 所有 GameView 视觉相关组件都引用这里的 token
+ * ============================================================ */
+
+:root {
+  /* ----- 背景层 ----- */
+  --bg-deep: #0a1233;            /* 屏幕最深底色 */
+  --bg-table: #1a2a5e;           /* 牌桌中心色 */
+  --bg-table-edge: #2a1a4e;      /* 牌桌边缘色 */
+  --bg-table-soft: #2a3464;      /* 整体页面底色(蓝紫) */
+  --wood-edge: #8B5A2B;          /* 木边棕色 */
+  --wood-edge-light: #b07a3f;    /* 木边高光 */
+
+  /* ----- 强调色 ----- */
+  --accent-yellow: #FFC107;      /* 主黄(按钮/本局打) */
+  --accent-yellow-dark: #FFA000; /* 深黄(级牌边) */
+  --accent-yellow-soft: #FFD54F; /* 浅黄(级牌背景) */
+  --accent-orange: #FF9800;      /* 橙(倒计时) */
+  --accent-orange-dark: #EF6C00; /* 深橙 */
+  --orange-warm: #FFB300;        /* v3.6 暖橙(智能理牌渐变顶端) */
+  --orange-bright: #FF6D00;      /* v3.6 亮橙(智能理牌 hover) */
+  --orange-soft: rgba(255, 152, 0, 0.25);
+  --accent-blue: #2196F3;        /* 主蓝(出牌按钮) */
+  --accent-blue-dark: #1976D2;   /* 深蓝 */
+  --accent-red: #E53935;         /* 飘字红 / 不出 */
+  --accent-green: #43A047;       /* 胜利绿 */
+  --accent-purple: #7E57C2;      /* 紫(对家) */
+
+  /* ----- v3.6 身份三色(队友=蓝/对手=红/自己=绿) ----- */
+  --color-teammate: #42a5f5;          /* 队友 主蓝 */
+  --color-teammate-bg: rgba(33,150,243,0.22);
+  --color-teammate-glow: rgba(66,165,245,0.55);
+  --color-opponent: #ef5350;          /* 对手 主红 */
+  --color-opponent-bg: rgba(229,57,53,0.18);
+  --color-opponent-glow: rgba(239,83,80,0.5);
+  --color-self: #66bb6a;              /* 自己 主绿 */
+  --color-self-bg: rgba(67,160,71,0.22);
+  --color-self-glow: rgba(102,187,106,0.55);
+
+  /* ----- 文字色 ----- */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.78);
+  --text-muted: rgba(255, 255, 255, 0.5);
+  --text-on-card: #1A237E;
+
+  /* ----- 牌面色 ----- */
+  --red-card: #E74C3C;           /* 红桃/方块 */
+  --black-card: #2C3E50;         /* 梅花/黑桃 */
+  --card-bg: #FFFFFF;            /* 牌白底 */
+  --card-bg-soft: #F5F5F5;       /* 牌阴影侧 */
+  --card-border: rgba(0, 0, 0, 0.1);
+
+  /* ----- 金属/高级 ----- */
+  --gold: #FFD700;               /* 金色(选中/级牌) */
+  --gold-dark: #C9A227;
+  --gold-soft: rgba(255, 215, 0, 0.2);
+
+  /* ----- 半透明遮罩 ----- */
+  --mask-dark: rgba(0, 0, 0, 0.55);
+  --mask-soft: rgba(0, 0, 0, 0.3);
+  --mask-light: rgba(255, 255, 255, 0.1);
+
+  /* ----- 间距 / 圆角 ----- */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ----- 字号 ----- */
+  --fs-xs: 10px;
+  --fs-sm: 12px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+  --fs-3xl: 40px;
+  --fs-display: 56px;
+  --fs-bomb: 72px;
+  --fs-5: 9px;                     /* v3.6 进度文字最小档 */
+
+  /* ----- 阴影 ----- */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 3px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 6px 16px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 2px 5px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-glow-gold: 0 0 14px rgba(255, 215, 0, 0.7);
+  --shadow-glow-red: 0 0 20px rgba(255, 23, 68, 0.8);
+  /* v3.6 3D 卡片阴影 + 身份三色光晕 */
+  --shadow-card-3d:
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --shadow-glow-teammate: 0 0 12px rgba(66, 165, 245, 0.5);
+  --shadow-glow-opponent: 0 0 10px rgba(239, 83, 80, 0.4);
+  --shadow-glow-self: 0 0 16px rgba(102, 187, 106, 0.55);
+  --shadow-glow-orange: 0 4px 12px rgba(255, 109, 0, 0.5), 0 0 16px rgba(255, 179, 0, 0.4);
+
+  /* ----- 动效 ----- */
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-fast: 120ms;
+  --t-med: 240ms;
+  --t-slow: 400ms;
+  --t-bomb: 1500ms;
+
+  /* ----- HUD 卡片高度 ----- */
+  --hud-card-h: 56px;
+  --clock-size: 48px;
+  --avatar-size: 56px;             /* v3.6: 50 → 56,圆头像更大 */
+  --hand-card-w: 60px;
+  --hand-card-h: 84px;
+  --hand-overlap: -16px;          /* 牌间距(负值=重叠) */
+  --play-card-w: 60px;
+  --play-card-h: 84px;
+  --action-btn-w: 100px;
+  --action-btn-h: 48px;
+  --quick-btn-size: 44px;          /* v3.6: 48 → 44,降级为辅助小图标 */
+  --col-w: 78px;                   /* v3.6 手牌列宽(跟 GameView 同步) */
+}

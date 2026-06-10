@@ -1,0 +1,25 @@
+{
+  "name": "guandan-p2p",
+  "version": "0.1.0",
+  "description": "掼蛋 P2P 局域网版 - 离线 4 人联机",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node src/common/guandan-engine.test.js && node src/common/guandan-ai.test.js && node src/common/guandan-game.test.js && node src/common/deal-animation.test.js && node src/common/audio.test.js && node src/common/card-api.test.js && node src/common/network.test.js && node src/common/network-multitab.test.js",
+    "test:engine": "node src/common/guandan-engine.test.js",
+    "test:ai": "node src/common/guandan-ai.test.js",
+    "test:game": "node src/common/guandan-game.test.js",
+    "test:anim": "node src/common/deal-animation.test.js && node src/common/audio.test.js",
+    "bench": "node src/benchmark.js"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}

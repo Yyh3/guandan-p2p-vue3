@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掼蛋 P2P v0.1.0 — 项目状态报告</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #f7f5f0;
+  --surface: #ffffff;
+  --line: #e9e3d6;
+  --line-soft: #f0ebde;
+  --ink: #14171e;
+  --ink-2: #3a4256;
+  --muted: #7c7a72;
+  --primary: #c97b3f;
+  --primary-soft: rgba(201, 123, 63, 0.1);
+  --green: #4a7a52;
+  --blue: #3b6b8a;
+  --red: #b06367;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px -2px rgba(0,0,0,0.06);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100dvh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before, body::after {
+  content: '';
+  position: fixed;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+body::before { background: var(--primary-soft); top: -200px; right: -200px; }
+body::after { background: rgba(74, 122, 82, 0.08); bottom: -200px; left: -200px; }
+
+main { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 56px 28px 80px; }
+
+section { margin-bottom: 64px; }
+
+/* === Hero === */
+.hero { margin-bottom: 72px; }
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+.eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+
+h1 {
+  font-family: 'DM Serif Display', 'Noto Serif SC', serif;
+  font-size: 56px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-bottom: 16px;
+}
+h1 .accent { color: var(--primary); font-style: italic; }
+
+.subtitle {
+  font-size: 17px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  max-width: 640px;
+  margin-bottom: 32px;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.meta-row span strong { color: var(--ink); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+/* === Section heads === */
+h2 {
+  font-family: 'DM Serif Display', 'Noto Serif SC', serif;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink);
+  margin-bottom: 8px;
+  letter-spacing: -0.005em;
+}
+h2 .head-icon { display: inline-block; vertical-align: -4px; margin-right: 10px; color: var(--primary); }
+.lead { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+
+/* === Stat grid === */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 40px;
+  height: 40px;
+  background: var(--primary-soft);
+  border-bottom-left-radius: 14px;
+}
+.stat-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.stat-num .unit { font-size: 16px; color: var(--muted); margin-left: 2px; }
+.stat-label { font-size: 12px; color: var(--muted); }
+.stat-sub { font-size: 11px; color: var(--green); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+/* === Timeline chart === */
+.chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+  height: 280px;
+}
+
+/* === Phase cards (P0/P1/P2) === */
+.phase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.phase-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  position: relative;
+  transition: all 0.2s;
+}
+.phase-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.phase-tag {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+.phase-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.phase-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+.phase-list { list-style: none; }
+.phase-list li {
+  font-size: 13px;
+  color: var(--ink-2);
+  padding: 6px 0 6px 20px;
+  position: relative;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.phase-list li:last-child { border-bottom: none; }
+.phase-list li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 12px;
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  background: var(--primary);
+  transform: rotate(45deg);
+  opacity: 0.7;
+}
+
+/* === Architecture diagram === */
+.arch-svg-wrap {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  overflow-x: auto;
+}
+.arch-svg-wrap svg { display: block; margin: 0 auto; }
+
+/* === Decisions table === */
+.decision-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.decision {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.decision-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.decision-text { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.decision-text strong { color: var(--ink); font-weight: 600; }
+
+/* === Roadmap === */
+.roadmap {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 28px;
+}
+.roadmap-list { list-style: none; position: relative; }
+.roadmap-list::before {
+  content: '';
+  position: absolute;
+  left: 11px; top: 8px; bottom: 8px;
+  width: 2px;
+  background: var(--line);
+}
+.roadmap-item {
+  position: relative;
+  padding: 0 0 22px 36px;
+}
+.roadmap-item::before {
+  content: '';
+  position: absolute;
+  left: 4px; top: 6px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--primary);
+}
+.roadmap-item.done::before { background: var(--primary); }
+.roadmap-item.active::before { background: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+.roadmap-ver {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0.5px;
+}
+.roadmap-title { font-size: 14px; font-weight: 600; color: var(--ink); margin: 2px 0 4px; }
+.roadmap-desc { font-size: 12px; color: var(--muted); }
+.roadmap-status {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 6px;
+}
+.status-done { background: rgba(74, 122, 82, 0.12); color: var(--green); }
+.status-active { background: var(--primary-soft); color: var(--primary); }
+.status-plan { background: rgba(59, 107, 138, 0.12); color: var(--blue); }
+.status-idea { background: rgba(124, 122, 114, 0.12); color: var(--muted); }
+
+/* === Test bars === */
+.test-bars { display: grid; gap: 10px; }
+.bench {
+  display: grid;
+  grid-template-columns: 160px 1fr 60px;
+  gap: 12px;
+  align-items: center;
+}
+.bench-label { font-size: 13px; color: var(--ink-2); }
+.bench-track {
+  height: 18px;
+  background: var(--line-soft);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.bench-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, #d99265 100%);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  color: white;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.bench-val { font-size: 12px; color: var(--ink); font-family: 'JetBrains Mono', monospace; text-align: right; }
+.test-total {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.test-total strong { color: var(--green); font-family: 'JetBrains Mono', monospace; }
+
+/* === Doc list === */
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.doc-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.15s;
+}
+.doc-item:hover { border-color: var(--primary); color: var(--ink); }
+.doc-icon {
+  width: 24px; height: 24px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.doc-name { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); margin-left: 4px; }
+.doc-title { font-weight: 500; color: var(--ink); }
+
+/* === Footer === */
+footer {
+  margin-top: 80px;
+  padding-top: 28px;
+  border-top: 1px dashed var(--line);
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+footer .sign { font-family: 'DM Serif Display', serif; font-size: 18px; color: var(--ink); margin-bottom: 6px; font-style: italic; }
+
+/* === Responsive === */
+@media (max-width: 900px) {
+  main { padding: 40px 20px 60px; }
+  h1 { font-size: 40px; }
+  h2 { font-size: 24px; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .phase-grid { grid-template-columns: 1fr; }
+  .decision-list { grid-template-columns: 1fr; }
+  .doc-grid { grid-template-columns: 1fr 1fr; }
+  .bench { grid-template-columns: 100px 1fr 50px; }
+  section { margin-bottom: 48px; }
+}
+@media (max-width: 500px) {
+  .stat-grid { grid-template-columns: 1fr; }
+  .doc-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="eyebrow"><span class="dot"></span>v0.1.0 · 2026-06-09 · 局域网 P2P 掼蛋</div>
+    <h1>掼蛋 P2P<br><span class="accent">v3.7 体验优化,完整收尾。</span></h1>
+    <p class="subtitle">离线 4 人联机掼蛋游戏。一人开热点,四人秒连,无公网、无账号、无广告。
+      核心规则自实现,UI/UX 经历 v3.0-3.7 七轮打磨,279 单测全过,11 篇开发文档齐备。</p>
+    <div class="meta-row">
+      <span><strong>3 步启动</strong> npm install && npm run dev</span>
+      <span><strong>279 / 0</strong> 测试通过</span>
+      <span><strong>0 依赖</strong> 第三方 UI 库</span>
+      <span><strong>11 篇</strong> 开发者文档</span>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>数字一览</h2>
+    <p class="lead">从 0 到能玩的全部产出。</p>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-num">279<span class="unit">/0</span></div>
+        <div class="stat-label">单元测试</div>
+        <div class="stat-sub">100% PASS</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">14</div>
+        <div class="stat-label">牌型识别</div>
+        <div class="stat-sub">含王炸/同花顺</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">12</div>
+        <div class="stat-label">Vue 组件</div>
+        <div class="stat-sub">8 view + 4 helper</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">0</div>
+        <div class="stat-label">第三方 UI 库</div>
+        <div class="stat-sub">纯 Vue + 原生 CSS</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TIMELINE CHART -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>演进时间线</h2>
+    <p class="lead">从基础可用到体验打磨,每一步都有明确产物。</p>
+    <div class="chart-wrap">
+      <canvas id="timelineChart"></canvas>
+    </div>
+  </section>
+
+  <!-- v3.7 PHASES -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>v3.7 三个等级,全做</h2>
+    <p class="lead">体验门槛 + 操作效率 + 管理面板,一次性把 v3.7 闭环。</p>
+    <div class="phase-grid">
+      <div class="phase-card">
+        <span class="phase-tag">P0</span>
+        <div class="phase-title">体验门槛</div>
+        <div class="phase-sub">必做 / 防误解</div>
+        <ul class="phase-list">
+          <li>报数提示(剩 ≤ 10 张 tick/warn/urgent 音效)</li>
+          <li>对局中禁止改名(toast 拦截)</li>
+          <li>炸弹 / 王炸 / 超炸音效(Web Audio 合成)</li>
+          <li>BGM 折中方案(280ms 拍鼓点 + 贝斯)</li>
+          <li>自座位位置 C(底部居中突出)</li>
+        </ul>
+      </div>
+      <div class="phase-card">
+        <span class="phase-tag">P1</span>
+        <div class="phase-title">操作效率</div>
+        <div class="phase-sub">增值 / 提效率</div>
+        <ul class="phase-list">
+          <li>出牌音效分级(sfxSingle/Pair/Straight 节奏+音高)</li>
+          <li>倒计时 ≤ 5s 蜂鸣 + 手牌区闪红</li>
+          <li>桌面端快捷键 A/Space/P/Esc</li>
+          <li>快捷聊天 10 颗 pill(本地 toast)</li>
+        </ul>
+      </div>
+      <div class="phase-card">
+        <span class="phase-tag">P2</span>
+        <div class="phase-title">管理面板</div>
+        <div class="phase-sub">完善 / 沉淀</div>
+        <ul class="phase-list">
+          <li>战绩图表(零依赖 SVG 柱+折线)</li>
+          <li>集中设置面板(BGM/SFX/音量/风格)</li>
+          <li>/settings 路由 + 首页"设置"入口</li>
+          <li>动画开关 disabled 视觉修复</li>
+          <li>BGM 风格持久化(localStorage)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEST COVERAGE -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>测试覆盖</h2>
+    <p class="lead">Node 原生 assert,零测试框架,跑完全部 &lt; 3 秒。</p>
+    <div class="chart-wrap" style="height: auto; padding: 28px;">
+      <div class="test-bars">
+        <div class="bench">
+          <span class="bench-label">guandan-engine</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 30%">85</div></div>
+          <span class="bench-val">规则</span>
+        </div>
+        <div class="bench">
+          <span class="bench-label">guandan-ai</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 16%">44</div></div>
+          <span class="bench-val">AI</span>
+        </div>
+        <div class="bench">
+          <span class="bench-label">audio</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 42%">117</div></div>
+          <span class="bench-val">音效</span>
+        </div>
+        <div class="bench">
+          <span class="bench-label">deal-animation</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 4%">11</div></div>
+          <span class="bench-val">动画</span>
+        </div>
+        <div class="bench">
+          <span class="bench-label">card-api</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 7%">19</div></div>
+          <span class="bench-val">卡牌</span>
+        </div>
+        <div class="bench">
+          <span class="bench-label">guandan-game</span>
+          <div class="bench-track"><div class="bench-fill" style="width: 1%">3</div></div>
+          <span class="bench-val">状态机</span>
+        </div>
+      </div>
+      <div class="test-total">
+        <span>合计 <strong>279</strong> 用例 · <strong>0</strong> 失败</span>
+        <span>npm test 通过</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>分层架构</h2>
+    <p class="lead">业务核心不依赖 UI,UI 不直接调游戏逻辑。</p>
+    <div class="arch-svg-wrap">
+      <svg viewBox="0 0 800 380" width="100%" style="max-width: 760px;">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#c97b3f"/>
+          </marker>
+        </defs>
+
+        <!-- Layer 1: Browser Native -->
+        <rect x="40" y="20" width="720" height="44" rx="8" fill="#f0ebde" stroke="#e9e3d6"/>
+        <text x="60" y="46" font-family="JetBrains Mono" font-size="12" fill="#7c7a72">BROWSER NATIVE</text>
+        <text x="400" y="46" font-family="Outfit" font-size="12" fill="#3a4256" text-anchor="middle">BroadcastChannel · localStorage · Web Audio API · Vue 3 reactivity · Vite HMR</text>
+
+        <!-- Layer 2: Common -->
+        <rect x="40" y="100" width="720" height="100" rx="8" fill="#fff" stroke="#c97b3f" stroke-width="1.5"/>
+        <text x="60" y="125" font-family="JetBrains Mono" font-size="12" fill="#c97b3f">src/common/  —  PURE JS, NO VUE</text>
+
+        <rect x="60" y="140" width="120" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="120" y="160" font-family="Outfit" font-size="11" fill="#14171e" text-anchor="middle" font-weight="600">engine</text>
+        <text x="120" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">539 行 · 牌型识别</text>
+
+        <rect x="195" y="140" width="120" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="255" y="160" font-family="Outfit" font-size="11" fill="#14171e" text-anchor="middle" font-weight="600">ai</text>
+        <text x="255" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">766 行 · 贪心决策</text>
+
+        <rect x="330" y="140" width="120" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="390" y="160" font-family="Outfit" font-size="11" fill="#14171e" text-anchor="middle" font-weight="600">game</text>
+        <text x="390" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">226 行 · 状态机</text>
+
+        <rect x="465" y="140" width="100" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="515" y="160" font-family="Outfit" font-size="11" fill="#14171e" text-anchor="middle" font-weight="600">audio</text>
+        <text x="515" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">759 行 · Web Audio</text>
+
+        <rect x="580" y="140" width="100" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="630" y="160" font-family="Outfit" font-size="11" fill="#14171e" text-anchor="middle" font-weight="600">network</text>
+        <text x="630" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">148 行 · P2P</text>
+
+        <rect x="695" y="140" width="50" height="44" rx="4" fill="#faf6ee" stroke="#e9e3d6"/>
+        <text x="720" y="160" font-family="Outfit" font-size="10" fill="#14171e" text-anchor="middle" font-weight="600">storage</text>
+        <text x="720" y="176" font-family="Outfit" font-size="9" fill="#7c7a72" text-anchor="middle">83 行</text>
+
+        <!-- Layer 3: Components -->
+        <rect x="40" y="230" width="720" height="60" rx="8" fill="#fff" stroke="#3b6b8a" stroke-width="1.5"/>
+        <text x="60" y="254" font-family="JetBrains Mono" font-size="12" fill="#3b6b8a">src/components/  —  VUE 3  ·  &lt;script setup&gt;</text>
+        <text x="60" y="276" font-family="Outfit" font-size="12" fill="#3a4256">HudTop · PlayerSeat · TableCenter · CardPlay · MainActions · QuickActions · HistoryChart · ChatQuickPanel · EffectLayer · CountdownClock · NicknameEditor · PlayHintButton</text>
+
+        <!-- Layer 4: Views -->
+        <rect x="40" y="320" width="720" height="44" rx="8" fill="#fff" stroke="#4a7a52" stroke-width="1.5"/>
+        <text x="60" y="346" font-family="JetBrains Mono" font-size="12" fill="#4a7a52">src/views/  —  8 PAGES (ROUTE TARGETS)</text>
+        <text x="400" y="346" font-family="Outfit" font-size="12" fill="#3a4256" text-anchor="middle">Home · Room · Join · Game(1257 行) · AI · Guide · History · Settings</text>
+
+        <!-- Arrows -->
+        <line x1="400" y1="200" x2="400" y2="225" stroke="#c97b3f" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="400" y1="290" x2="400" y2="315" stroke="#3b6b8a" stroke-width="1.5" marker-end="url(#arr)"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- DECISIONS -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>6 条产品决策</h2>
+    <p class="lead">已拍板,改产品逻辑前先回看这 6 条。</p>
+    <div class="decision-list">
+      <div class="decision">
+        <div class="decision-num">1</div>
+        <div class="decision-text"><strong>换座 = 只跟对家换</strong>。不能随便换座位,保证队友固定。</div>
+      </div>
+      <div class="decision">
+        <div class="decision-num">2</div>
+        <div class="decision-text"><strong>昵称 + 头像可自设</strong>。不强制随机,玩家自己挑。</div>
+      </div>
+      <div class="decision">
+        <div class="decision-num">3</div>
+        <div class="decision-text"><strong>改名实时广播</strong>。本地存 + P2P 广播,其他玩家立刻看到。</div>
+      </div>
+      <div class="decision">
+        <div class="decision-num">4</div>
+        <div class="decision-text"><strong>对局中禁止改名</strong>。v3.7 加,防作弊,弹 toast 拦截。</div>
+      </div>
+      <div class="decision">
+        <div class="decision-num">5</div>
+        <div class="decision-text"><strong>AI 中等难度</strong>。规则 + 贪心,不是深度学习。</div>
+      </div>
+      <div class="decision">
+        <div class="decision-num">6</div>
+        <div class="decision-text"><strong>纯自实现</strong>。不借鉴已有掼蛋项目,版权干净。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 11 22 2 13 21 11 13 3 11"/></svg>路线图</h2>
+    <p class="lead">v1.0 跑通,接下来走体验 + 真机两步。</p>
+    <div class="roadmap">
+      <ol class="roadmap-list">
+        <li class="roadmap-item done">
+          <span class="roadmap-ver">v1.0</span>
+          <span class="roadmap-status status-done">DONE</span>
+          <div class="roadmap-title">基础可用</div>
+          <div class="roadmap-desc">规则引擎 + AI + 浏览器版联机 + 单机 AI + 80+ 单测</div>
+        </li>
+        <li class="roadmap-item done">
+          <span class="roadmap-ver">v3.0-3.6</span>
+          <span class="roadmap-status status-done">DONE</span>
+          <div class="roadmap-title">UI/UX 重设计</div>
+          <div class="roadmap-desc">HUD · 牌桌 · 手牌竖叠 · 身份三色 · 设计 token 系统</div>
+        </li>
+        <li class="roadmap-item done">
+          <span class="roadmap-ver">v3.7</span>
+          <span class="roadmap-status status-done">DONE</span>
+          <div class="roadmap-title">体验优化三个等级</div>
+          <div class="roadmap-desc">P0 报数/BGM/禁改名 · P1 音效/快捷键/聊天 · P2 图表/设置</div>
+        </li>
+        <li class="roadmap-item active">
+          <span class="roadmap-ver">v3.8</span>
+          <span class="roadmap-status status-plan">PLAN</span>
+          <div class="roadmap-title">体验补丁 + 用户反馈</div>
+          <div class="roadmap-desc">P2P 聊天同步 · 录像回放 · 断线重连 · 移动端前置</div>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-ver">v2.0</span>
+          <span class="roadmap-status status-plan">DESIGN</span>
+          <div class="roadmap-title">真机联机</div>
+          <div class="roadmap-desc">TCP Socket 网络层 + Capacitor 打包 + Android/iOS 原生插件</div>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-ver">v4.0</span>
+          <span class="roadmap-status status-idea">IDEA</span>
+          <div class="roadmap-title">AI 难度分级</div>
+          <div class="roadmap-desc">Easy(随机) / Medium(当前) / Hard(1 层博弈搜索)</div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- DOCS -->
+  <section>
+    <h2><svg class="head-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>交付文档</h2>
+    <p class="lead">11 篇 · 3821 行 · 新工程师直接上手。</p>
+    <div class="doc-grid">
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+        <div><div class="doc-title">README</div><div class="doc-name">项目入口</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>
+        <div><div class="doc-title">ARCHITECTURE</div><div class="doc-name">系统架构</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>
+        <div><div class="doc-title">ENGINE</div><div class="doc-name">规则引擎</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div><div class="doc-title">AI</div><div class="doc-name">AI 决策</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div>
+        <div><div class="doc-title">NETWORK</div><div class="doc-name">P2P 网络</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+        <div><div class="doc-title">UI</div><div class="doc-name">UI 系统</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div><div class="doc-title">TESTING</div><div class="doc-name">测试规范</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+        <div><div class="doc-title">STYLE</div><div class="doc-name">代码风格</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+        <div><div class="doc-title">HOWTO-EXTEND</div><div class="doc-name">扩展指南</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+        <div><div class="doc-title">ROADMAP</div><div class="doc-name">路线图</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+        <div><div class="doc-title">CHANGELOG</div><div class="doc-name">更新日志</div></div>
+      </div>
+      <div class="doc-item">
+        <div class="doc-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+        <div><div class="doc-title">BGM 已就绪</div><div class="doc-name">0 字节外链</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="sign">—  干得漂亮。—</div>
+    <div>掼蛋 P2P v0.1.0 · 2026-06-09 完工 · 局域网对局已就绪</div>
+    <div style="margin-top: 6px;">由 Mavis 多 agent 团队协作交付:PM 拆解 + Coder 实施 + Verifier 验收</div>
+  </footer>
+
+</main>
+
+<script>
+// === Timeline chart (Chart.js) ===
+const ctx = document.getElementById('timelineChart').getContext('2d');
+
+// Tests count over versions
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: ['v1.0', 'v3.0', 'v3.5', 'v3.6', 'v3.7', 'v3.8*'],
+    datasets: [
+      {
+        label: '测试用例数',
+        data: [81, 81, 81, 81, 279, 320],
+        borderColor: '#c97b3f',
+        backgroundColor: 'rgba(201, 123, 63, 0.12)',
+        borderWidth: 2.5,
+        fill: true,
+        tension: 0.35,
+        pointBackgroundColor: '#c97b3f',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+      },
+      {
+        label: '文档篇数',
+        data: [4, 4, 4, 4, 4, 15],
+        borderColor: '#3b6b8a',
+        backgroundColor: 'rgba(59, 107, 138, 0.08)',
+        borderWidth: 2,
+        borderDash: [4, 4],
+        fill: false,
+        tension: 0.2,
+        pointBackgroundColor: '#3b6b8a',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        pointRadius: 4,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: '#3a4256',
+          font: { family: 'Outfit', size: 12, weight: '500' },
+          boxWidth: 12,
+          boxHeight: 12,
+          padding: 14,
+          usePointStyle: true,
+        }
+      },
+      tooltip: {
+        backgroundColor: '#14171e',
+        titleFont: { family: 'Outfit', size: 12 },
+        bodyFont: { family: 'JetBrains Mono', size: 11 },
+        padding: 10,
+        cornerRadius: 6,
+      }
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#7c7a72', font: { family: 'JetBrains Mono', size: 11 } }
+      },
+      y: {
+        grid: { color: 'rgba(0,0,0,0.04)', drawBorder: false },
+        ticks: { color: '#7c7a72', font: { family: 'JetBrains Mono', size: 11 } },
+        beginAtZero: true,
+      }
+    },
+    interaction: { intersect: false, mode: 'index' }
+  }
+});
+</script>
+
+</body>
+</html>
