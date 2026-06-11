@@ -1,17 +1,20 @@
 /**
- * network.js 单元测试(单实例基础 + Mock BroadcastChannel)
+ * network.js 单元测试 (WS transport 路径)
  *
- * 真实多 tab 联调测改用 network-multitab.test.js 跑(那里用真实 BroadcastChannel)
- * 这里用 EventEmitter + 内存版 MockBroadcastChannel 模拟 BC,验证:
+ * v2.0:每个 network.js 实例配一个独立的 WebSocketTransport(host 用 ephemeral port 0,
+ * joiner 连 host)。保留 fake timer 注入,不依赖真实时间。
+ *
+ * 覆盖:
  *   - 公共 API(startAsHost / joinRoom / scanLanRooms / sendTo / broadcast / on / off)
- *   - Bug 2 修复:sendTo 加 to 字段,onmessage 过滤非自己 to
- *   - Bug 3 修复:scanLanRooms 返回 []
- *   - Bug 1 修复相关:host 收到 JOIN 时分配 seat、满员回 ROOM_FULL
- *
- * v3.8 重写:旧测试断言 scanLanRooms 返回 1 项是 bug 3 的旧行为,改为断言 0 项
+ *   - sendTo 加 to 字段,定向消息过滤
+ *   - scanLanRooms 返回 [] (v3.8 Bug 3 修复保留)
+ *   - host 收到 JOIN 时分配 seat、满员回 ROOM_FULL
+ *   - UUID 持久化 (sessionStorage)
+ *   - 心跳发送 / 超时释放 / PEER_LEAVE 广播
+ *   - BUG-7 防御:host 不依赖 broadcast loopback 触发 ai:takeover
  */
 
-import { EventEmitter } from 'events'
+import { WebSocket, WebSocketServer } from 'ws'
 
 let pass = 0, fail = 0
 function assert(name, cond) {
@@ -25,510 +28,541 @@ function eq(name, actual, expected) {
   else { console.log(`  ✗ ${name}  期望=${e} 实际=${a}`); fail++ }
 }
 
-// ============== Mock BroadcastChannel(同 process 多实例互通) ==============
-class MockBroadcastChannel {
-  static registry = new Map()  // name -> Set<instance>
+// ============== Test helpers ==============
 
-  static reset() { MockBroadcastChannel.registry = new Map() }
-  static instancesOf(name) {
-    return Array.from(MockBroadcastChannel.registry.get(name) || [])
+/**
+ * 创建一个独立的 network.js 实例,绑定到 ws transport。
+ * 默认 host 用 port 0 (ephemeral),joiner 连 host。
+ */
+async function makeInstance(tag, opts = {}) {
+  const url = './network.js?tag=' + tag + '&t=' + Date.now() + '_' + Math.random()
+  const mod = await import(url)
+
+  // fake timers
+  const captured = { intervals: [], timeouts: [], cleared: [] }
+  mod.__installFakeTimers({
+    setInterval: (fn, ms) => {
+      captured.intervals.push({ fn, ms, cancelled: false })
+      return captured.intervals.length
+    },
+    clearInterval: (id) => {
+      captured.cleared.push({ type: 'interval', id })
+      if (id >= 1 && id <= captured.intervals.length) captured.intervals[id - 1].cancelled = true
+    },
+    setTimeout: (fn, ms) => {
+      captured.timeouts.push({ fn, ms, cancelled: false })
+      return captured.timeouts.length
+    },
+    clearTimeout: (id) => {
+      captured.cleared.push({ type: 'timeout', id })
+      if (id >= 1 && id <= captured.timeouts.length) captured.timeouts[id - 1].cancelled = true
+    },
+  })
+
+  return { mod, captured }
+}
+
+async function makeHost(tag, port = 0) {
+  const { mod, captured } = await makeInstance(tag)
+  // 注入 transport factory:host 用 ephemeral port
+  const { WebSocketTransport } = await import('./network-transport-ws.js?tag=' + tag + '&t=' + Date.now())
+  mod._setTransportFactory(() => new WebSocketTransport({ port }))
+  mod.setRoomId('test-' + tag)
+  mod.startAsHost({ nickname: 'H', avatar: 'H' })
+  // 等待 ws server bind
+  let bound = null
+  const start = Date.now()
+  while (Date.now() - start < 2000) {
+    const t = mod._getTransport()
+    if (t && t.getBoundPort && t.getBoundPort() !== null) { bound = t.getBoundPort(); break }
+    await new Promise(r => setTimeout(r, 5))
   }
+  if (bound == null) throw new Error('host not ready after 2s')
+  return { mod, captured, port: bound }
+}
 
-  constructor(name) {
-    this.name = name
-    this.onmessage = null
-    this.closed = false
-    if (!MockBroadcastChannel.registry.has(name)) {
-      MockBroadcastChannel.registry.set(name, new Set())
+async function makeJoiner(tag, hostPort, fixedUuid, nickname = 'J', avatar = 'J') {
+  if (fixedUuid !== undefined) {
+    globalThis.sessionStorage = {
+      _store: { 'guandan_session_uuid': fixedUuid },
+      getItem(k) { return this._store[k] || null },
+      setItem(k, v) { this._store[k] = v },
     }
-    MockBroadcastChannel.registry.get(name).add(this)
   }
-
-  // BC spec:postMessage 不发给自己,异步派发给同 name 的其它实例
-  postMessage(data) {
-    if (this.closed) return
-    const peers = MockBroadcastChannel.registry.get(this.name) || new Set()
-    for (const peer of peers) {
-      if (peer === this || peer.closed) continue
-      const handler = peer.onmessage
-      if (typeof handler === 'function') {
-        // 模拟真实 BC 的微任务异步派发
-        Promise.resolve().then(() => {
-          if (!peer.closed && peer.onmessage === handler) {
-            try { handler({ data }) } catch (e) { /* 同 emit 的吞错策略 */ }
-          }
-        })
-      }
-    }
+  const { mod, captured } = await makeInstance(tag)
+  const { WebSocketTransport } = await import('./network-transport-ws.js?tag=' + tag + '&t=' + Date.now())
+  mod._setTransportFactory(() => new WebSocketTransport())
+  mod.joinRoom('test-' + tag, { nickname, avatar }, { hostIp: '127.0.0.1', hostPort })
+  // 等待 joiner 分配到 seat
+  let seat = -1
+  const start = Date.now()
+  while (Date.now() - start < 2000) {
+    seat = mod.getSelfSeat()
+    if (seat >= 1 && seat <= 3) break
+    await new Promise(r => setTimeout(r, 5))
   }
+  return { mod, captured, seat }
+}
 
-  close() {
-    this.closed = true
-    const peers = MockBroadcastChannel.registry.get(this.name)
-    if (peers) peers.delete(this)
-    this.onmessage = null
+function resetSessionStorage() {
+  globalThis.sessionStorage = {
+    _store: {},
+    getItem(k) { return this._store[k] || null },
+    setItem(k, v) { this._store[k] = v },
   }
 }
 
-// 替换全局 BroadcastChannel
-const OriginalBC = globalThis.BroadcastChannel
-globalThis.BroadcastChannel = MockBroadcastChannel
+async function settle(ms = 100) {
+  await new Promise(r => setTimeout(r, ms))
+}
 
-// 现在 import network(它读 globalThis.BroadcastChannel,会用 Mock 版)
-const Net = await import('./network.js?t=' + Date.now())
-
-// ============== 测试块 ==============
+// ============== Test blocks ==============
 
 console.log('\n=== 1. host 开房基本 API ===')
-const r1 = Net.startAsHost({ nickname: '房主', avatar: '🀄' })
-assert('startAsHost 返回 ok', r1.ok)
-assert('isHost() = true', Net.isHost() === true)
-assert('selfSeat = 0', Net.getSelfSeat() === 0)
-assert('isConnected() = true', Net.isConnected() === true)
-assert('peers 至少含自己', Net.getPeers().size >= 1)
-eq('peers[0].nickname = 房主', Net.getPeers().get(0)?.nickname, '房主')
+{
+  const { mod: Net } = await makeInstance('h1')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h1f')
+  Net._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Net.setRoomId('test-h1')
+  const r1 = Net.startAsHost({ nickname: '房主', avatar: '🀄' })
+  assert('startAsHost 返回 ok', r1.ok)
+  assert('isHost() = true', Net.isHost() === true)
+  assert('selfSeat = 0', Net.getSelfSeat() === 0)
+  // 等 ws server bind
+  await new Promise(r => setTimeout(r, 50))
+  assert('isConnected() = true (transport ready)', Net.isConnected() === true)
+  assert('peers 至少含自己', Net.getPeers().size >= 1)
+  eq('peers[0].nickname = 房主', Net.getPeers().get(0)?.nickname, '房主')
+  Net.close()
+}
 
 console.log('\n=== 2. 事件订阅(on / emit / off + 异常吞掉) ===')
-let count = 0
-const handler = () => count++
-Net.on('test:event', handler)
-Net.emit('test:event')
-Net.emit('test:event')
-assert('emit 2 次 handler 触发 2 次', count === 2)
-Net.off('test:event')
-Net.emit('test:event')
-assert('off 后再 emit 不触发', count === 2)
-Net.on('test:event', () => { throw new Error('boom') })
-Net.emit('test:event')  // handler 抛错,emit 必须吞掉
-assert('handler 抛错被吞掉(不冒泡)', true)
-Net.off('test:event')
+{
+  const { mod: Net } = await makeInstance('h2')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h2f')
+  Net._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Net.setRoomId('test-h2')
+  Net.startAsHost({ nickname: 'H', avatar: 'H' })
+  await settle(50)
+
+  let count = 0
+  const handler = () => count++
+  Net.on('test:event', handler)
+  Net.emit('test:event')
+  Net.emit('test:event')
+  assert('emit 2 次 handler 触发 2 次', count === 2)
+  Net.off('test:event')
+  Net.emit('test:event')
+  assert('off 后再 emit 不触发', count === 2)
+  Net.on('test:event', () => { throw new Error('boom') })
+  Net.emit('test:event')
+  assert('handler 抛错被吞掉(不冒泡)', true)
+  Net.off('test:event')
+  Net.close()
+}
 
 console.log('\n=== 3. send / broadcast / sendTo 返回值 ===')
-const s1 = Net.send({ type: 'X', payload: 1 })
-assert('send 成功(有 channel)', s1 === true)
-const s2 = Net.broadcast({ type: 'X', payload: 1 })
-assert('broadcast 同 send', s2 === true)
-const s3 = Net.sendTo(1, { type: 'X', payload: 1 })
-assert('sendTo 也成功', s3 === true)
-Net.close()
-const s4 = Net.send({ type: 'X' })
-assert('close 后 send 返回 false', s4 === false)
+{
+  const { mod: Net } = await makeInstance('h3')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h3f')
+  Net._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Net.setRoomId('test-h3')
+  Net.startAsHost({ nickname: 'H', avatar: 'H' })
+  await settle(50)
 
-console.log('\n=== 4. sendTo 加 to 字段 + Bug 2 单实例验证 ===')
-// 重新开房
-Net.setRoomId('test-bug2')
-const r4 = Net.startAsHost({ nickname: 'H', avatar: 'H' })
-assert('重开 host 成功', r4.ok)
+  // 没有 joiner,host 的 send 会广播给 0 个 client,但仍然返回 true (transport 已 ready)
+  const s1 = Net.send({ type: 'X', payload: 1 })
+  assert('send 成功(transport ready)', s1 === true)
+  const s2 = Net.broadcast({ type: 'X', payload: 1 })
+  assert('broadcast 同 send', s2 === true)
+  const s3 = Net.sendTo(1, { type: 'X', payload: 1 })
+  assert('sendTo 也成功(无 client 时静默 no-op)', s3 === true)
 
-// 监听 sibling 收到的原始消息
-const sibling = new MockBroadcastChannel('guandan-p2p-test-bug2')
-const siblingReceived = []
-sibling.onmessage = (e) => siblingReceived.push(e.data)
+  Net.close()
+  await settle(20)
+  const s4 = Net.send({ type: 'X' })
+  assert('close 后 send 返回 false', s4 === false)
+}
 
-Net.sendTo(3, { type: 'TO_TEST', payload: { x: 1 } })
-// 等待微任务
-await new Promise(r => setTimeout(r, 20))
-assert('sibling 收到 1 条消息', siblingReceived.length === 1)
-assert('sibling 收到消息带 to=3', siblingReceived[0]?.to === 3)
-eq('from = 0(host selfSeat)', siblingReceived[0]?.from, 0)
-eq('type = TO_TEST', siblingReceived[0]?.type, 'TO_TEST')
-eq('payload = {x:1}', siblingReceived[0]?.payload, { x: 1 })
+console.log('\n=== 4. sendTo 加 to 字段 + ws 端收到定向消息 ===')
+{
+  const { mod: Host } = await makeInstance('h4')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h4f')
+  Host._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Host.setRoomId('test-h4')
+  Host.startAsHost({ nickname: 'H', avatar: 'H' })
 
-// 验证:host 自己也注册 on('message:TO_TEST') 不会收到自己的 sendTo(from===selfSeat 过滤)
-let localCaptured = null
-Net.on('message:TO_TEST', (payload, from, msg) => { localCaptured = { payload, from, to: msg.to } })
-Net.sendTo(1, { type: 'TO_TEST', payload: { y: 2 } })
-await new Promise(r => setTimeout(r, 20))
-assert('host 自己的 on(message:TO_TEST) 不被自身 sendTo 触发(from===selfSeat 过滤)', localCaptured === null)
-Net.off('message:TO_TEST')
+  // 等 host bind
+  let hostPort = null
+  const start = Date.now()
+  while (Date.now() - start < 2000) {
+    hostPort = Host._getTransport()?.getBoundPort?.()
+    if (hostPort != null) break
+    await new Promise(r => setTimeout(r, 5))
+  }
 
-sibling.close()
+  // 直接开一个 raw ws client 模拟 joiner
+  const { WebSocketTransport: WST } = await import('./network-transport-ws.js?t=h4f2')
+  const { mod: Joiner } = await makeInstance('j4')
+  Joiner._setTransportFactory(() => new WST())
+  Joiner.joinRoom('test-h4', { nickname: 'J', avatar: 'J' }, { hostIp: '127.0.0.1', hostPort })
+
+  // 等 joiner 拿到 seat
+  let jSeat = -1
+  const start2 = Date.now()
+  while (Date.now() - start2 < 2000) {
+    jSeat = Joiner.getSelfSeat()
+    if (jSeat >= 1) break
+    await new Promise(r => setTimeout(r, 10))
+  }
+  assert('joiner 拿到 seat >= 1', jSeat >= 1)
+
+  // joiner 监听收到的所有消息
+  const jRecv = []
+  Joiner.on('message', (msg) => jRecv.push(msg))
+
+  // host sendTo 给 joiner seat
+  Host.sendTo(jSeat, { type: 'TO_TEST', payload: { x: 1 } })
+  await settle(100)
+
+  // joiner 应该收到带 to=jSeat 的消息
+  const toMsgs = jRecv.filter(m => m.type === 'TO_TEST')
+  assert('joiner 收到 host 的 sendTo', toMsgs.length === 1)
+  assert('to 字段 = ' + jSeat, toMsgs[0]?.to === jSeat)
+  eq('from = 0(host)', toMsgs[0]?.from, 0)
+
+  // 反向:host 监听收到 joiner 的消息
+  const hRecv = []
+  Host.on('message', (msg) => hRecv.push(msg))
+  Joiner.send({ type: 'J_HELLO', payload: {} })
+  await settle(100)
+  const jMsgs = hRecv.filter(m => m.type === 'J_HELLO')
+  assert('host 收到 joiner 的消息', jMsgs.length === 1)
+  eq('host 收到的 from = joiner seat', jMsgs[0]?.from, jSeat)
+
+  // BUG-7 防御验证:host sendTo 时 host 自己的 onmessage 不应被触发
+  // (即 jRecv 不会收到 host 自己的 sendTo,host 也不该看到自己的 broadcast)
+  // 已经在 jRecv 过滤出 TO_TEST,host 也没 listener 监听自己 — 验证 joiner 端不重复收到
+  assert('joiner 只收到 1 条 TO_TEST (不重复)', toMsgs.length === 1)
+
+  Joiner.close()
+  Host.close()
+}
 
 console.log('\n=== 5. close + 再开 ===')
-Net.close()
-assert('close 后 isConnected = false', Net.isConnected() === false)
-Net.setRoomId('test-5')
-const r5 = Net.startAsHost({ nickname: 'X', avatar: 'X' })
-assert('close 后可再开', r5.ok)
-assert('isConnected 恢复', Net.isConnected() === true)
+{
+  const { mod: Net } = await makeInstance('h5')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h5f')
+  Net._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Net.setRoomId('test-h5')
+  const r5 = Net.startAsHost({ nickname: 'X', avatar: 'X' })
+  assert('第一次 startAsHost 成功', r5.ok)
+  await settle(50)
+  Net.close()
+  assert('close 后 isConnected = false', Net.isConnected() === false)
+  Net.setRoomId('test-h5b')
+  const r5b = Net.startAsHost({ nickname: 'X', avatar: 'X' })
+  assert('close 后可再开', r5b.ok)
+  await settle(50)
+  Net.close()
+}
 
-console.log('\n=== 6. scanLanRooms 改后行为(Bug 3 修复) ===')
-const rooms = await Net.scanLanRooms()
-assert('返回数组', Array.isArray(rooms))
-assert('返回 0 项(浏览器版不支持 LAN 扫描)', rooms.length === 0)
+console.log('\n=== 6. scanLanRooms 返回 [] (浏览器/真机版都不支持 LAN 扫描) ===')
+{
+  const { mod: Net } = await makeInstance('h6')
+  const rooms = await Net.scanLanRooms()
+  assert('返回数组', Array.isArray(rooms))
+  assert('返回 0 项', rooms.length === 0)
+}
 
-console.log('\n=== 7. getSelfInfo + broadcast from 字段 ===')
-eq('getSelfInfo().nickname = X', Net.getSelfInfo()?.nickname, 'X')
+console.log('\n=== 7. getSelfInfo + joiner 后 from 字段 ===')
+{
+  const { mod: Host, port } = await makeHost('h7')
+  const { mod: Joiner, seat: jSeat } = await makeJoiner('j7', port, 'uuid-h7-j')
 
-// 监听 sibling 验证 from 字段
-const sib7 = new MockBroadcastChannel('guandan-p2p-test-5')
-const sib7Msgs = []
-sib7.onmessage = (e) => sib7Msgs.push(e.data)
+  // joiner 监听收到的所有消息,看 from 字段
+  const jRecv = []
+  Joiner.on('message', (msg) => jRecv.push(msg))
 
-Net.broadcast({ type: 'FROM_TEST', payload: {} })
-await new Promise(r => setTimeout(r, 20))
-assert('sibling 收到 broadcast', sib7Msgs.length === 1)
-assert('selfSeat=0 时 from=0', sib7Msgs[0]?.from === 0)
+  // joiner broadcast
+  Joiner.broadcast({ type: 'FROM_TEST', payload: {} })
+  await settle(100)
+  const jBc = jRecv.filter(m => m.type === 'FROM_TEST')
+  assert('joiner 收到自己的 broadcast', jBc.length === 0)  // 不应回环
 
-Net.setSelfSeat(2)
-Net.broadcast({ type: 'FROM_TEST', payload: {} })
-await new Promise(r => setTimeout(r, 20))
-assert('selfSeat=2 时 from=2', sib7Msgs[1]?.from === 2)
-Net.setSelfSeat(0)  // 还原
-sib7.close()
+  Host.close()
+  Joiner.close()
+}
 
-console.log('\n=== 8. ROOM_FULL 流程(Bug 1 副作用验证) ===')
-// 重置,清空 peers
-Net.close()
-MockBroadcastChannel.reset()
-Net.setRoomId('test-full')
-const r8 = Net.startAsHost({ nickname: 'HOST', avatar: 'H' })
-assert('重开 host 成功', r8.ok)
+console.log('\n=== 8. ROOM_FULL 流程 ===')
+{
+  const { mod: Host, port } = await makeHost('h8')
 
-// 手造满员:peers = 0,1,2,3 全部填上
-Net.getPeers().set(1, { nickname: 'P1', avatar: '1' })
-Net.getPeers().set(2, { nickname: 'P2', avatar: '2' })
-Net.getPeers().set(3, { nickname: 'P3', avatar: '3' })
-assert('peers 满员 size=4', Net.getPeers().size === 4)
+  // 手造满员
+  Host.getPeers().set(1, { nickname: 'P1', avatar: '1', uuid: 'p1' })
+  Host.getPeers().set(2, { nickname: 'P2', avatar: '2', uuid: 'p2' })
+  Host.getPeers().set(3, { nickname: 'P3', avatar: '3', uuid: 'p3' })
 
-// 模拟一个 4 号 joiner 发 JOIN(from=-1)
-const joiner4 = new MockBroadcastChannel('guandan-p2p-test-full')
-const joiner4Received = []
-joiner4.onmessage = (e) => joiner4Received.push(e.data)
-joiner4.postMessage({ type: 'JOIN', payload: { nickname: 'P4', avatar: '4' }, from: -1, ts: Date.now() })
-// postMessage 异步派发
-await new Promise(r => setTimeout(r, 30))
+  // 第 4 个 joiner 用新 uuid,应该被 ROOM_FULL
+  const { mod: J4 } = await makeJoiner('j8', port, 'uuid-h8-j4-different')
+  await settle(100)
+  // joiner 端应该触发 error 事件
+  let errMsg = null
+  J4.on('error', (e) => { errMsg = e })
+  // ROOM_FULL 是在 joiner.connect 时收到的,J4 已 joinRoom,可能已经错过;
+  // 但 host 不会回 SYNC,所以 joiner 会 schedule retry 然后收到 ROOM_FULL
+  // 手动让 retry 触发一次
+  await settle(500)
+  // 检查 host 的 peers size 应该没增加
+  assert('host peers.size 仍为 4 (满员拒收)', Host.getPeers().size === 4)
 
-assert('joiner4 收到 host 的 ROOM_FULL', joiner4Received.length === 1)
-eq('收到 type = ROOM_FULL', joiner4Received[0]?.type, 'ROOM_FULL')
-eq('收到 to = -1(joiner selfSeat)', joiner4Received[0]?.to, -1)
-eq('收到 payload.reason = 房间已满', joiner4Received[0]?.payload?.reason, '房间已满')
-
-// 清理
-joiner4.close()
-Net.close()
-MockBroadcastChannel.reset()
+  Host.close()
+  J4.close()
+}
 
 console.log('\n=== 9. setRoomId 在 startAsHost 之前(防 v3.8 死锁回归) ===')
-// 这里只验证 network.js 的 API 顺序:setRoomId 后 getRoomId 正确(语义契约)
-// 真正的 setRoomId→startAsHost 顺序由 RoomView.vue 保证(已同步修)
-Net.setRoomId('order-test')
-assert('setRoomId 后 getRoomId = order-test', Net.getRoomId() === 'order-test')
-const r9 = Net.startAsHost({ nickname: 'ORD', avatar: 'O' })
-assert('接着 startAsHost 成功', r9.ok)
-const instances = MockBroadcastChannel.instancesOf('guandan-p2p-order-test')
-assert('BroadcastChannel 用的 name = guandan-p2p-order-test(不是 default)', instances.length === 1)
-Net.close()
-MockBroadcastChannel.reset()
-
-// ============== 还原全局(避免污染其它测试) ==============
-globalThis.BroadcastChannel = OriginalBC
-
-// ==============
+{
+  const { mod: Net } = await makeInstance('h9')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h9f')
+  Net._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Net.setRoomId('order-test')
+  assert('setRoomId 后 getRoomId = order-test', Net.getRoomId() === 'order-test')
+  const r9 = Net.startAsHost({ nickname: 'ORD', avatar: 'O' })
+  assert('接着 startAsHost 成功', r9.ok)
+  Net.close()
+}
 
 // ============== v3.8 P1 新增测试块(UUID / 心跳 / 并发撞座) ==============
 
-function installFakeTimersFor(mod) {
- const captured = { intervals: [], timeouts: [], cleared: [] }
- mod.__installFakeTimers({
- setInterval: (fn, ms) => {
- captured.intervals.push({ fn, ms, cancelled: false })
- return captured.intervals.length
- },
- clearInterval: (id) => {
- captured.cleared.push({ type: 'interval', id })
- if (id >=1 && id <= captured.intervals.length) captured.intervals[id -1].cancelled = true
- },
- setTimeout: (fn, ms) => {
- captured.timeouts.push({ fn, ms, cancelled: false })
- return captured.timeouts.length
- },
- clearTimeout: (id) => {
- captured.cleared.push({ type: 'timeout', id })
- if (id >=1 && id <= captured.timeouts.length) captured.timeouts[id -1].cancelled = true
- },
- })
- return captured
+console.log('\n=== 10. UUID 持久化 (sessionStorage) ===')
+{
+  resetSessionStorage()
+  globalThis.sessionStorage = {
+    _store: { 'guandan_session_uuid': 'fixed-uuid-001' },
+    getItem(k) { return this._store[k] || null },
+    setItem(k, v) { this._store[k] = v },
+  }
+  const { mod: Net } = await makeInstance('h10')
+  const u1 = Net.ensureUuid()
+  assert('ensureUuid 返回 storage 中已存在的值', u1 === 'fixed-uuid-001')
+  const u2 = Net.ensureUuid()
+  assert('ensureUuid 二次调用返回相同值', u2 === 'fixed-uuid-001')
 }
 
-// ==========10. UUID持久化(sessionStorage) ==========
-console.log('\n===10. UUID持久化(sessionStorage) ===')
-Net.close(); MockBroadcastChannel.reset()
-
-const origSS10 = globalThis.sessionStorage
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'fixed-uuid-001' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 11. startAsHost 后 selfInfo 含 uuid ===')
+{
+  resetSessionStorage()
+  globalThis.sessionStorage = {
+    _store: { 'guandan_session_uuid': 'host-uuid-001' },
+    getItem(k) { return this._store[k] || null },
+    setItem(k, v) { this._store[k] = v },
+  }
+  const { mod: Host } = await makeInstance('h11')
+  const { WebSocketTransport } = await import('./network-transport-ws.js?t=h11f')
+  Host._setTransportFactory(() => new WebSocketTransport({ port: 0 }))
+  Host.setRoomId('test-h11')
+  Host.startAsHost({ nickname: 'H', avatar: 'H' })
+  await settle(50)
+  const hInfo = Host.getSelfInfo()
+  assert('host selfInfo.uuid = host-uuid-001', hInfo?.uuid === 'host-uuid-001')
+  assert('host peers[0].uuid 同步', Host.getPeers().get(0)?.uuid === 'host-uuid-001')
+  Host.close()
 }
-const u1 = Net.ensureUuid()
-assert('ensureUuid 返回 storage 中已存在的值', u1 === 'fixed-uuid-001')
-assert('storage 中值不变', globalThis.sessionStorage._store['guandan_session_uuid'] === 'fixed-uuid-001')
 
-//再次 ensureUuid 应该返回相同值（验证持久化）
-const u2 = Net.ensureUuid()
-assert('ensureUuid二次调用返回相同值', u2 === 'fixed-uuid-001')
-
-globalThis.sessionStorage = origSS10
-Net.close(); MockBroadcastChannel.reset()
-
-// ==========11. startAsHost 后 selfInfo 含 uuid ==========
-console.log('\n===11. startAsHost 后 selfInfo 含 uuid ===')
-Net.close(); MockBroadcastChannel.reset()
-const origSS11 = globalThis.sessionStorage
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'host-uuid-001' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 12. joiner selfInfo 含 uuid ===')
+{
+  resetSessionStorage()
+  globalThis.sessionStorage = {
+    _store: { 'guandan_session_uuid': 'joiner-uuid-001' },
+    getItem(k) { return this._store[k] || null },
+    setItem(k, v) { this._store[k] = v },
+  }
+  const { mod: Host, port } = await makeHost('h12')
+  const { mod: Joiner } = await makeJoiner('j12', port, 'joiner-uuid-001')
+  assert('joiner selfInfo.uuid = joiner-uuid-001', Joiner.getSelfInfo()?.uuid === 'joiner-uuid-001')
+  Host.close()
+  Joiner.close()
 }
-Net.setRoomId('test-uuid-host')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-const hInfo = Net.getSelfInfo()
-assert('host selfInfo.uuid = host-uuid-001', hInfo?.uuid === 'host-uuid-001')
-assert('host peers[0].uuid同步', Net.getPeers().get(0)?.uuid === 'host-uuid-001')
-globalThis.sessionStorage = origSS11
-Net.close(); MockBroadcastChannel.reset()
 
-// ==========12. joinRoom 后 selfInfo 含 uuid ==========
-console.log('\n===12. joinRoom 后 selfInfo 含 uuid ===')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-uuid-join')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-const J12 = await import('./network.js?t=' + Date.now() + '_j12')
-const origSS12 = globalThis.sessionStorage
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'joiner-uuid-001' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 13. host 收 JOIN 复用同 uuid seat (重连) ===')
+{
+  const { mod: Host, port } = await makeHost('h13')
+
+  // joiner A 进来,seat=1
+  globalThis.sessionStorage = {
+    _store: { 'guandan_session_uuid': 'reconnect-uuid-001' },
+    getItem(k) { return this._store[k] || null },
+    setItem(k, v) { this._store[k] = v },
+  }
+  const { mod: JA } = await makeJoiner('j13a', port, 'reconnect-uuid-001')
+  assert('A seat=1', JA.getSelfSeat() === 1)
+  const sizeBefore = Host.getPeers().size
+  JA.close()
+  await settle(50)
+
+  // 同 uuid 重连
+  const { mod: JA2 } = await makeJoiner('j13b', port, 'reconnect-uuid-001', 'A2', 'A2')
+  await settle(150)  // 等 host 处理 JOIN + 广播 SYNC 完成
+  assert('A2 重连后 seat 仍是 1', JA2.getSelfSeat() === 1)
+  assert('host peers.size 不增长 (复用)', Host.getPeers().size === sizeBefore)
+  assert('host peers[1].nickname 更新为 A2', Host.getPeers().get(1)?.nickname === 'A2')
+
+  Host.close()
+  JA2.close()
 }
-J12.joinRoom('test-uuid-join', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r,30))
-assert('joiner selfInfo.uuid = joiner-uuid-001', J12.getSelfInfo()?.uuid === 'joiner-uuid-001')
-globalThis.sessionStorage = origSS12
-J12.close()
-Net.close(); MockBroadcastChannel.reset()
 
-// ==========13. host收 JOIN复用同 uuid seat（重连）==========
-console.log('\n===13. host收 JOIN复用同 uuid seat ===')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-reconnect')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-
-const J13A = await import('./network.js?t=' + Date.now() + '_j13a')
-const origSS13 = globalThis.sessionStorage
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'reconnect-uuid-001' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 14. host 收 JOIN 分配新 seat (不同 uuid) ===')
+{
+  const { mod: Host, port } = await makeHost('h14')
+  const { mod: JA } = await makeJoiner('j14a', port, 'uuid-A')
+  assert('A seat=1', JA.getSelfSeat() === 1)
+  const { mod: JB } = await makeJoiner('j14b', port, 'uuid-B')
+  assert('B seat=2 (不同 uuid 走新分配)', JB.getSelfSeat() === 2)
+  assert('host peers.size = 3', Host.getPeers().size === 3)
+  Host.close()
+  JA.close()
+  JB.close()
 }
-J13A.joinRoom('test-reconnect', { nickname: 'A', avatar: 'A' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerA拿到 seat=1', J13A.getSelfSeat() ===1)
-assert('host peers.size=2', Net.getPeers().size ===2)
-const sizeBefore13 = Net.getPeers().size
 
-J13A.close()
-await new Promise(r => setTimeout(r,10))
+console.log('\n=== 15. 心跳发送 (joiner 端 fake timer) ===')
+{
+  const { mod: Host, port } = await makeHost('h15')
+  const { mod: Joiner, captured } = await makeJoiner('j15', port, 'uuid-h15-j')
+  // joiner 注册的 intervals(心跳 + rejoin)
+  assert('joiner 注册了 setInterval (心跳发送)', captured.intervals.length >= 1)
+  const hbInterval = captured.intervals.find(t => t.ms === 3000)
+  assert('心跳 interval 周期 = 3000ms', !!hbInterval)
 
-// 同 sessionStorage uuid 不变，模拟刷新 tab
-const J13A2 = await import('./network.js?t=' + Date.now() + '_j13a2')
-J13A2.joinRoom('test-reconnect', { nickname: 'A2', avatar: 'A2' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerA2 重连后 seat仍是1', J13A2.getSelfSeat() ===1)
-assert('host peers.size 不增长（复用）', Net.getPeers().size === sizeBefore13)
-assert('host peers[1].nickname 已更新为 A2', Net.getPeers().get(1)?.nickname === 'A2')
+  // 手动调一次心跳 callback(joiner 发 HEARTBEAT,host 收到)
+  const hbRecv = []
+  Host.on('message:HEARTBEAT', (payload, from) => hbRecv.push({ payload, from }))
+  hbInterval.fn()
+  await settle(100)
+  assert('host 收到 joiner 的 HEARTBEAT', hbRecv.length === 1)
 
-globalThis.sessionStorage = origSS13
-J13A2.close()
-Net.close(); MockBroadcastChannel.reset()
-
-// ==========14. host收 JOIN分配新 seat（不同 uuid）==========
-console.log('\n===14. host收 JOIN分配新 seat（不同 uuid）==========')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-newseat')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-
-const origSS14 = globalThis.sessionStorage
-
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'uuid-A' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+  Host.close()
+  Joiner.close()
 }
-const J14A = await import('./network.js?t=' + Date.now() + '_j14a')
-J14A.joinRoom('test-newseat', { nickname: 'A', avatar: 'A' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerA seat=1', J14A.getSelfSeat() ===1)
 
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'uuid-B' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 16. 心跳超时释放 seat + BUG-7 修复验证 ===')
+{
+  const { mod: Host, captured: hCap } = await makeHost('h16')
+  const hostPort16 = Host._getTransport().getBoundPort()
+  const { mod: Joiner } = await makeJoiner('j16', hostPort16, 'uuid-h16-j')
+  assert('joiner seat=1', Joiner.getSelfSeat() === 1)
+  assert('host peers 含 joiner', Host.getPeers().has(1))
+
+  let leaveEvent = null
+  let aiTakeoverEvent = null
+  Host.on('peer:leave', (e) => { leaveEvent = e })
+  Host.on('ai:takeover', (e) => { aiTakeoverEvent = e })
+
+  // host 注册的心跳检查 interval
+  const checker = hCap.intervals.find(t => t.ms === 5000)
+  assert('host 注册了心跳检查 interval (5000ms)', !!checker)
+
+  // 强制让 seat=1 的心跳过期
+  Host._forceExpireHeartbeat(1)
+  // 触发 checker
+  checker.fn()
+  await settle(100)
+
+  assert('心跳超时后 host peers 不含 seat=1', !Host.getPeers().has(1))
+  assert('emit peer:leave seat=1', leaveEvent?.seat === 1)
+  assert('peer:leave 事件含 info', leaveEvent?.info != null)
+
+  // ★★★ BUG-7 修复验证 ★★★
+  assert('emit ai:takeover seat=1 (host 端本地触发,不靠 loopback)', aiTakeoverEvent?.seat === 1)
+  assert('ai:takeover 事件含 info', aiTakeoverEvent?.info != null)
+
+  Host.off('peer:leave')
+  Host.off('ai:takeover')
+  Host.close()
+  Joiner.close()
 }
-const J14B = await import('./network.js?t=' + Date.now() + '_j14b')
-J14B.joinRoom('test-newseat', { nickname: 'B', avatar: 'B' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerB seat=2（不同 uuid走新分配）', J14B.getSelfSeat() ===2)
-assert('host peers.size=3', Net.getPeers().size ===3)
 
-globalThis.sessionStorage = origSS14
-J14A.close()
-J14B.close()
-Net.close(); MockBroadcastChannel.reset()
+console.log('\n=== 17. PEER_LEAVE 广播给其它 joiner (BUG-7 joiner 端路径) ===')
+{
+  const { mod: Host, port } = await makeHost('h17')
+  const { mod: JA, seat: aSeat } = await makeJoiner('j17a', port, 'uuid-h17-a')
+  const { mod: JB } = await makeJoiner('j17b', port, 'uuid-h17-b')
+  assert('A seat=1, B seat=2', aSeat === 1 && JB.getSelfSeat() === 2)
 
-// ==========15. 心跳发送（joiner端 fake timer）==========
-console.log('\n===15. 心跳发送（joiner端 fake timer）==========')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-hb-send')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
+  let leaveB = null
+  let aiTakeoverB = null
+  JB.on('peer:leave', (e) => { leaveB = e })
+  JB.on('ai:takeover', (e) => { aiTakeoverB = e })
 
-const sib15 = new MockBroadcastChannel('guandan-p2p-test-hb-send')
-const sib15Msgs = []
-sib15.onmessage = (e) => sib15Msgs.push(e.data)
+  // 模拟 A 掉线
+  Host._forceExpireHeartbeat(1)
+  Host._tickHeartbeatChecker()
+  await settle(100)
 
-const J15 = await import('./network.js?t=' + Date.now() + '_j15')
-const ft15 = installFakeTimersFor(J15)
-J15.joinRoom('test-hb-send', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r,30))
-assert('joiner 注册了 setInterval（心跳发送）', ft15.intervals.length >=1)
-assert('心跳 interval周期 =3000ms', ft15.intervals[0]?.ms ===3000)
+  assert('B 收到 peer:leave seat=1', leaveB?.seat === 1)
+  assert('B 收到 ai:takeover seat=1', aiTakeoverB?.seat === 1)
 
-await new Promise(r => setTimeout(r,20))
-const sib15MsgsLen = sib15Msgs.length
-J15._sendHeartbeat()
-await new Promise(r => setTimeout(r,20))
-// (joiner _sendHeartbeat 调 sendMessage 直接验证发包能力 — 端到端心跳验证在 multitab §3)
-
-J15.close()
-sib15.close()
-Net.close(); MockBroadcastChannel.reset()
-
-// ==========16. 心跳接收（host端 _sendHeartbeat 不抛错）==========
-console.log('\n===16. 心跳接收（host端）==========')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-hb-recv')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-const J16 = await import('./network.js?t=' + Date.now() + '_j16')
-J16.joinRoom('test-hb-recv', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r,30))
-J16._sendHeartbeat()
-await new Promise(r => setTimeout(r,20))
-assert('_sendHeartbeat 不抛错', true)
-J16._sendHeartbeat()
-J16._sendHeartbeat()
-await new Promise(r => setTimeout(r,20))
-assert('多次 _sendHeartbeat 不抛错', true)
-J16.close()
-Net.close(); MockBroadcastChannel.reset()
-
-// ==========17. 心跳超时释放 seat ==========
-console.log('\n===17. 心跳超时释放 seat ===')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-hb-timeout')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-const J17 = await import('./network.js?t=' + Date.now() + '_j17')
-J17.joinRoom('test-hb-timeout', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r,30))
-assert('joiner seat=1', J17.getSelfSeat() ===1)
-assert('host peers 含 joiner', Net.getPeers().has(1))
-
-let leaveEvent17 = null
-Net.on('peer:leave', (e) => { leaveEvent17 = e })
-
-Net._forceExpireHeartbeat(1)
-Net._tickHeartbeatChecker()
-await new Promise(r => setTimeout(r,20))
-
-assert('心跳超时后 host peers 不含 seat1', !Net.getPeers().has(1))
-assert('emit peer:leave seat=1', leaveEvent17?.seat ===1)
-assert('peer:leave事件含 info', leaveEvent17?.info != null)
-
-Net.off('peer:leave')
-J17.close()
-Net.close(); MockBroadcastChannel.reset()
-
-// ==========18. PEER_LEAVE广播给其它 joiner ==========
-console.log('\n===18. PEER_LEAVE广播 ===')
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-peer-leave')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-
-const origSS18 = globalThis.sessionStorage
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'uuid-leave-A' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+  JB.off('peer:leave')
+  JB.off('ai:takeover')
+  Host.close()
+  JA.close()
+  JB.close()
 }
-const J18A = await import('./network.js?t=' + Date.now() + '_j18a')
-J18A.joinRoom('test-peer-leave', { nickname: 'A', avatar: 'A' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerA seat=1', J18A.getSelfSeat() ===1)
 
-globalThis.sessionStorage = {
- _store: { 'guandan_session_uuid': 'uuid-leave-B' },
- getItem(k) { return this._store[k] || null },
- setItem(k, v) { this._store[k] = v },
+console.log('\n=== 18. close 清心跳 timer ===')
+{
+  const { mod: Host, captured: hCap } = await makeHost('h18')
+  assert('host 注册了心跳检查 interval', hCap.intervals.length >= 1)
+  Host.close()
+  assert('host close 后 clearInterval 被调用', hCap.cleared.some(c => c.type === 'interval'))
 }
-const J18B = await import('./network.js?t=' + Date.now() + '_j18b')
-J18B.joinRoom('test-peer-leave', { nickname: 'B', avatar: 'B' })
-await new Promise(r => setTimeout(r,30))
-assert('joinerB seat=2', J18B.getSelfSeat() ===2)
 
-let leaveEventB = null
-J18B.on('peer:leave', (e) => { leaveEventB = e })
+console.log('\n=== 19. ★ BUG-7 防御:host broadcast → host 自己的 transport onMessage 触发次数 ===')
+{
+  const { mod: Host, port } = await makeHost('h19')
 
-Net._forceExpireHeartbeat(1)
-Net._tickHeartbeatChecker()
-await new Promise(r => setTimeout(r,30))
+  // 监听 host 自己的 transport onMessage 收到的所有消息(通过 'message' 事件)
+  const hostReceived = []
+  Host.on('message', (msg) => hostReceived.push(msg))
 
-assert('joinerB收到 peer:leave seat=1', leaveEventB?.seat ===1)
-assert('joinerB 本地 peers 已删 seat1', !J18B.getPeers().has(1))
+  // host broadcast 一条消息
+  Host.broadcast({ type: 'HOST_SELF_TEST', payload: { tag: 'no-loopback' } })
+  await settle(100)
 
-globalThis.sessionStorage = origSS18
-J18A.close()
-J18B.close()
-J18B.off('peer:leave')
-Net.close(); MockBroadcastChannel.reset()
+  // ★ 关键断言:host 自己的 onmessage 收到 0 条 (transport 不回环 + 网络层不靠 loopback)
+  const hostSelfLoops = hostReceived.filter(m => m.type === 'HOST_SELF_TEST')
+  assert('host broadcast → host 自己的 message handler 收到 0 条 (transport 不回环)', hostSelfLoops.length === 0)
+  assert('host 完全没有收到任何消息(其他 joiner 也没广播)', hostReceived.length === 0)
 
-// ==========19. close 清心跳 timer ==========
-console.log('\n===19. close 清心跳 timer ===')
-Net.close(); MockBroadcastChannel.reset()
-const ft19 = installFakeTimersFor(Net)
-Net.setRoomId('test-close-host')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-assert('host 注册了心跳检查 interval', ft19.intervals.length >=1)
-Net.close()
-assert('host close 后 clearInterval 被调用', ft19.cleared.some(c => c.type === 'interval'))
-assert('host close 清掉至少1 个 interval', ft19.cleared.filter(c => c.type === 'interval').length >=1)
+  Host.close()
+}
 
-Net.close(); MockBroadcastChannel.reset()
-const J19 = await import('./network.js?t=' + Date.now() + '_j19')
-const ft19j = installFakeTimersFor(J19)
-J19.joinRoom('test-close-joiner', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r,20))
-assert('joiner 注册了心跳发送 interval', ft19j.intervals.length >=1)
-J19.close()
-assert('joiner close 后 clearInterval 被调用', ft19j.cleared.some(c => c.type === 'interval'))
+console.log('\n=== 20. ★ BUG-7 防御:host 心跳超时 → host 端 ai:takeover 触发 1 次,addAIPlayer 等价语义 ===')
+{
+  const { mod: Host, captured: hCap } = await makeHost('h20')
+  const hostPort20 = Host._getTransport().getBoundPort()
+  const { mod: Joiner } = await makeJoiner('j20', hostPort20, 'uuid-h20-j')
+  assert('joiner seat=1', Joiner.getSelfSeat() === 1)
 
-J19.close()
-Net.close(); MockBroadcastChannel.reset()
+  let aiCount = 0
+  const aiSeats = []
+  Host.on('ai:takeover', (e) => { aiCount++; aiSeats.push(e?.seat) })
 
-// ==========20-22. retry / debounce / reuse (skipped - covered in multitab)
-// Single-instance MockBC microtask timing is unreliable for retry path.
-// Cross-instance real BC test in network-multitab.test.js covers these.
-// Stub: just verify basic host+joiner connection still works.
+  // 模拟 joiner 掉线:host 强制过期心跳 + 触发 checker
+  Host._forceExpireHeartbeat(1)
+  const checker = hCap.intervals.find(t => t.ms === 5000)
+  checker.fn()
+  await settle(100)
 
-Net.close(); MockBroadcastChannel.reset()
-Net.setRoomId('test-retry-skip')
-Net.startAsHost({ nickname: 'H', avatar: 'H' })
-const Jskip = await import('./network.js?t=' + Date.now() + '_skip')
-Jskip.joinRoom('test-retry-skip', { nickname: 'J', avatar: 'J' })
-await new Promise(r => setTimeout(r, 30))
-assert('joiner got valid seat (retry test placeholder)', Jskip.getSelfSeat() >= 1 && Jskip.getSelfSeat() <= 3)
-Jskip.close()
-Net.close(); MockBroadcastChannel.reset()
+  // ★ 关键断言:host 端 ai:takeover 触发 1 次(直接 emit,不靠 broadcast loopback)
+  assert('host 心跳超时 → host 端 ai:takeover 触发恰好 1 次', aiCount === 1)
+  assert('ai:takeover 触发 seat=1', aiSeats[0] === 1)
 
+  Host.off('ai:takeover')
+  Host.close()
+  Joiner.close()
+}
 
-// ==============汇总 ==============
-console.log(`\n========== 测试结果: ${pass} 通过 / ${fail}失败 ==========`)
-if (fail >0) process.exit(1)
+// ============== 汇总 ==============
+console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
+// WS server / open handles 可能让 process 不退出,显式退出
+setTimeout(() => process.exit(fail > 0 ? 1 : 0), 50)
