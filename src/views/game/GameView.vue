@@ -205,6 +205,7 @@ import CardPlay from '@/components/CardPlay.vue'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 import ChatQuickPanel from '@/components/ChatQuickPanel.vue'
 import net from '@/common/network.js'
+import { rotateSeats } from '@/common/seat-rotation.js'
 
 // 引入 tokens(全局变量)
 import '@/styles/tokens.css'
@@ -341,9 +342,7 @@ const seatData = computed(() => {
   // 之前硬编码 seat 0=自己,只对 host 正确,joiner 看自己是 AI-西 等
   // 2v2 掼蛋:队友永远在正上方(self + 2) mod 4
   const selfSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
-  const tmSeat = (selfSeat + 2) % 4
-  const leftSeat = (selfSeat + 3) % 4
-  const rightSeat = (selfSeat + 1) % 4
+  const { top: tmSeat, left: leftSeat, right: rightSeat } = rotateSeats(selfSeat)
   // 上 = 队友
   const t = players.value[tmSeat] || players.value[2]
   const tCount = st ? (st.finishedOrder.includes(tmSeat) ? 0 : st.hands[tmSeat]?.length ?? 27) : 27
