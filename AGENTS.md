@@ -25,13 +25,17 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（engine 60 + ai 17 + game 4 = 81 个）
+# 跑全部测试（13 套件 / 634 通过 / 0 失败，v2.3 收官基线）
 npm test
 
 # 跑单个测试套件
-npm run test:engine
-npm run test:ai
-npm run test:game
+npm run test:engine      # 规则引擎
+npm run test:ai          # AI 出牌引擎
+npm run test:game        # 对局状态机
+npm run test:anim        # 发牌动画 + 音效
+npm run test:ws          # WebSocket transport（真机 host + 跨设备 client）
+npm run test:rotation    # seat rotation（4 selfSeat × 4 position 覆盖）
+npm run test:kick        # 房主踢人（host → 被踢 joiner self:kicked）
 
 # 跑性能基准
 npm run bench
@@ -48,30 +52,54 @@ guandan-p2p-vue3/
 ├── README.md                # 项目入口说明
 ├── BUILD.md                 # 打包 / 部署教程
 ├── TROUBLESHOOTING.md       # 排错指南
+├── CHANGELOG.md             # 版本变更日志（v0.3.0 起每版本一段）
 ├── package.json             # npm 配置
 ├── vite.config.js           # Vite 构建配置
+├── capacitor.config.json    # Capacitor 配置（v2.0+，APK 构建）
 ├── index.html               # HTML 入口
 ├── src/
 │   ├── main.js              # Vue 应用入口 + 路由
 │   ├── App.vue              # 根组件
 │   ├── benchmark.js         # 性能基准
 │   ├── common/              # 核心模块（纯 JS, 无 Vue 依赖）
-│   │   ├── guandan-engine.js   # 规则引擎（牌型识别 / 大小比较 / 升级）
-│   │   ├── guandan-ai.js       # AI 出牌引擎（规则 + 贪心搜索）
-│   │   ├── guandan-game.js     # 对局状态机（发牌 / 出牌 / 进贡 / 升级）
-│   │   ├── network.js          # P2P 网络抽象（浏览器版用 BroadcastChannel）
-│   │   ├── storage.js          # localStorage 封装
-│   │   └── *.test.js           # 单元测试
-│   ├── components/
-│   │   └── NicknameEditor.vue  # 昵称 / 头像编辑器
-│   └── views/
+│   │   ├── guandan-engine.js       # 规则引擎（牌型识别 / 大小比较 / 升级）
+│   │   ├── guandan-ai.js           # AI 出牌引擎（规则 + 贪心搜索）
+│   │   ├── guandan-game.js         # 对局状态机（发牌 / 出牌 / 进贡 / 升级 / 迁移）
+│   │   ├── network.js              # P2P 网络抽象（事件总线 + 传输层路由）
+│   │   ├── network-transport-bc.js # BC transport（v2.0 拆出）
+│   │   ├── network-transport-ws.js # WebSocket transport（v2.2，跨设备 + 浏览器）
+│   │   ├── network-transport-android-ws.js # AndroidWsTransport（v2.0 真机）
+│   │   ├── ws-server.js            # 真机 WS server 桥接封装（v2.0）
+│   │   ├── seat-rotation.js        # 4 selfSeat 旋转纯函数（v2.1，从 GameView 抽出）
+│   │   ├── qr-fallback.js          # QR 失败兜底纯函数（v2.2）
+│   │   ├── deal-animation.js       # 发牌动画状态机
+│   │   ├── audio.js                # Web Audio 出牌音 / BGM
+│   │   ├── storage.js              # localStorage 封装
+│   │   ├── effects.js              # 特效层
+│   │   └── *.test.js               # 13 套件 Node assert 单测（634 case 全过）
+│   ├── components/          # Vue SFC 业务组件
+│   │   ├── CardPlay.vue        # 出牌按钮 + 提示
+│   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
+│   │   ├── CountdownClock.vue  # 倒计时
+│   │   ├── EffectLayer.vue     # 特效层（炸弹 / 王炸 / 飞机动画）
+│   │   ├── HistoryChart.vue    # 战绩柱状图
+│   │   ├── HudTop.vue          # 顶部 HUD（级牌 / 头像 / 设置）
+│   │   ├── MainActions.vue     # 主操作按钮（出牌 / 过牌 / 提示）
+│   │   ├── NicknameEditor.vue  # 昵称 / 头像编辑器
+│   │   ├── PlayHintButton.vue  # 出牌提示按钮
+│   │   ├── PlayerSeat.vue      # 玩家座位（4 视图旋转）
+│   │   ├── QrFallbackCard.vue  # QR 失败兜底卡片（v2.2）
+│   │   ├── QuickActions.vue    # 房间内快捷操作
+│   │   └── TableCenter.vue     # 桌面中央（出牌区 / 倒计时）
+│   └── views/               # 路由页（8 个）
 │       ├── index/HomeView.vue       # 首页
 │       ├── room/RoomView.vue        # 房间页（开房 / 加入 / 4 座位）
-│       ├── join/JoinView.vue        # 扫码加入 / 输入房间号
-│       ├── game/GameView.vue        # 对局页（出牌 / 跟牌 / 倒计时）
+│       ├── join/JoinView.vue        # 扫码加入 / 输入房间号 / 跨设备连接
+│       ├── game/GameView.vue        # 对局页（出牌 / 跟牌 / 倒计时 / GameView.test.js）
 │       ├── ai/AIView.vue            # AI 单机配置页
 │       ├── guide/GuideView.vue      # 新手引导（开热点 / 加房间）
-│       └── history/HistoryView.vue  # 本地战绩页
+│       ├── history/HistoryView.vue  # 本地战绩页
+│       └── settings/SettingsView.vue # 设置页（v3.7+，音效 / 动画 / 头像）
 └── .harness/                # Mavis 多 agent 团队配置（不影响运行）
     ├── agent.md
     └── reins/
@@ -95,14 +123,18 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v2.3 收官：13 套件 / 634 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
-| `npm run test:engine` | 规则引擎：牌组 / 牌型识别 / 大小比较 / 升级 / 进贡 | 60 |
-| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 | 17 |
-| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass | 4 |
-| `npm test` | 全部 | 81 |
+| `npm run test:engine` | 规则引擎：牌组 / 牌型识别 / 大小比较 / 升级 / 进贡 / 种子发牌 / groupHandByRank | 93 |
+| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 / autoPlayGrouped | 44 |
+| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass / v3.8 P1 联机同步 / v2.1 P3 host 迁移 | 11 |
+| `npm run test:anim` | 发牌动画 + 音效（playSfxForType × 牌型 × count 全覆盖） | 11 + 117 |
+| `npm run test:ws` | WebSocket server + 真机 transport 桥接 + parseHostAddress + joinRemoteRoom | 29 + 50 |
+| `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 56 |
+| `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
+| `npm test` | 全部 | **634 / 0 fail** |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -179,19 +211,35 @@ createGame({ players, seed, ghostRank }) → {
 
 ### `network.js`
 ```js
+// 事件总线 + 状态
 on(event, handler) / off(event, handler) / emit(event, data)  // 事件总线
 close()
 isHost / isConnected / getSelfInfo() / getPeers()
 getRoomId() / setRoomId() / getSelfSeat() / setSelfSeat()
-startAsHost(roomId)  / joinRoom(hostIp, roomId)
+startAsHost(roomId)  / joinRoom(hostIp, roomId)             // v1.0：兼容房间号 / hostIp:hostPort
 send(seat, msg) / broadcast(msg) / sendTo(seat, msg)
 scanLanRooms() → Promise<{ ip, name }[]>
+
+// v2.0+ 跨设备 / 真机
+joinRemoteRoom(hostAddress, selfInfo) → Promise            // v2.2：hostAddress = "IP:port" 解析 + 创建 WS client
+parseHostAddress(hostAddress) → { host, port }             // v2.2：纯函数，支持 IPv4 / IPv6 / 默认端口
+forceDisconnectSeat(seat)                                   // v2.1：房主主动踢人（3 transport 对称实现）
+
+// v2.1 Host 迁移
+migrateHost(newHostSeat, hands, table, currentSeat) → bool // v2.1 P3：座位重映射 + lastPlay.who 修正
+requestHostMigration() → { newHost, reason }              // v2.1 P3：自动选下一候选 host
+
+// v2.1 测试 hook（仅测试环境挂载，生产构建 tree-shake 掉）
+__gd_net()                                                  // 暴露内部 state：peers / transport / heartbeat timer
 ```
 
 **事件名**：
 - `peer:join` / `peer:leave` / `peer:update`
 - `game:start` / `game:play` / `game:pass` / `game:trick_end` / `game:level_up`
 - `chat:msg`
+- `host:migration:request` / `host:migration:announce` / `host:migrated`  // v2.1 P3 host 迁移
+- `self:kicked`                                                // v2.1：被踢 joiner 立即跳页
+- `connection:heartbeat_tick`                                 // v2.1 心跳内部（debug 用，生产一般不订阅）
 
 ### `storage.js`
 ```js
@@ -234,11 +282,23 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 - 不收集用户数据 / 不上报埋点
 - localStorage 只存本机数据，不外传
 
-## 已知的 v1.0 限制
+## 已修的 v1.0 限制（v2.0 - v2.3 收官）
 
-- **网络层是浏览器版实现**（BroadcastChannel），**真机跨设备无法联机**——v2.0 要接 TCP Socket / WiFi Direct / Multipeer
-- **没有原生 APK/IPA 构建配置**——v2.0 加 Capacitor
-- AI 只有中等难度，没分 Easy / Hard
+- ~~网络层是浏览器版实现（BroadcastChannel），真机跨设备无法联机~~ → **v2.0 接 AndroidWsTransport（真机 host）+ v2.2 WebSocketTransport 客户端 WS，跨设备 2 真机 + 2 浏览器实测可联**
+- ~~没有原生 APK / IPA 构建配置~~ → **v2.0 Capacitor + `android/app/build/outputs/apk/debug/app-debug.apk` 真机调试包**
+- ~~心跳太松（10s）掉线感知慢~~ → **v2.1 调到 HEARTBEAT_INTERVAL_MS=2000 / CHECK_INTERVAL_MS=2000 / TIMEOUT_MS=6000，6-8s 释放窗口（精确性测试断言 6.5s 触发释放）**
+- ~~4-tab 联机不稳（随机种子手牌不一致 / __gd_net 没暴露 / rotation 公式耦合 GameView）~~ → **v2.0 种子发牌 + v2.1 __gd_net hook + v2.1 seat-rotation.js 抽出纯函数 + GameView.test.js 56 case 覆盖**
+- ~~QR 库失败没兜底~~ → **v2.2 QrFallbackCard.vue + qr-fallback.js 纯函数（36 case 测 formatHostAddress / buildJoinUrl / shouldShowFallback / describeFallbackMode / clipboardPayload）**
+- ~~BUG-7 host self-broadcast 导致 ai:takeover 误触发~~ → **v2.1 transport onMessage 路径加 host 自屏蔽 + ai:takeover 触发次数限制**
+
+## 真没做（v3.0+ 候选）
+
+- AI 难度分档（Easy / Hard）——当前只有中等难度（规则 + 贪心搜索）
+- 录像回放——对局过程没存盘
+- iOS 脚手架——只有 Android（Capacitor 配了 ios/ 但未跑过 `cap add ios`）
+- 玩家统计 / 战绩分析——`storage.js` 只存原始 record，没做趋势图
+- 弱网 / 隧道 / 高铁 压测数据——只在高速局域网 + WiFi 测过
+- 二维码扫码加入——当前需要手动输入 IP:port（QrFallbackCard 只解决"QR 库失败"的兜底，不是真正的扫码）
 
 ## Agent 团队（本仓库专属）
 
@@ -249,12 +309,53 @@ Mavis 多 agent 团队配置在 `.harness/`：
 - `users-yangyuanhao-downloads-guandan-p2p-vue3--pm`（项目 rein）—— 提需求 / 拆解 / 反馈
 - `mavis`（orchestrator）—— 路由
 
-## Owner 工作流偏好（2026-06-07）
+## Owner 工作流偏好（2026-06-07 基线）
 
 - **bug 自动修**：verifier 找出的 bug 100% 自动按反馈修，不要每条都问 user
 - **plan 配置**：`auto_reject_retries: 2-3`（verifier FAIL 自动 retry），`plan_complete: true` 由 owner 主动控制
 - **新功能**：用 mavis team plan 跑，不要单 worker 单打
 - **producer prompt 模板**：显式写明 "verifier FAIL 时按反馈直接修，不要问 user"
+
+## Owner 实战教训（2026-06-08+，v2.x 收官刷新）
+
+### Worker scope drift 教训（v2.1 4-tab E2E）
+
+- 拿到"4-tab E2E"任务的 worker 容易自己往 5-tab 加 dev hook（超范围）
+- **producer prompt 显式写边界**：4-tab / 不加 hook / 不重写 rotation 公式
+- verifier FAIL 直接 retry，不要先问 user
+
+### 优化路径破坏既有 fix（v2.0 P0 sendToClient 教训）
+
+- 优化"立即清理 host state"听起来对，但会破 v2.0 P0 修复（host state 死锁）
+- **producer prompt 显式写保护边界**：遵守 v2.0 P0 保护 / 不动 `_handleDisconnect` 立即清 host state
+- 既有 fix 的 invariant 要先 grep git log 找出来
+
+### Task spec vs 项目约定的偏差（v2.2 t1-qr-fallback 教训）
+
+- spec 写 `src/components/QrFallbackCard.test.js`，但项目已有 `GameView.test.js + seat-rotation.js` 放 `src/common/` 的模式
+- worker 给 3 条理由接受偏差：
+  1. 项目约定统一
+  2. 避免 vue-test-utils + jsdom 100+ MB dev dep tree
+  3. 36 case 远超 spec 4-6 case，测试覆盖更细
+- **verifier 接受偏差**：但要在 deliverable.md 写清楚（a）新增什么（b）production 影响 0（c）如何还原
+
+### 边界保护（v2.1 host 迁移教训）
+
+- "立即"反应（立即清 peers / 立即跳页）经常会和"延迟"机制（心跳释放窗口）打架
+- 正确做法：立即反应只走**新事件**或**UI 层 reactive state**，不动底层 state machine
+- 让既有 fix 的计时器自然触发释放，状态变更解耦
+
+### 测试时间预算（v2.2 cross-device + kick 教训）
+
+- 跨实例 mock BC 测试加 2-3s 到 npm test（13 套件 634 case 总耗时 ~10s 还能接受）
+- 不要无脑加 mock 跨实例测试，先看现有 mock 是否够用
+- 真 BroadcastChannel 跨实例需要 `globalThis.BroadcastChannel` 注入 + dynamic-import cache-bust (`?tag=xxx&t=Date.now()`)
+
+### 多文档同步必须靠 board（v2.3 release 教训）
+
+- v2.3 同时改 README / CHANGELOG / TROUBLESHOOTING / AGENTS.md / BUILD.md
+- 每个 worker 只看自己 task spec 容易漏：实际项目状态 vs 文档状态
+- **解决**：每个 task 跑完先在 board.md 写"+XX/-YY 行，commit XXXX"，后续 worker 校对当前状态
 
 ## 出问题先看
 
