@@ -101,35 +101,79 @@ export class WebSocketTransport {
     this._mode = 'client'
     this._hostIp = hostIp
     const port = hostPort != null ? hostPort : this._port
-    const wsModule = await import('ws')
-    const WebSocket = wsModule.default || wsModule.WebSocket
     const url = `ws://${hostIp}:${port}${this._path}`
-    this._ws = new WebSocket(url)
-    this._ws.on('open', () => {
-      this._ready = true
-      this._flushOutbox()
-    })
-    this._ws.on('message', (data) => {
+    // ★ v2.2 task B:跨设备联机 — 浏览器环境用原生 WebSocket 全局,Node 测试环境用 'ws'
+    //   浏览器 Vite bundle 里没有 'ws' npm 包(只在 devDependencies 里),所以 import('ws') 会失败。
+    //   优先用 globalThis.WebSocket (浏览器原生);只在它不存在时才尝试 'ws' (Node 测试环境)。
+    let WebSocketImpl = null
+    if (typeof globalThis.WebSocket !== 'undefined') {
+      WebSocketImpl = globalThis.WebSocket
+    } else {
       try {
-        const msg = JSON.parse(data.toString())
-        this._emit(msg)
+        const wsModule = await import('ws')
+        WebSocketImpl = wsModule.default || wsModule.WebSocket
       } catch (e) {
-        // 非法 JSON 忽略
+        throw new Error('WebSocket 不支持(浏览器需要原生 WebSocket,Node 测试环境需要 npm "ws"): ' + (e?.message || e))
       }
-    })
-    this._ws.on('close', () => {
-      const wasReady = this._ready
-      this._ready = false
-      if (wasReady) {
-        this._emit({ type: '_DISCONNECT', payload: { seat: -1 }, ts: Date.now() })
-      }
-    })
-    this._ws.on('error', () => { /* swallow; close handler will fire */ })
-    // 等待 ws open
-    await new Promise((resolve, reject) => {
-      this._ws.once('open', () => resolve(undefined))
-      this._ws.once('error', (err) => reject(err))
-    })
+    }
+    this._ws = new WebSocketImpl(url)
+    // ★ 兼容 Node 'ws' 的 EventEmitter API + 浏览器原生 WebSocket API (use addEventListener)
+    //   两条路径用同一段代码:用 addEventListener 当原生,on() 当 'ws'。
+    const isNativeBrowserWs = (typeof globalThis.WebSocket !== 'undefined') && (this._ws instanceof globalThis.WebSocket)
+    if (isNativeBrowserWs) {
+      this._ws.addEventListener('open', () => {
+        this._ready = true
+        this._flushOutbox()
+      })
+      this._ws.addEventListener('message', (event) => {
+        try {
+          const msg = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString())
+          this._emit(msg)
+        } catch (e) {
+          // 非法 JSON 忽略
+        }
+      })
+      this._ws.addEventListener('close', () => {
+        const wasReady = this._ready
+        this._ready = false
+        if (wasReady) {
+          this._emit({ type: '_DISCONNECT', payload: { seat: -1 }, ts: Date.now() })
+        }
+      })
+      this._ws.addEventListener('error', () => { /* swallow; close handler will fire */ })
+      // 等待 ws open
+      await new Promise((resolve, reject) => {
+        this._ws.addEventListener('open', () => resolve(undefined), { once: true })
+        this._ws.addEventListener('error', () => reject(new Error('WebSocket connect failed')), { once: true })
+      })
+    } else {
+      // Node 'ws' EventEmitter 风格
+      this._ws.on('open', () => {
+        this._ready = true
+        this._flushOutbox()
+      })
+      this._ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString())
+          this._emit(msg)
+        } catch (e) {
+          // 非法 JSON 忽略
+        }
+      })
+      this._ws.on('close', () => {
+        const wasReady = this._ready
+        this._ready = false
+        if (wasReady) {
+          this._emit({ type: '_DISCONNECT', payload: { seat: -1 }, ts: Date.now() })
+        }
+      })
+      this._ws.on('error', () => { /* swallow; close handler will fire */ })
+      // 等待 ws open
+      await new Promise((resolve, reject) => {
+        this._ws.once('open', () => resolve(undefined))
+        this._ws.once('error', (err) => reject(err))
+      })
+    }
   }
 
   send(msg) {

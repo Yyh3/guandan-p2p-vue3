@@ -308,11 +308,15 @@ async function initNetwork() {
       await generateQr()
     }
   } else {
-    // joiner: 支持 ?host=1.2.3.4:8848 (Capacitor) 或 ?roomNo=xxx (浏览器)
+    // joiner: 支持 ?host=1.2.3.4:8848 (跨设备 WS,真机或远端电脑 host)
+    //                          ?host=1.2.3.4 (端口默认 8848)
+    //                          ?roomNo=xxx (浏览器 BC,同电脑多 tab)
     const hostParam = route.query.host ? String(route.query.host) : null
-    if (hostParam && hostParam.indexOf(':') >= 0) {
-      // ws 模式:network.joinRoom 内部解析 host:port
-      const r = net.joinRoom(hostParam, { nickname: myName.value, avatar: myAvatar.value })
+    if (hostParam) {
+      // ★ v2.2 task B:跨设备联机 — 浏览器 joiner 端走 WebSocket 远程连 host
+      //   joinRemoteRoom 内部注入 WebSocketTransport client + 解析 host:port + 走 WS 路径
+      //   跟原 Capacitor path 行为一致,但 transport 用的是浏览器 WebSocketTransport (vs AndroidWsTransport)
+      const r = net.joinRemoteRoom(hostParam, { nickname: myName.value, avatar: myAvatar.value })
       netStatus.value = r.ok ? '🟢' : '🔴'
     } else {
       const r = net.joinRoom(route.query.roomNo || 'default', { nickname: myName.value, avatar: myAvatar.value })

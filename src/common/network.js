@@ -493,6 +493,103 @@ function send(payload) { return sendMessage(payload) }
 function broadcast(payload) { return sendMessage(payload) }
 function sendTo(seat, payload) { return sendMessage({ ...payload, to: seat }) }
 
+// ============== v2.2 task B:跨设备 joinRemoteRoom ==============
+/**
+ * 解析 hostAddress 字符串为 {hostIp, hostPort}。
+ *
+ * 接受的格式:
+ *   - '192.168.1.5:8848' → {hostIp: '192.168.1.5', hostPort: 8848}
+ *   - '192.168.1.5'      → {hostIp: '192.168.1.5', hostPort: 8848} (默认端口)
+ *   - '[2001:db8::1]:8848' → IPv6 with brackets
+ *
+ * 抛出 Error 当格式无效(空 / 多余的 ':' / 端口非法 / IP 段数不对)。
+ *
+ * @param {string} hostAddress
+ * @returns {{hostIp: string, hostPort: number}}
+ */
+function parseHostAddress(hostAddress) {
+  if (typeof hostAddress !== 'string') {
+    throw new Error('hostAddress 必须是字符串')
+  }
+  const trimmed = hostAddress.trim()
+  if (!trimmed) {
+    throw new Error('hostAddress 不能为空')
+  }
+  // IPv6 [::1]:8848
+  if (trimmed.startsWith('[')) {
+    const close = trimmed.indexOf(']')
+    if (close < 0) throw new Error('hostAddress IPv6 格式错误(缺少 "]")')
+    const hostIp = trimmed.slice(1, close)
+    const rest = trimmed.slice(close + 1)
+    if (!rest.startsWith(':')) throw new Error('hostAddress IPv6 缺少端口(":" )')
+    const port = parseInt(rest.slice(1), 10)
+    if (Number.isNaN(port) || port <= 0 || port >= 65536) {
+      throw new Error('hostAddress 端口非法: ' + rest.slice(1))
+    }
+    return { hostIp, hostPort: port }
+  }
+  // IPv4 / hostname:port or IPv4
+  const colonIdx = trimmed.lastIndexOf(':')
+  if (colonIdx < 0) {
+    // 无端口,默认 8848
+    return { hostIp: trimmed, hostPort: 8848 }
+  }
+  const hostIp = trimmed.slice(0, colonIdx)
+  const portStr = trimmed.slice(colonIdx + 1)
+  if (!hostIp) {
+    throw new Error('hostAddress 缺少 IP(空)')
+  }
+  if (!portStr) {
+    // 末尾 ':' — 非法
+    throw new Error('hostAddress 端口为空')
+  }
+  const port = parseInt(portStr, 10)
+  if (Number.isNaN(port) || port <= 0 || port >= 65536) {
+    throw new Error('hostAddress 端口非法: ' + portStr)
+  }
+  // 拒绝像 'foo:bar' (端口非数字) 但允许 host 内多 ':' (IPv4 用 :8888,host 部分 ':' 不是合法 IPv4,
+  // 实际 IPv4 不会含 ':',所以 portStr 非数字就 throw)
+  return { hostIp, hostPort: port }
+}
+
+/**
+ * ★ v2.2 task B:跨设备 joiner API
+ *
+ * 浏览器 joiner 通过 WebSocketTransport 远程连入真机 / 另一台电脑 host。
+ *
+ * 跟 joinRoom(roomId, self, opts) 的区别:
+ *   - joinRoom(roomId='ws-host:port', self, {hostIp, hostPort}) 走 WS 模式
+ *     **前提**是 transport 是 WebSocketTransport。浏览器默认走 BCTransport,
+ *     所以 joiner 在浏览器里调 joinRoom 传 hostIp,会拿到 BCTransport,hostIp 被忽略,
+ *     BC 模式没有远程连接能力。
+ *   - joinRemoteRoom(hostAddress, self) 显式注入 WebSocketTransport 作为 client,
+ *     然后走 joinRoom 的 WS 路径,让浏览器能连远程 ws://host:8848。
+ *
+ * 调用方(RoomView.vue)在 ?host=IP:port URL 参数存在时调本方法。
+ * 完成后行为与 joinRoom 一致:'connect' / 'error' / 'self:kicked' / 'peer:leave'
+ * / 'message:*' 等事件正常触发。
+ *
+ * @param {string} hostAddress —— 'IP' / 'IP:port',端口默认 8848
+ * @param {{nickname:string,avatar:string}} self
+ * @returns {{ok: boolean, error?: string}}
+ */
+function joinRemoteRoom(hostAddress, self) {
+  let parsed
+  try {
+    parsed = parseHostAddress(hostAddress)
+  } catch (e) {
+    return { ok: false, error: e?.message || 'hostAddress 解析失败' }
+  }
+  // 注入 transport factory:把当前 transport 换成 WebSocketTransport client。
+  // ★ 仅当用户没注入过 factory 时才注入默认 factory(避免覆盖测试 / 高级用法已注入的 factory)。
+  //   如果用户之前调过 _setTransportFactory(fn),我们尊重他们的选择,假设 fn 会返回合适的 WS 客户端。
+  if (!_transportFactory) {
+    _setTransportFactory(() => new WebSocketTransport())
+  }
+  // 复用 joinRoom 的 WS 路径 — 它内部会解析 hostIp/hostPort,创建 transport,open,发 JOIN,启心跳
+  return joinRoom(hostAddress, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+}
+
 function close() {
   stopHeartbeat()
   stopHeartbeatChecker()
@@ -623,7 +720,7 @@ export {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
-  startAsHost, joinRoom, send, broadcast, sendTo,
+  startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
   scanLanRooms,
   ensureUuid,
   // ★ v2.1 P3:host 迁移 API
@@ -642,7 +739,7 @@ const net = {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
-  startAsHost, joinRoom, send, broadcast, sendTo,
+  startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
   scanLanRooms,
   // ★ v2.1 P3:host 迁移
   selectNextHostCandidate, requestHostMigration, announceNewHost,
