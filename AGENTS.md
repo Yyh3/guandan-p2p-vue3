@@ -206,6 +206,7 @@ createGame({ players, seed, ghostRank }) → {
   play(seat, cards): { ok, error? }    // 玩家出牌
   pass(seat): { ok, error? }            // 玩家过牌
   // ... 状态推进
+  migrateHost(oldHostSeat, newHostSeat) → bool  // v2.1 P3：座位重映射 + currentPlayer / lastPlay.who / trickHistory 修正 + 清理 aiPlayers
 }
 ```
 
@@ -223,14 +224,14 @@ scanLanRooms() → Promise<{ ip, name }[]>
 // v2.0+ 跨设备 / 真机
 joinRemoteRoom(hostAddress, selfInfo) → Promise            // v2.2：hostAddress = "IP:port" 解析 + 创建 WS client
 parseHostAddress(hostAddress) → { host, port }             // v2.2：纯函数，支持 IPv4 / IPv6 / 默认端口
-forceDisconnectSeat(seat)                                   // v2.1：房主主动踢人（3 transport 对称实现）
+// v2.1 forceDisconnectSeat(seat) 在 transport 层(见 network-transport-ws.js / network-transport-android-ws.js / network-transport-bc.js)
 
 // v2.1 Host 迁移
-migrateHost(newHostSeat, hands, table, currentSeat) → bool // v2.1 P3：座位重映射 + lastPlay.who 修正
 requestHostMigration() → { newHost, reason }              // v2.1 P3：自动选下一候选 host
+selectNextHostCandidate() → number                         // v2.1 P3：座位优先级 2>1>3，纯函数
 
 // v2.1 测试 hook（仅测试环境挂载，生产构建 tree-shake 掉）
-__gd_net()                                                  // 暴露内部 state：peers / transport / heartbeat timer
+__installFakeTimers(opts)                                  // 注入假定时器，替换 setInterval/clearInterval；测试用 mod.__installFakeTimers({ ... })
 ```
 
 **事件名**：
@@ -287,7 +288,7 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 - ~~网络层是浏览器版实现（BroadcastChannel），真机跨设备无法联机~~ → **v2.0 接 AndroidWsTransport（真机 host）+ v2.2 WebSocketTransport 客户端 WS，跨设备 2 真机 + 2 浏览器实测可联**
 - ~~没有原生 APK / IPA 构建配置~~ → **v2.0 Capacitor + `android/app/build/outputs/apk/debug/app-debug.apk` 真机调试包**
 - ~~心跳太松（10s）掉线感知慢~~ → **v2.1 调到 HEARTBEAT_INTERVAL_MS=2000 / CHECK_INTERVAL_MS=2000 / TIMEOUT_MS=6000，6-8s 释放窗口（精确性测试断言 6.5s 触发释放）**
-- ~~4-tab 联机不稳（随机种子手牌不一致 / __gd_net 没暴露 / rotation 公式耦合 GameView）~~ → **v2.0 种子发牌 + v2.1 __gd_net hook + v2.1 seat-rotation.js 抽出纯函数 + GameView.test.js 56 case 覆盖**
+- ~~4-tab 联机不稳（随机种子手牌不一致 / __installFakeTimers 没暴露 / rotation 公式耦合 GameView）~~ → **v2.0 种子发牌 + v2.1 __installFakeTimers hook + v2.1 seat-rotation.js 抽出纯函数 + GameView.test.js 56 case 覆盖**
 - ~~QR 库失败没兜底~~ → **v2.2 QrFallbackCard.vue + qr-fallback.js 纯函数（36 case 测 formatHostAddress / buildJoinUrl / shouldShowFallback / describeFallbackMode / clipboardPayload）**
 - ~~BUG-7 host self-broadcast 导致 ai:takeover 误触发~~ → **v2.1 transport onMessage 路径加 host 自屏蔽 + ai:takeover 触发次数限制**
 
