@@ -32,6 +32,8 @@
       </div>
       <div class="seat-name">{{ getPeer(1)?.nickname || '等待加入' }}</div>
       <div class="seat-score">{{ getPeer(1) ? '0 分' : '— 分' }}</div>
+      <!-- ★ v2.1 P1 host 主动踢人:只在 host 视角 + 座位有人时显示 -->
+      <button v-if="isHost && getPeer(1)" class="seat-kick" @click="onKickPlayer(1)" title="踢出房间">✕</button>
     </div>
 
     <div class="seat seat-top" :class="seatClass(2)">
@@ -55,6 +57,8 @@
       </div>
       <div class="seat-name">{{ getPeer(3)?.nickname || '等待加入' }}</div>
       <div class="seat-score">{{ getPeer(3) ? '0 分' : '— 分' }}</div>
+      <!-- ★ v2.1 P1 host 主动踢人:只踢对手(seat 1/3),seat 2 队友留给"换队友" -->
+      <button v-if="isHost && getPeer(3)" class="seat-kick" @click="onKickPlayer(3)" title="踢出房间">✕</button>
     </div>
 
     <div class="seat seat-bottom">
@@ -225,6 +229,16 @@ async function initNetwork() {
     netStatus.value = '🔴'
     console.error('network error:', e)
   })
+  // ★ v2.1 P1 host 主动踢人:host 端 transport forceDisconnectSeat → _DISCONNECT → peer:leave
+  //   host 自己调用后立即在 UI 上把该 seat 显示"等待加入" (因为对端会被踢 + release)
+  net.on('peer:leave', ({ seat }) => {
+    if (seat != null) peers.delete(seat)
+  })
+  // ★ v2.1 P1 host 主动踢人:joiner 端收到 self:kicked → 跳 /?force_disconnected=1
+  net.on('self:kicked', ({ reason }) => {
+    net.close()
+    router.push('/?force_disconnected=1' + (reason ? '&reason=' + encodeURIComponent(reason) : ''))
+  })
   net.on('message:NICK_UPDATE', (payload, from) => {
     if (peers.has(from)) {
       const old = peers.get(from)
@@ -385,6 +399,37 @@ function onSwapWithTeammate() {
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
 }
 function onCut() { alert('切牌完成') }
+
+// ★ v2.1 P1 host 主动踢人
+//   - 仅 host 可调(UI 按钮只对 host 显示)
+//   - 只踢对手 seat 1 / seat 3(seat 2 队友留给"换队友")
+//   - confirm 防误触
+//   - 立即改 reactive `peers` Map (UI 状态,跟 network.js 内部 peers Map 解耦),
+//     让 seat 卡片回"等待加入"。
+//   - network.js 内部 peers Map 释放由 _tickHeartbeatChecker 在 6-8s 后处理
+//     (owner steer: 不能立即清 host 端 peers Map,保留 v2.1 心跳 6-8s 路径)
+//   - 其他 joiner 端:从 host broadcast PEER_LEAVE { kick: true } 收到后:
+//        * selfSeat === seat + kick:true → 'self:kicked' → UI 跳 /?force_disconnected=1
+//        * selfSeat !== seat → 旁观者,正常 peers.delete + peer:leave
+function onKickPlayer(seat) {
+  if (!isHost.value) return
+  if (seat !== 1 && seat !== 3) return
+  const target = peers.get(seat)
+  if (!target) return
+  const nickname = target.nickname || `座位 ${seat}`
+  if (!confirm(`确定要踢出 ${nickname} 吗?\n\n该玩家将立即断开连接,可在 6-8s 后重新加入。`)) return
+  // 1) 调 transport 真断 + broadcast PEER_LEAVE { kick: true }
+  const t = net._getTransport && net._getTransport()
+  if (t && typeof t.forceDisconnectSeat === 'function') {
+    t.forceDisconnectSeat(seat)
+  } else {
+    // 兜底:如果 transport 不支持,本地清 + 广播 PEER_LEAVE
+    net.broadcast({ type: 'PEER_LEAVE', payload: { seat, kick: true, reason: 'kicked' } })
+  }
+  // 2) 同步 UI 反映 — 立即改 reactive peers Map (UI 状态)
+  //   注意:这不影响 network.js 内部的 peers Map,后者由心跳 6-8s 后 _tickHeartbeatChecker 释放
+  peers.delete(seat)
+}
 </script>
 
 <style scoped>
@@ -482,6 +527,25 @@ function onCut() { alert('切牌完成') }
   border: none;
   cursor: pointer;
 }
+/* v2.1 P1 host 主动踢人按钮 — 红色圆形小图标,座位卡片右下角 */
+.seat-kick {
+  position: absolute;
+  right: -6px; bottom: -6px;
+  width: 26px; height: 26px;
+  background: linear-gradient(180deg, #ff7e7e, #d4404a);
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  z-index: 6;
+  padding: 0;
+}
+.seat-kick:hover { transform: scale(1.1); background: linear-gradient(180deg, #ff5050, #b03040); }
+.seat-kick:active { transform: scale(0.95); }
 .ready-mark {
   position: absolute; right: -6px; top: -6px;
   width: 22px; height: 22px;

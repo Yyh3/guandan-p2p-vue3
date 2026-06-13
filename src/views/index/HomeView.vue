@@ -91,6 +91,13 @@
 
     <p class="footer">纯本地 · 无服务器 · 无流量</p>
 
+    <!-- ★ v2.1 P1 被踢提示 -->
+    <div v-if="kickedToast" class="kicked-toast">
+      <span class="kicked-icon">🚫</span>
+      <span class="kicked-text">{{ kickedToast }}</span>
+      <button class="kicked-close" @click="kickedToast = ''">×</button>
+    </div>
+
     <NicknameEditor
       v-if="showNickEditor"
       @close="showNickEditor = false"
@@ -101,11 +108,12 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import audio from '@/common/audio.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 
+const route = useRoute()
 const router = useRouter()
 const myName = ref('')
 const myAvatar = ref('🀄')
@@ -116,6 +124,9 @@ const bgmEnabled = ref(true)
 const sfxEnabled = ref(true)
 const bgmVolume = ref(50)
 const sfxVolume = ref(70)
+
+// ★ v2.1 P1 host 主动踢人:被踢的 joiner 跳到 /?force_disconnected=1 → 首页弹提示
+const kickedToast = ref('')
 
 onMounted(() => {
   myName.value = storage.getNickname()
@@ -130,6 +141,18 @@ onMounted(() => {
   audio.setSfxEnabled(sfxEnabled.value)
   audio.setBgmVolume(bgmVolume.value / 100)
   audio.setSfxVolume(sfxVolume.value / 100)
+  // ★ v2.1 P1 处理被踢提示
+  if (route.query.force_disconnected === '1') {
+    const reason = route.query.reason ? String(route.query.reason) : ''
+    const msg = reason === 'kicked'
+      ? '你已被房主踢出房间'
+      : '连接已断开,已返回首页'
+    kickedToast.value = msg
+    // 5 秒后自动消失,或点击 × 立刻消失
+    setTimeout(() => { kickedToast.value = '' }, 5000)
+    // 清理 URL,避免刷新再次触发
+    router.replace({ path: '/', query: {} })
+  }
 })
 
 function saveSettings() {
@@ -322,4 +345,37 @@ function onSettings() { router.push('/settings') }
 .switch input:checked + .slider::before { transform: translateX(20px); }
 
 .footer { text-align: center; font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 32px; letter-spacing: 2px; }
+
+/* v2.1 P1 被踢提示 */
+.kicked-toast {
+  position: fixed;
+  top: 80px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: linear-gradient(180deg, #ff7e7e, #d4404a);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 12px;
+  font-size: 14px;
+  font-weight: bold;
+  animation: kickToastIn 0.3s ease-out;
+}
+.kicked-icon { font-size: 18px; }
+.kicked-text { flex: 1; }
+.kicked-close {
+  background: rgba(255,255,255,0.25);
+  border: none; color: #fff;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.kicked-close:hover { background: rgba(255,255,255,0.4); }
+@keyframes kickToastIn {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 </style>
