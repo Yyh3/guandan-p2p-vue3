@@ -590,6 +590,13 @@ function onKickPlayer(seat) {
   bottom: max(220px, calc(20px + env(safe-area-inset-bottom, 0px)) + 200px);
   transform: translateX(-50%);
 }
+/* v2.4-p2 T2:横屏 4 座位均匀分布,top/bottom 居中横排,left/right 居中竖排 */
+@media (orientation: landscape) {
+  .seat-top    { left: 50%; top: 60px; }
+  .seat-bottom { left: 50%; bottom: 30px; transform: translateX(-50%); }
+  .seat-left   { left: 60px;  top: 50%; transform: translateY(-50%); }
+  .seat-right  { right: 60px; top: 50%; transform: translateY(-50%); }
+}
 .info-card {
   /* v2.4-p2 T1:改 bottom 定位,让 4 座位在信息卡上方,横屏也成立(landscape 分支另设) */
   position: absolute;
@@ -608,6 +615,15 @@ function onKickPlayer(seat) {
   box-shadow: 0 8px 20px rgba(0,0,0,0.3);
   z-index: 8;
   color: #2a3464;
+}
+/* v2.4-p2 T2:横屏中央浮动,max-width 略宽于 portrait 440 */
+@media (orientation: landscape) {
+  .info-card {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 460px;
+  }
 }
 .info-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .info-title { font-size: 20px; font-weight: bold; letter-spacing: 2px; }
@@ -664,6 +680,10 @@ function onKickPlayer(seat) {
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   /* v2.4-p2 T1:z-index:10 高过 .info-card 的 8,避免被信息卡覆盖 */
   z-index: 10;
+}
+/* v2.4-p2 T2:横屏切牌按钮贴右下,避开中心信息卡 */
+@media (orientation: landscape) {
+  .cut-card { right: 30px; bottom: 100px; }
 }
 /* v2.4-p2 T1:320px 屏切牌按钮压缩到 60×60,避免被 .seat-right 覆盖 */
 @media (max-width: 360px) {
