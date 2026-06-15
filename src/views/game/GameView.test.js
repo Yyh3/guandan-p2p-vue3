@@ -133,5 +133,33 @@ threw = false
 try { rotateSeatView(null, 0) } catch { threw = true }
 assert('rotateSeatView null 抛错', threw === true)
 
-console.log(`\n========== seat-rotation test result: ${pass} pass / ${fail} fail ==========`)
+console.log('\n=== 6. isMobile viewport 检测 (v2.4 task 4 加) ===')
+// GameView.vue 用 matchMedia 三段检测:
+//   - portrait + width <= 768        → mobile
+//   - landscape + height <= 500       → mobile
+//   - 其他                              → desktop
+// 我们不挂 Vue 组件,直接断言逻辑表达式
+function isMobileLogic({ portrait, narrowWidth, shortHeight }) {
+  return (portrait && narrowWidth) || (!portrait && shortHeight)
+}
+assert('竖屏 + 窄屏 → mobile', isMobileLogic({ portrait: true,  narrowWidth: true,  shortHeight: false }) === true)
+assert('竖屏 + 宽屏 → desktop', isMobileLogic({ portrait: true,  narrowWidth: false, shortHeight: false }) === false)
+assert('横屏 + 矮屏(iPhone SE)→ mobile', isMobileLogic({ portrait: false, narrowWidth: true,  shortHeight: true }) === true)
+assert('横屏 + 高屏(iPhone 13)→ desktop', isMobileLogic({ portrait: false, narrowWidth: true,  shortHeight: false }) === false)
+// 横屏 + 桌面浏览器拉到 500 高 + 1920 宽(narrowWidth false):
+//   (portrait && narrowWidth) = (false && false) = false
+//   (!portrait && shortHeight) = (true && true) = true
+//   → true (mobile)
+// 这是 iPhone SE 横屏那种矮宽比场景,也合"桌面拉扁到只剩 500 高"的判定
+assert('横屏 + 矮高 500(无窄宽)→ mobile', isMobileLogic({ portrait: false, narrowWidth: false, shortHeight: true }) === true)
+assert('竖屏 + 桌面 1920 宽 → desktop', isMobileLogic({ portrait: true,  narrowWidth: false, shortHeight: false }) === false)
+assert('竖屏 + iPad 1024 宽 → desktop', isMobileLogic({ portrait: true,  narrowWidth: false, shortHeight: false }) === false)
+
+console.log('\n=== 7. deal-animation 兜底常量 (v2.4-p1 修卡死) ===')
+// useGameLogic.js startDealAnimation 8s timeout 兜底,这里验证 dealAnim 模块 API 仍可用
+import { dealAnim as dealAnimRef } from '../../common/deal-animation.js'
+assert('dealAnim 单例可访问', typeof dealAnimRef.isRunning === 'function')
+assert('dealAnim 初始 isRunning=false', dealAnimRef.isRunning() === false)
+
+console.log(`\n========== seat-rotation + viewport + deal test result: ${pass} pass / ${fail} fail ==========`)
 if (fail > 0) process.exit(1)

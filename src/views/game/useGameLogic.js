@@ -309,6 +309,7 @@ export function useGameLogic(opts = {}) {
     audio.setSfxVolume(Number(s.sfxVolume ?? 0.7))
   }
 
+  let dealTimeoutId = null
   function startDealAnimation() {
     isDealing.value = true
     hintCards.value = []
@@ -324,6 +325,18 @@ export function useGameLogic(opts = {}) {
     audio.unlock()
     if (storage.getSettings().bgmEnabled) audio.startBgm()
 
+    // 兜底:无论动画为何卡住(真机 WebView / 后台切回前台 / 容错),
+    // 8 秒后强制 isDealing=false 并进 playing,玩家至少能玩,而不是永远卡 loading。
+    // 27 张牌 × 55ms stagger + 380ms flight + 80ms 余量 ≈ 1.95s,8s 是真机慢网/真 WebView 的安全冗余。
+    if (dealTimeoutId) clearTimeout(dealTimeoutId)
+    dealTimeoutId = setTimeout(() => {
+      if (isDealing.value) {
+        isDealing.value = false
+        finishDeal()
+      }
+      dealTimeoutId = null
+    }, 8000)
+
     nextTick(() => {
       const container = document.querySelector('.page')
       if (!container) { isDealing.value = false; finishDeal(); return }
@@ -332,7 +345,11 @@ export function useGameLogic(opts = {}) {
       dealAnim.start({
         container, center, targets,
         cardsPerSeat: 27, stagger: 55, flightDuration: 380,
-        onComplete: () => { isDealing.value = false; finishDeal() },
+        onComplete: () => {
+          if (dealTimeoutId) { clearTimeout(dealTimeoutId); dealTimeoutId = null }
+          isDealing.value = false
+          finishDeal()
+        },
       })
     })
   }

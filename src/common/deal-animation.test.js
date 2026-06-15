@@ -47,5 +47,29 @@ console.log('\n=== 5. cancel 不抛错 ===')
 try { inst.cancel() } catch (e) { threw = true; console.log(e) }
 assert('cancel() 不抛错', threw === false)
 
-console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
-if (fail > 0) process.exit(1)
+console.log('\n=== 6. __gd_skipDealAnim hook (v2.4 t3 加,v2.4-p1 回归) ===')
+// 模拟生产 headless/真机 WebView 跳过动画场景:onComplete 必须下个 microtask 触发
+globalThis.window = { __gd_skipDealAnim: true }
+const skipped = new Promise((resolve) => {
+  const inst2 = new DealAnimation()
+  inst2.start({
+    container: { style: {}, appendChild: () => {} },
+    center: { x: 100, y: 100 },
+    targets: { 0: { x: 0, y: 0 }, 1: { x: 0, y: 0 }, 2: { x: 0, y: 0 }, 3: { x: 0, y: 0 } },
+    onComplete: () => resolve('done'),
+  })
+  // onComplete 应当在 Promise.resolve() 后同步触发(测试环境下 microtask 立即 flush)
+})
+skipped.then(tag => {
+  assert('skipDealAnim 时 onComplete 被调用', tag === 'done')
+  delete globalThis.window
+
+  console.log('\n=== 7. onComplete 缺参时不抛错 ===')
+  let threw2 = false
+  try { dealAnim.start({ container: null }) } catch (e) { threw2 = true }
+  assert('container null 不抛错', threw2 === false)
+
+  console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
+  if (fail > 0) process.exit(1)
+})
+
