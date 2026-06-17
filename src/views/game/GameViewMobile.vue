@@ -771,19 +771,22 @@ button {
   flex-wrap: nowrap;
   min-height: 110px;
   padding: 18px 4px 18px;
-  gap: 2px;
+  gap: 0;
   overflow-x: auto;
   overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
 }
-/* 移动端手牌列:56px 宽,纵向叠 3 张 */
+/* 移动端手牌列:56px 宽,纵向叠 3 张
+ * v2.4-p3: 列负 margin 让相邻牌的视觉边距从 12px 压到 2px,
+ *         列 width 56px 不变 → 点击 hit area 仍 ≥ 44px (移动端规范) */
 .hand-column {
   position: relative;
   width: 56px;             /* 桌面 78 → 移动 56(每屏装 9 列) */
   min-height: 84px;
   flex-shrink: 0;
   margin: 0;
+  margin-left: -10px;      /* 叠列:列 56 - 牌 44 - 叠 10 = 2px 可见间隙 */
   padding: 12px 0 2px;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.04);
@@ -799,6 +802,7 @@ button {
   transition: transform var(--t-fast, 120ms) var(--ease-out, ease),
               background var(--t-fast, 120ms) var(--ease-out, ease);
 }
+.hand-column:first-child { margin-left: 0; }
 .hand-column:active { background: rgba(255, 255, 255, 0.07); }
 .hand-column:last-child { border-right: none; }
 .hand-column.is-selected {
