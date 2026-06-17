@@ -6,6 +6,13 @@
  *   - 收到 joiner JOIN 后分配 seat（1-3），通过 bindLastSenderSeat 告知
  *   - send(msg)：msg.to != null 时定向给该 seat 的 ws；否则广播给所有 joiner
  *
+ * ★ v2.4-p3 T4:joiner 端访问 host IP 时（电脑浏览器输入 http://IP:8848 加载 PWA）,
+ *   在 ws server 同一端口叠加 http handler：
+ *   - 'upgrade' 事件 → ws server.handleUpgrade（保持 ws 协议完全不变）
+ *   - 'request' 事件 → 返回 dist/index.html + dist/assets/* （让 joiner 浏览器能加载 PWA）
+ *   - 0.0.0.0:8848 监听行为不变
+ *   - 既有 v2.0 P0 sendToClient / v2.1 心跳 6-8s / v2.1 P1 踢人 / v2.1 P3 迁移 / v2.2 joinRemoteRoom 全部不动
+ *
  * Joiner 端：ws://host-ip:8848
  *   - 单连接，只连 host
  *   - send(msg) 直接发给 host，host 负责转发/广播
@@ -19,6 +26,43 @@
  */
 
 const DEFAULT_PORT = 8848
+const DEFAULT_HTTP_DOC_ROOT = 'dist'
+
+/**
+ * 找到 PWA 的 dist 根目录(相对于当前文件 / cwd)。
+ * 优先 process.cwd()/dist 命中 index.html;否则试 import.meta.url 解析的 src/common/../dist。
+ * 测试环境通常没有 dist,返回 null 让 http server 走 503 fallback 而不是 throw。
+ *
+ * @param {object} deps —— 注入的 fs/path/fileURLToPath/url,方便单测 mock
+ * @returns {string|null} docRoot 绝对路径 / null
+ */
+function findDocRoot(deps) {
+  const fs = deps?.fs
+  const path = deps?.path
+  const fileURLToPath = deps?.fileURLToPath
+  if (!fs || !path) return null
+  // 候选 1:cwd/dist
+  try {
+    if (typeof process !== 'undefined' && process.cwd) {
+      const c = path.join(process.cwd(), 'dist')
+      if (fs.existsSync(path.join(c, 'index.html'))) return c
+    }
+  } catch (e) { /* swallow */ }
+  // 候选 2:从 import.meta.url 推断的 repo root /dist (file: /abs/path/src/common/network-transport-ws.js → /abs/path/dist)
+  try {
+    const metaUrl = (typeof import.meta !== 'undefined' && import.meta.url) || ''
+    if (metaUrl && fileURLToPath) {
+      const fp = fileURLToPath(metaUrl)
+      // /abs/path/src/common/network-transport-ws.js → /abs/path/dist
+      const idx = fp.lastIndexOf(`${path.sep}src${path.sep}`)
+      if (idx >= 0) {
+        const c = path.join(fp.slice(0, idx), 'dist')
+        if (fs.existsSync(path.join(c, 'index.html'))) return c
+      }
+    }
+  } catch (e) { /* swallow */ }
+  return null
+}
 
 export class WebSocketTransport {
   /**
@@ -34,7 +78,8 @@ export class WebSocketTransport {
 
     this._mode = null        // 'self' | 'client'
     this._ws = null          // client 端
-    this._wss = null         // host 端 WebSocketServer
+    this._wss = null         // host 端 WebSocketServer (v2.4-p3 T4 起 noServer 模式)
+    this._httpServer = null  // host 端 http server (v2.4-p3 T4 新增,PWA 入口)
     this._clients = new Map() // ws -> { seat: number }
     this._listeners = []
     this._outbox = []        // ready 之前的消息队列
@@ -63,7 +108,83 @@ export class WebSocketTransport {
     this._mode = 'self'
     // 动态 import 'ws'（避免在浏览器环境 / BC 测试时强制加载）
     const { WebSocketServer } = await import('ws')
-    this._wss = new WebSocketServer({ host: this._host, port: this._port, path: this._path })
+    const httpModule = await import('http')
+    const pathModule = await import('path')
+    const fsModule = await import('fs')
+    const urlModule = await import('url')
+    const http = httpModule.default || httpModule
+    const path = pathModule.default || pathModule
+    const fs = fsModule.default || fsModule
+    const fileURLToPath = urlModule.fileURLToPath || (urlModule.default && urlModule.default.fileURLToPath)
+
+    // ★ v2.4-p3 T4:在 ws server 同一端口起一个 http server,让 joiner 浏览器访问
+    //   http://IP:8848 能加载 PWA(dist/index.html + dist/assets/*)。
+    //   0.0.0.0:8848 监听行为不变(显式 server.listen(host, port))。
+    const docRoot = findDocRoot({ fs, path, fileURLToPath })
+    const hasDist = !!(docRoot && fs.existsSync(path.join(docRoot, 'index.html')))
+
+    this._httpServer = http.createServer((req, res) => {
+      try {
+        // 简单安全:拒绝 .. 路径穿越
+        const safePath = (req.url || '/').split('?')[0].replace(/\.\.+/g, '')
+        if (safePath === '/' || safePath === '') {
+          // PWA 入口
+          if (!hasDist) {
+            res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' })
+            res.end('PWA dist/ not found; run `npm run build` first.\n')
+            return
+          }
+          const html = fs.readFileSync(path.join(docRoot, 'index.html'))
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': html.length })
+          res.end(html)
+          return
+        }
+        // /assets/* 静态资源
+        if (safePath.startsWith('/assets/')) {
+          if (!hasDist) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' })
+            res.end('not found')
+            return
+          }
+          const fp = path.join(docRoot, safePath)
+          // 防止 ../ 跳出 docRoot
+          if (!fp.startsWith(docRoot)) {
+            res.writeHead(403); res.end('forbidden'); return
+          }
+          if (!fs.existsSync(fp)) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' })
+            res.end('not found')
+            return
+          }
+          const buf = fs.readFileSync(fp)
+          const ext = path.extname(fp).toLowerCase()
+          const mime = ext === '.js' ? 'application/javascript'
+            : ext === '.css' ? 'text/css'
+            : ext === '.svg' ? 'image/svg+xml'
+            : ext === '.png' ? 'image/png'
+            : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+            : 'application/octet-stream'
+          res.writeHead(200, { 'Content-Type': mime, 'Content-Length': buf.length })
+          res.end(buf)
+          return
+        }
+        // 其他路径 → SPA fallback 到 index.html (让前端 router 处理)
+        if (hasDist) {
+          const html = fs.readFileSync(path.join(docRoot, 'index.html'))
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': html.length })
+          res.end(html)
+        } else {
+          res.writeHead(404, { 'Content-Type': 'text/plain' })
+          res.end('not found')
+        }
+      } catch (e) {
+        try { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('server error') } catch (_) {}
+      }
+    })
+
+    // ★ 用 noServer 模式:ws server 不自起 http server,我们显式管理。
+    //   path 匹配交给 wss.shouldHandle(同 ws 库默认行为)。
+    this._wss = new WebSocketServer({ noServer: true, path: this._path })
     this._wss.on('connection', (ws) => {
       ws._seat = -1
       ws._isAlive = true
@@ -88,10 +209,24 @@ export class WebSocketTransport {
       })
       ws.on('error', () => { /* swallow */ })
     })
-    // 等待 server bind 完成
+
+    // ★ upgrade 事件 → 交给 wss.handleUpgrade(保持 ws 协议路径匹配完全一致)
+    this._httpServer.on('upgrade', (req, socket, head) => {
+      // 路径不匹配 ws.path → 忽略(浏览器 ws client 默认走 '/',path 默认为 '/',一般会命中)
+      if (this._wss.shouldHandle(req)) {
+        this._wss.handleUpgrade(req, socket, head, (ws) => {
+          this._wss.emit('connection', ws, req)
+        })
+      } else {
+        try { socket.destroy() } catch (e) { /* swallow */ }
+      }
+    })
+
+    // 等待 server bind 完成(0.0.0.0:8848 行为不变)
     await new Promise((resolve, reject) => {
-      this._wss.once('listening', () => resolve(undefined))
-      this._wss.once('error', (err) => reject(err))
+      this._httpServer.once('listening', () => resolve(undefined))
+      this._httpServer.once('error', (err) => reject(err))
+      this._httpServer.listen(this._port, this._host)
     })
     this._ready = true
     this._flushOutbox()
@@ -298,6 +433,11 @@ export class WebSocketTransport {
       try { this._wss.close() } catch (e) { /* swallow */ }
       this._wss = null
     }
+    // ★ v2.4-p3 T4:同步关 v2.4-p3 新增的 http server,释放 8848 端口
+    if (this._httpServer) {
+      try { this._httpServer.close() } catch (e) { /* swallow */ }
+      this._httpServer = null
+    }
     if (this._ws) {
       try { this._ws.close() } catch (e) { /* swallow */ }
       this._ws = null
@@ -331,8 +471,14 @@ export class WebSocketTransport {
     return out
   }
 
-  /** 测试 / 诊断：server 实际绑定的端口（ephemeral 时用） */
+  /** 测试 / 诊断：server 实际绑定的端口（ephemeral 时用）
+   *  v2.4-p3 T4:bind 端口的现在是我们显式起的 http server(_wss 用 noServer 模式不自 listen)
+   */
   getBoundPort() {
+    if (this._httpServer && typeof this._httpServer.address === 'function') {
+      const addr = this._httpServer.address()
+      return typeof addr === 'object' ? addr.port : null
+    }
     if (this._wss && this._wss.address) {
       const addr = this._wss.address()
       return typeof addr === 'object' ? addr.port : null
@@ -348,3 +494,6 @@ export class WebSocketTransport {
     }
   }
 }
+
+// ★ v2.4-p3 T4 导出 findDocRoot 方便单测
+export { findDocRoot }
