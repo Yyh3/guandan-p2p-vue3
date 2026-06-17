@@ -573,12 +573,13 @@ button {
 /* ============================================================
  * 3. 左右对手 mini-pill
  * 不渲染整张 PlayerSeat,改用绝对定位 pill 节省空间
+ * v2.4-p3: 位置从 50% (中央桌面正中央) 改到 24% (对家座位下方 + 桌面之上),
+ *         避让 .table-area (top 32% + height ~22vh),不再被中央桌面遮挡
  * ============================================================ */
 .seat-left-mobile,
 .seat-right-mobile {
   position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 24%;
   z-index: 9;
   pointer-events: auto;
 }
@@ -675,14 +676,16 @@ button {
 /* ============================================================
  * 4. 中央牌桌 35%
  * 缩到 ~280×280,出牌区放大
+ * v2.4-p3: top 23% → 32% (避开左右 mini-pill 的 24% 区域),
+ *         height 缩到 clamp(150px, 22vh, 200px) 给手牌留更多空间
  * ============================================================ */
 .table-area {
   position: fixed;
-  top: 23%;             /* 对家座位下方 + 手牌上方 */
+  top: 32%;             /* 抬到 mini-pill 下方,不再被遮挡 */
   left: 50%;
   transform: translateX(-50%);
-  width: clamp(280px, 80vw, 340px);
-  height: clamp(180px, 28vh, 240px);
+  width: clamp(240px, 70vw, 300px);
+  height: clamp(150px, 22vh, 200px);
   z-index: 4;
   pointer-events: none;
 }
