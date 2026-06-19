@@ -342,9 +342,10 @@ export function useGameLogic(opts = {}) {
       if (!container) { isDealing.value = false; finishDeal(); return }
       const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
       const targets = computeDealTargets()
+      // v2.5:stagger 55 → 70,flight 380 → 380,曲线 ease-out-back(微微 overshoot,更自然)
       dealAnim.start({
         container, center, targets,
-        cardsPerSeat: 27, stagger: 55, flightDuration: 380,
+        cardsPerSeat: 27, stagger: 70, flightDuration: 380,
         onComplete: () => {
           if (dealTimeoutId) { clearTimeout(dealTimeoutId); dealTimeoutId = null }
           isDealing.value = false

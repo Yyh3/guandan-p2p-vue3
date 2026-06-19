@@ -1,5 +1,5 @@
 <template>
-  <div class="page" :class="{ dealing: isDealing, bomb: isShaking }">
+  <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape }">
     <!-- 背景:渐变蓝紫底色 -->
     <div class="bg-deep"></div>
 
@@ -199,7 +199,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 
@@ -234,6 +234,35 @@ const props = defineProps({
 // v2.4 task 1:纯逻辑抽到 useGameLogic.js composable
 // 这里只声明 mainActionsRef,让 composable 拿到 setShowing(false) 接口
 const mainActionsRef = ref(null)
+
+// v2.5:横屏检测 → 给 .page 加 .is-landscape class,让 CSS 在 scoped 内直接覆盖(不依赖 :deep + @media 嵌套)
+// 横屏标准:landscape + max-height: 500px(手机横屏 h ≤ 430)
+const isLandscape = ref(false)
+let mqLandscape = null
+const updateLandscape = () => {
+  if (!mqLandscape) return
+  isLandscape.value = mqLandscape.matches
+}
+onMounted(() => {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mqLandscape = window.matchMedia('(orientation: landscape) and (max-height: 500px)')
+    updateLandscape()
+    if (mqLandscape.addEventListener) {
+      mqLandscape.addEventListener('change', updateLandscape)
+    } else if (mqLandscape.addListener) {
+      mqLandscape.addListener(updateLandscape)
+    }
+  }
+})
+onUnmounted(() => {
+  if (mqLandscape) {
+    if (mqLandscape.removeEventListener) {
+      mqLandscape.removeEventListener('change', updateLandscape)
+    } else if (mqLandscape.removeListener) {
+      mqLandscape.removeListener(updateLandscape)
+    }
+  }
+})
 
 const {
   // state
@@ -310,7 +339,9 @@ function onNickEditorConfirmed(p) {
   padding: 8px 0 60px;  /* 留出底部操作栏空间 */
   background: linear-gradient(180deg, transparent, rgba(0,0,0,0.6));
   z-index: 5;
-  transition: opacity var(--t-med) var(--ease-out);
+  /* v2.5:发牌完手牌"立刻可见",去掉 opacity transition(默认 240ms → 0ms)
+   * 之前 transition: opacity var(--t-med) var(--ease-out)(240ms 渐显)让用户感觉"发牌完还要等 240ms 才看到牌" */
+  transition: none;
 }
 .hand-area.disabled { opacity: 0.3; pointer-events: none; }
 /* v3.7 P1:倒计时 <=5s 时,自己回合手牌区闪红 */
@@ -453,8 +484,9 @@ function onNickEditorConfirmed(p) {
 /* 响应式:窄屏列宽自动缩到 50px */
 @media (max-width: 768px) {
   /* v3-5:右侧 padding 从 8 加大到 72,给 QuickActions 按钮(48px + 8px 右偏移 + 16 安全距离)留空间,最右一手牌不再被挤 */
-  .hand-inner { gap: 2px; padding: 8px 72px 22px 8px; }
-  .hand-column { width: 52px; min-height: 92px; padding: 4px 0 2px; }
+  /* v2.5:左侧 padding 8 → 16,跟 mobile 同步,让手牌"左右两侧留一些空间" */
+  .hand-inner { gap: 2px; padding: 8px 72px 22px 16px; }
+  .hand-column { width: 52px; min-height: 92px; padding: 4px 0 2px; margin-left: -12px; }
   /* v3-4:CardPlay 在窄屏同步缩到 44x62(原 60x84),装得下 52px 列宽 */
   /* 同步修改 CSS 变量,让 CardPlay .size-md 也按 44x62 渲染 */
   .hand-card {
@@ -468,6 +500,133 @@ function onNickEditorConfirmed(p) {
   .hand-area { padding: 8px 0 100px; }          /* 底部 padding 加大,手牌顶端有更舒服的位置 */
   /* v3-5:QuickActions 在窄屏进一步上移到 240,避开 self 座位(现 110)+ suit-tabs(320)之间的区域 */
   :deep(.quick-actions) { bottom: 240px; right: 8px; }
+}
+
+/* ============================================================
+ * v2.5:横屏兜底(.page.is-landscape)
+ * 手机横屏(h ≤ 430px)默认走 GameViewDesktop 桌面布局,但桌面布局是给 16:9 宽屏设计的,
+ * 在手机横屏 2.17:1 比例下元素挤压、座位被裁出屏。
+ * v2.5 用 .is-landscape class 钩子(JS matchMedia 触发),不用 @media + :deep 嵌套,
+ * 避免 Vue scoped CSS 处理 :deep + @media 的 quirk。
+ * 4 座位(顶 + 左 + 右)缩 0.55 + 桌面顶 + 手牌中 + 操作栏底
+ * ========================================================= */
+.page.is-landscape {
+  /* 隐藏自座位:用户手牌就是自己的牌背,无需重复显示 */
+}
+.page.is-landscape :deep(.seat-bottom) {
+  display: none;
+}
+/* 队友座位(顶):从 top: 60 改 top: 4,缩 0.55 */
+.page.is-landscape :deep(.seat-top) {
+  top: 4px;
+  transform: scale(0.55);
+  transform-origin: top center;
+  animation: none;
+}
+/* 左右 AI 座位:top: 220 → 56,缩 0.55,避开队友座位下方 */
+.page.is-landscape :deep(.seat-left) {
+  top: 56px;
+  left: 4px;
+  transform: scale(0.55);
+  transform-origin: top left;
+  animation: none;
+}
+.page.is-landscape :deep(.seat-right) {
+  top: 56px;
+  right: 4px;
+  transform: scale(0.55);
+  transform-origin: top right;
+  animation: none;
+}
+/* 顶部 HUD 元素缩小 */
+.page.is-landscape :deep(.hud-topleft),
+.page.is-landscape :deep(.hud-topright) {
+  transform: scale(0.65);
+  transform-origin: top left;
+}
+.page.is-landscape :deep(.hud-topright) {
+  transform-origin: top right;
+}
+/* 中央桌面:margin-top 180 → 20,height 360 → 120 */
+.page.is-landscape :deep(.table-center-wrap) {
+  margin-top: 20px;
+  height: 120px;
+}
+.page.is-landscape :deep(.ellipse-table) {
+  width: 60%;
+  max-width: 380px;
+  height: 80%;
+}
+/* 信息条字号缩到 9px(本来 10px) */
+.page.is-landscape :deep(.table-info-pill) {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+.page.is-landscape :deep(.table-info-top) {
+  top: -20px;
+}
+/* 出牌堆扇形紧凑 */
+.page.is-landscape :deep(.card-stack) {
+  width: 180px;
+  height: 80px;
+}
+/* 手牌 area:贴底,限制 max-height,避免顶到桌面 */
+.page.is-landscape .hand-area {
+  bottom: 0;
+  padding: 4px 0 4px;
+  max-height: 150px;
+  overflow: hidden;
+}
+.page.is-landscape .hand-inner {
+  min-height: 60px;
+  padding: 4px 16px 6px;
+  gap: 0;
+}
+.page.is-landscape .hand-column {
+  width: 44px;
+  min-height: 56px;
+  margin-left: -10px;
+}
+.page.is-landscape .hand-card {
+  left: 4px;
+  width: 36px;
+  height: 50px;
+  --hand-card-w: 36px;
+  --hand-card-h: 50px;
+}
+.page.is-landscape .hand-card:nth-child(1) { top: 0 !important; }
+.page.is-landscape .hand-card:nth-child(2) { top: -8px !important; }
+.page.is-landscape .hand-card:nth-child(3) { top: -16px !important; }
+.page.is-landscape .hand-card:nth-child(4) { top: -24px !important; }
+.page.is-landscape .hand-card:nth-child(n+5) { top: -28px !important; }
+.page.is-landscape .col-rank {
+  top: -16px;
+  height: 14px;
+  font-size: 9px;
+  min-width: 18px;
+}
+.page.is-landscape .col-count {
+  bottom: -6px;
+  height: 11px;
+  font-size: 8px;
+  min-width: 18px;
+}
+/* 操作栏贴底 */
+.page.is-landscape .action-bar-wrap {
+  bottom: 0;
+  height: 56px;
+  padding: 0;
+}
+.page.is-landscape .suit-tabs {
+  bottom: 180px;
+}
+/* 智能理牌 / 不出 / 提示 / 出牌按钮字号缩 */
+.page.is-landscape :deep(.auto-find-btn) {
+  font-size: 11px;
+  padding: 4px 14px;
+}
+.page.is-landscape :deep(.main-actions .m-btn) {
+  font-size: 11px;
 }
 
 /* 花色 tab */
@@ -645,8 +804,10 @@ function onNickEditorConfirmed(p) {
 .r-btn.primary { background: linear-gradient(180deg, #4caf50, #2e7d32); color: #fff; }
 .r-btn.ghost { background: #eef0f5; color: #888; }
 
-/* 发牌中:手牌 + 座位牌背 隐藏 */
-.dealing .hand-area { opacity: 0; pointer-events: none; }
+/* 发牌中:手牌 + 座位牌背 隐藏
+ * v2.5:加 transition: none 确保发牌完 .dealing class 移除时,手牌区"立刻"恢复 opacity 1,
+ * 不会有 240ms 渐显延迟 */
+.dealing .hand-area { opacity: 0; pointer-events: none; transition: none; }
 
 /* ============================================================
  * v3.7:对局中禁改名 toast

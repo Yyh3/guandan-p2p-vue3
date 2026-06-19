@@ -9,11 +9,11 @@
    * 桌面中央改为几何装饰花纹,不再有大字水印。
    -->
   <div class="table-center-wrap" :class="{ 'is-dealing': isDealing }">
-    <!-- 椭圆牌桌(背景) -->
+<!-- 椭圆牌桌(背景) -->
     <div class="ellipse-table">
       <!-- 木边外圈装饰高光 -->
       <div class="wood-edge"></div>
-      <!-- 桌面装饰花纹(SVG 圆环 + 十字 + 角点 + 中央 PVP) -->
+      <!-- 桌面装饰花纹(SVG 圆环 + 十字 + PVP) -->
       <div class="table-deco">
         <svg viewBox="0 0 280 140" fill="none" stroke="white" stroke-width="1">
           <circle cx="140" cy="70" r="60" />
@@ -31,10 +31,18 @@
       <div class="table-toplight"></div>
       <!-- 桌面暗角(中心聚光) -->
       <div class="table-vignette"></div>
+      <!-- v3.9:首家出牌人胶囊挪进椭圆内,绝对定位在椭圆底部内沿
+       *   ellipse-table overflow:hidden 自动裁掉溢出椭圆外的部分 → 不再压到下方 .hand-area 手牌顶
+       *   stack-card(出牌堆)在椭圆中心 ±55px,胶囊 bottom 8% ≈ 椭圆内 +115px,有 ~60px 间距不冲突 -->
+      <div v-if="!isDealing && firstPlayerName" class="first-tip-bottom">
+        <span class="tip-emoji">{{ firstPlayerEmoji || '🤖' }}</span>
+        <span class="tip-name">{{ firstPlayerName }}</span>
+        <span class="tip-act">出牌中 ▶</span>
+      </div>
     </div>
 
-    <!-- 桌面顶部信息条:打 X · 第 N 轮 · ×N 倍 + 首家出牌人 -->
-    <!-- v3.7:首家提示胶囊并入这里,跟 3 颗 pill 同行(避免之前 absolute 浮在桌面下沿跟智能理牌按钮重叠) -->
+    <!-- 桌面顶部信息条:打 X · 第 N 轮 · ×N 倍(浮在桌面上方,不挡中央出牌堆) -->
+    <!-- v2.5:信息条从桌面内 top:8px 改 top:-24px(浮到桌面上沿),首家出牌胶囊单独挪到桌面下沿,避免跟出牌堆扇形重叠 -->
     <div class="table-info-top" v-if="!isDealing">
       <div class="table-info-pill">
         <span class="ico">♠</span>打 <b class="v">{{ levelLabel }}</b>
@@ -45,13 +53,9 @@
       <div class="table-info-pill">
         <span class="ico">×</span><b class="v">{{ multiplier }}</b> 倍
       </div>
-      <!-- 首家出牌人胶囊:跟信息条同列,水平排列,金色描边 -->
-      <div v-if="firstPlayerName" class="table-info-pill first-tip-inline">
-        <span class="tip-emoji">{{ firstPlayerEmoji || '🤖' }}</span>
-        <span class="tip-name">{{ firstPlayerName }}</span>
-        <span class="tip-act">出牌中 ▶</span>
-      </div>
     </div>
+
+    <!-- v3.9: 首家出牌人胶囊已挪进 .ellipse-table 内部(见上),这里不再单独渲染 -->
 
     <!-- 桌面牌堆 -->
     <div class="card-stack-area">
@@ -243,11 +247,11 @@ function stackStyle(i) {
  * ============================================================ */
 .table-info-top {
   position: absolute;
-  top: 8px;
+  top: -24px;                  /* v2.5: 从桌面内 8px 浮到 -24px(桌面上方),不挡中央出牌堆 */
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
+  gap: 6px;
   z-index: 6;
   pointer-events: none;
 }
@@ -277,20 +281,34 @@ function stackStyle(i) {
 }
 
 /* ============================================================
- * v3.7:旧的 .first-tip(absolute 浮在桌面下沿)已删除,改用
- *       .first-tip-inline 跟 .table-info-top 同行显示(避开
- *       智能理牌按钮 / 操作栏)
- * 复用 .table-info-pill 样式,只覆盖金色描边 + 强调色
+ * v3.9:首家出牌人胶囊 — 移到 .ellipse-table 内部(由 template 改),
+ *   absolute 定位在椭圆内底部 10px。ellipse-table overflow:hidden 会
+ *   自动裁掉溢出椭圆外的部分,胶囊永远不溢出到桌面外下方 → 不再压到
+ *   .hand-area 手牌顶数字(横屏尤其严重,以前 bottom:-22px 会盖 9 个牌顶)
  * ============================================================ */
-.first-tip-inline {
-  border: 1.5px solid var(--gold, #FFD700);
-  background: linear-gradient(180deg, rgba(255, 215, 0, 0.18), rgba(0, 0, 0, 0.65));
-  box-shadow: 0 0 10px rgba(255, 215, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.5);
+.first-tip-bottom {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
   gap: 5px;
+  padding: 4px 12px;
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.18), rgba(0, 0, 0, 0.65));
+  border: 1.5px solid var(--gold, #FFD700);
+  border-radius: 14px;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+  pointer-events: none;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
 }
-.first-tip-inline .tip-emoji { font-size: 12px; line-height: 1; }
-.first-tip-inline .tip-name  { font-size: 11px; font-weight: 700; color: #fff; }
-.first-tip-inline .tip-act   { font-size: 11px; font-weight: 700; color: var(--gold, #FFD700); }
+.first-tip-bottom .tip-emoji { font-size: 12px; line-height: 1; }
+.first-tip-bottom .tip-name  { font-size: 11px; font-weight: 700; color: #fff; }
+.first-tip-bottom .tip-act   { font-size: 11px; font-weight: 700; color: var(--gold, #FFD700); }
+/* v2.5:旧 .first-tip-inline 类名保留(空规则),以防 v3.7 旧引用样式破裂 */
+.first-tip-inline { /* 已被 .first-tip-bottom 替代 */ }
 
 /* ============================================================
  * 桌面牌堆(已出牌)

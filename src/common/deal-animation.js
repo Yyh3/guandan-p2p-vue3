@@ -20,8 +20,9 @@
 
 const DEFAULTS = {
   cardsPerSeat: 27,
-  stagger: 60,
-  flightDuration: 400,
+  // v2.5:stagger 60 → 70,flightDuration 400 → 380,曲线 ease-out-back(微微 overshoot,自然)
+  stagger: 70,
+  flightDuration: 380,
   onProgress: null,
   onComplete: null,
 }
@@ -68,6 +69,9 @@ class DealAnimation {
         card.className = 'deal-flying-card'
         card.dataset.seat = String(s)
         card.dataset.idx = String(i)
+        // v2.5:加随机旋转初值(-25~25度),让牌从中心飞出时呈扇形散开,更自然
+        const initRot = (Math.random() * 50 - 25)
+        const targetRot = (s === 0 || s === 2) ? 0 : (s === 1 ? -8 : 8)
         card.style.cssText = [
           'position:absolute',
           `left:${center.x}px`,
@@ -80,8 +84,10 @@ class DealAnimation {
           'box-shadow:0 2px 6px rgba(0,0,0,0.4)',
           'z-index:9999',
           'opacity:0',
-          'transform:translate(-50%,-50%) scale(1) rotate(0deg)',
-          `transition:transform ${o.flightDuration}ms cubic-bezier(.3,.7,.4,1),opacity ${o.flightDuration}ms ease-out`,
+          // v2.5:初值 scale 1.4(大)+ 随机 rotate,飞向 target 时缩到 0.5 + 转正 + 透明度 0.85(模拟飞远)
+          `transform:translate(-50%,-50%) scale(1.4) rotate(${initRot}deg)`,
+          // v2.5:cubic-bezier(.34,1.56,.64,1) ease-out-back,微微 overshoot 更自然
+          `transition:transform ${o.flightDuration}ms cubic-bezier(.34,1.56,.64,1),opacity ${o.flightDuration}ms ease-out`,
           'will-change:transform,opacity',
           'pointer-events:none',
         ].join(';')
@@ -115,13 +121,15 @@ class DealAnimation {
         const target = targets[seat] || center
         const dx = target.x - center.x
         const dy = target.y - center.y
-        const rot = (seat === 0 || seat === 2) ? 0 : (seat === 1 ? -14 : 14)
+        // v2.5:从写死的 ±14 改用 pre-baked targetRot(±8,更柔和)
+        const rot = (seat === 0 || seat === 2) ? 0 : (seat === 1 ? -8 : 8)
         // 先显示
-        card.style.opacity = '1'
+        card.style.opacity = '0.85'  // v2.5:末态半透明,模拟"飞远"
         // 强制重排后改 transform 触发 transition
         // eslint-disable-next-line no-unused-expressions
         card.offsetWidth
-        card.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.55) rotate(${rot}deg)`
+        // v2.5:target scale 0.5(牌最终缩到 0.5,飞过去更小更远)
+        card.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.5) rotate(${rot}deg)`
       })
       sent++
       if (o.onProgress) o.onProgress(sent / total)
