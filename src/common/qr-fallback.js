@@ -20,9 +20,11 @@ export function formatHostAddress(hostIp, hostPort) {
 
 // 构建 join URL(http://IP:port),给 fallback 卡片"或用电脑浏览器打开 ..."提示用
 //   null IP → 返回 null
+//   默认端口 = 8848(与 ws-server.js 一致),不再是 80
+//   v3.x P1-14 修复:旧默认 80 没人访问,joiner 连错端口连不上
 export function buildJoinUrl(hostIp, hostPort) {
   if (hostIp == null || hostIp === '') return null
-  const port = hostPort == null || hostPort === '' ? 80 : hostPort
+  const port = hostPort == null || hostPort === '' ? 8848 : hostPort
   return `http://${hostIp}:${port}`
 }
 

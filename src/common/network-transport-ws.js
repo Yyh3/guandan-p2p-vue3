@@ -125,8 +125,12 @@ export class WebSocketTransport {
 
     this._httpServer = http.createServer((req, res) => {
       try {
-        // 简单安全:拒绝 .. 路径穿越
-        const safePath = (req.url || '/').split('?')[0].replace(/\.\.+/g, '')
+        // ★ v3.x P1-13 修复:防御 .. 路径穿越(包括 URL 编码 %2e%2e)
+        // 先 decode,再剥离 ..,最后用 path.resolve 归一化并校验仍在 docRoot 内
+        let rawPath
+        try { rawPath = decodeURIComponent((req.url || '/').split('?')[0]) }
+        catch (e) { rawPath = (req.url || '/').split('?')[0] }  // 编码不合法时退回原始
+        const safePath = rawPath.replace(/\.\.+/g, '')
         if (safePath === '/' || safePath === '') {
           // PWA 入口
           if (!hasDist) {

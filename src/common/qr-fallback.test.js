@@ -72,13 +72,13 @@ eq('null IP → null',
   buildJoinUrl(null, 8848),
   null)
 
-eq('null port → 默认 80',
+eq('null port → 默认 8848 (v3.x P1-14 修复:与 ws-server 端口一致)',
   buildJoinUrl('192.168.43.1', null),
-  'http://192.168.43.1:80')
+  'http://192.168.43.1:8848')
 
-eq('空字符串 port → 默认 80',
+eq('空字符串 port → 默认 8848 (v3.x P1-14 修复)',
   buildJoinUrl('192.168.43.1', ''),
-  'http://192.168.43.1:80')
+  'http://192.168.43.1:8848')
 
 eq('hostname (localhost) 也接受',
   buildJoinUrl('localhost', 3000),

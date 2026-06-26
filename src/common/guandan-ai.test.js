@@ -309,6 +309,33 @@ console.log('\n=== 19. autoPlayGrouped: 空手牌 pass ===')
   eq('空手牌 = pass', r.type, 'pass')
 }
 
+console.log('\n=== 23. P1-7:三带二(THREE_PAIR)鬼牌凑出 5 张 ===')
+{
+  // 修复前:2 concrete(r) + 2 鬼 = 4 张,非法(THREE_PAIR 要 5 张)
+  // 修复后:2 concrete(r) + 1 concrete(r2) + 2 鬼 = 5 张
+  const lr = 15  // 打 2,避免红桃级牌歧义
+  // 手牌:2 张 5(rank=5) + 1 张 7(rank=7) + 2 张红心 2(鬼)
+  const h = [
+    c(5, 0), c(5, 2),  // 2 张 5 → 凑三张(2 + 1 鬼)
+    c(7, 3),             // 1 张 7 → 凑对子(1 + 1 鬼)
+    c(15, 1), c(15, 1),  // 2 张鬼(红心 2)
+  ]
+  // 跟对方的三带二 mainRank=3
+  const target = { type: E.TYPE.THREE_PAIR, mainRank: 3, length: 5 }
+  const r = AI.decide(h, target, lr)
+  assert('P1-7:三带二鬼牌凑出 = play', r.type === 'play')
+  if (r.type === 'play') {
+    // bug 修了之后应返回 5 张(2 concrete + 1 concrete + 2 鬼 = 5)
+    // 老版本只返 4 张(2 concrete + 2 鬼 = 4,非法)
+    eq('P1-7:出 5 张(不是 4 张)', r.cards.length, 5)
+    // 验证鬼牌在 result 里(没被吞掉)
+    const ghostCount = r.cards.filter(c => c.suit === 1 && c.rank === lr).length
+    eq('P1-7:result 包含 2 张鬼', ghostCount, 2)
+    // 不直接调 E.recognize — 鬼牌没被具象化,recognize 不认识
+    // 但 5 张牌 + 2 张鬼 + 3 张 concrete(2 个 r + 1 个 r2) → 正确组成 THREE_PAIR 形态
+  }
+}
+
 console.log('\n=== 20. P0-2:findMinStraight 鬼牌不耗尽(多 start 候选间) ===')
 {
   // 测试:第 1 个 start 失败时,鬼牌仍可用于第 2 个 start

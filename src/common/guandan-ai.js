@@ -173,12 +173,20 @@ function findMinSameType(concrete, ghosts, target, levelRank) {
           }
         }
       }
-      // 鬼牌版:3 同 + 1 对
+      // 鬼牌版:3 同 + 1 对(共 5 张)
       if (ghostAvail >= 2) {
         for (const r of ranks) {
           if (r > target.mainRank && cnt[r] >= 2) {
-            // 1 鬼 + 2 张 r → 三张; 另 1 鬼 + 1 张 r2 → 配对
-            return [...concrete.filter(c => c.rank === r).slice(0, 2), ...ghosts.slice(0, 2)]
+            // 需要 2 张 r(凑三张)+ 1 张 r2(凑对子)+ 2 张鬼
+            for (const r2 of ranks) {
+              if (r2 !== r && cnt[r2] >= 1) {
+                return [
+                  ...concrete.filter(c => c.rank === r).slice(0, 2),
+                  ...concrete.filter(c => c.rank === r2).slice(0, 1),
+                  ...ghosts.slice(0, 2),
+                ]
+              }
+            }
           }
         }
       }

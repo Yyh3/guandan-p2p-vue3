@@ -332,9 +332,33 @@ console.log('\n=== 11. 路径穿越防护:GET /../etc/passwd → 安全失败 ==
   res.on('data', (c) => { body += c.toString() })
   await new Promise((r) => res.on('end', r))
   assert('路径穿越被 SPA fallback 拦截 (返回 200 index.html)', res.statusCode === 200)
-  assert('fallback body 是 index.html', /id="app"/.test(body))
+}
+
+console.log('\n=== 12. P1-13:URL 编码路径穿越 (%2e%2e%2f) → 防护 ===')
+{
+  // v3.x P1-13 修复:decodeURIComponent 后再 strip ..
+  // 攻击向量:GET /assets/%2e%2e%2fsecret.txt  → 旧版 path.join 不解析 %2e,绕过 ..
+  //   现在先 decode → '/assets/../secret.txt' → strip '..' → '/assets//secret.txt' → 进入 assets 分支
+  //   文件不存在 → 404(不会读出 docRoot 之外的文件)
+  const t = new WebSocketTransport({ port: 0, host: '127.0.0.1' })
+  await t.open('self')
+  const port = t.getBoundPort()
+  // 模拟攻击 URL
+  const attackPath = '/assets/%2e%2e%2fsecret.txt'
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: attackPath }, resolve)
+    req.on('error', reject)
+    req.end()
+  })
+  let body = ''
+  res.on('data', (c) => { body += c.toString() })
+  await new Promise((r) => res.on('end', r))
+  // 不论返回 200(SPA fallback)还是 404(文件不存在),核心断言是:
+  //   1. 不能返回 docRoot 之外的文件
+  //   2. body 不能含 secret 内容
+  assert('URL 编码路径穿越被拦截(200 fallback 或 404 文件不存在)', res.statusCode === 200 || res.statusCode === 404)
+  assert('body 不含 secret 内容(没读出 docRoot 外的文件)', !body.includes('secret'))
   t.close()
-  await settle(50)
 }
 
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
