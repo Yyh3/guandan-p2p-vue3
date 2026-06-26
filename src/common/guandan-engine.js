@@ -6,7 +6,7 @@
  *   点数 rank: 3..13(K), 14=A, 15=2, 16=小王, 17=大王
  *   内部数据: {suit, rank} 数组
  *
- * 顺序: 大王(16) > 小王(15) > 2(14) > A(13) > K(12) > ... > 3(3)
+ * 顺序: 大王(17) > 小王(16) > 2(15) > A(14) > K(13) > ... > 3(3)
  * 注意"红桃级牌"(逢人配)由调用方在出牌时特殊处理,引擎不做判断
  */
 
@@ -15,6 +15,7 @@ const SUIT_NAMES = ['♠', '♥', '♣', '♦']
 const RANK_NAMES = ['', '', '', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', '小王', '大王']
 // 升级序列:从打 2(rank=15)到打 A(rank=14),共 13 级
 // 顺序:2(15) → A(14) → K(13) → Q(12) → J(11) → 10(10) → ... → 3(3) → 回到 2(15)
+// v3.x P3-2 修复:不再 export — 没有任何调用方(getLevelRank 内部用 while 循环,不需要这个数组)
 const LEVEL_SEQUENCE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3]
 
 // ============ 牌组生成 ============
@@ -163,8 +164,8 @@ function recognize(cards) {
   // 王牌特殊处理
   const jokerCnt = (cnt[16] || 0) + (cnt[17] || 0)
 
-  // 王炸(4王)
-  if (jokerCnt === 4 && len === 4) {
+  // 王炸(4王) — v3.x P3-4 简化:整副牌只有 4 张王,jokerCnt===4 蕴含了 len===4
+  if (jokerCnt === 4) {
     return { type: TYPE.KINGS_BOMB, mainRank: 17, length: 4 }
   }
 
@@ -564,7 +565,7 @@ function tributeInfo(ranks, teams) {
 // ============ 导出 ============
 export {
   // 常量
-  SUIT_NAMES, RANK_NAMES, TYPE, TYPE_ORDER, LEVEL_SEQUENCE,
+  SUIT_NAMES, RANK_NAMES, TYPE, TYPE_ORDER,
   // 牌组
   createDeck, shuffle, sortHand, sortHandGrouped, isLevelCard, deal,
   // PRNG(4-tab 联机用 seeded firstPlayer)

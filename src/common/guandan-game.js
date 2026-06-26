@@ -229,8 +229,10 @@ function createGame(opts) {
     if (state.phase !== 'playing') return
     const seat = state.currentPlayer
     if (!aiPlayers.includes(seat)) return
-    // 500ms 后 AI 出牌(给人类观察时间)
-    setTimeout(() => {
+    // v3.x P2-21 修复:之前 setTimeout ID 没存,状态变化时无法取消,可能触发过期回调
+    if (state._aiTimer) clearTimeout(state._aiTimer)
+    state._aiTimer = setTimeout(() => {
+      state._aiTimer = null
       if (state.currentPlayer !== seat) return
       const hand = state.hands[seat]
       const ctx = {
@@ -326,6 +328,8 @@ function createGame(opts) {
       if (oldHostSeat !== 0) return false
       if (![1, 2, 3].includes(newHostSeat)) return false
       if (oldHostSeat === newHostSeat) return false
+      // v3.x P2-23 修复:新 host 不能是已出完牌的玩家(他手牌已空,迁移过去会破坏回合计算)
+      if (state.finishedOrder.includes(newHostSeat)) return false
       // 防御:手牌不存在时不做(空 hands)
       if (!state.hands[oldHostSeat] || !state.hands[newHostSeat]) return false
 
@@ -388,23 +392,33 @@ function createGame(opts) {
 
     // ★ v3.8 P1:断线重连用,joiner 收到 host 的 STATE_SNAPSHOT 后灌回 state
     // _ 开头为内部 API,使用方:GameView 的 onP2PStateSnapshot
+    // v3.x P2-26 修复:加关键字段 sanity check,畸形数据(99 / 空 hands)不再裸赋值
     _applySnapshot(snap) {
       if (!snap) return
-      if (snap.hands) state.hands = snap.hands.map(h => h.slice())
+      const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
+      const validPhase = ['idle', 'dealing', 'playing', 'trick_end', 'finished']
+      if (snap.hands) {
+        if (!Array.isArray(snap.hands) || snap.hands.length !== 4) return  // 畸形 hands 拒收
+        state.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
+      }
       if (snap.tableCards) state.tableCards = snap.tableCards.slice()
       if ('lastPlay' in snap) state.lastPlay = snap.lastPlay
-      if (typeof snap.currentPlayer === 'number') state.currentPlayer = snap.currentPlayer
-      if (typeof snap.firstPlayer === 'number') state.firstPlayer = snap.firstPlayer
-      if (typeof snap.leaderPlayer === 'number') state.leaderPlayer = snap.leaderPlayer
+      if (isValidSeat(snap.currentPlayer)) state.currentPlayer = snap.currentPlayer
+      if (isValidSeat(snap.firstPlayer)) state.firstPlayer = snap.firstPlayer
+      if (isValidSeat(snap.leaderPlayer)) state.leaderPlayer = snap.leaderPlayer
       if (snap.trickHistory) state.trickHistory = snap.trickHistory.slice()
-      if (snap.finishedOrder) state.finishedOrder = snap.finishedOrder.slice()
+      if (snap.finishedOrder) {
+        // finishedOrder 必须是 0..3 的子集
+        const ok = Array.isArray(snap.finishedOrder) && snap.finishedOrder.every(s => isValidSeat(s))
+        if (ok) state.finishedOrder = snap.finishedOrder.slice()
+      }
       if (typeof snap.passCount === 'number') state.passCount = snap.passCount
       if (snap.tribute) state.tribute = snap.tribute
       if (snap.ghost) state.ghost = snap.ghost
       if (typeof snap.levelUp === 'number') state.levelUp = snap.levelUp
       if (typeof snap.levelRank === 'number') state.levelRank = snap.levelRank
       if (typeof snap.round === 'number') state.round = snap.round
-      if (snap.phase) state.phase = snap.phase
+      if (snap.phase && validPhase.includes(snap.phase)) state.phase = snap.phase
       // 同步发 turn 事件让 UI 重新渲染
       emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
     },

@@ -293,6 +293,66 @@ console.log('\n=== 10.8 v3.x P0-6:nextTurn 4 人全 finished 不死循环 ===')
   }
 }
 
+console.log('\n=== 10.9 v3.x P2-23:migrateHost 拒绝已 finished 的候选 ===')
+{
+  // 修复前:新 host 候选已 finished 也照样迁移,手牌变空,回合计算错乱
+  // 修复后:migrateHost 返回 false,不破坏状态
+  const game = createGame({ seats: 4, levelRank: 5, aiPlayers: [] })
+  game.deal()
+  const st = game.getState()
+  // 模拟 seat 2 已 finished
+  st.finishedOrder.push(2)
+  st.hands[2] = []
+  const beforeHands0 = st.hands[0].slice()
+  const r = game.migrateHost(0, 2)
+  assert('migrateHost 到已 finished 玩家 → 返回 false', r === false)
+  assert('seat 0 手牌不变', JSON.stringify(st.hands[0]) === JSON.stringify(beforeHands0))
+  assert('seat 2 仍在 finishedOrder', st.finishedOrder.includes(2))
+}
+
+console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
+{
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    const origState = game.getState()
+    // 1) currentPlayer=99 畸形 → 不应用
+    game._applySnapshot({
+      currentPlayer: 99,
+      firstPlayer: 99,
+      leaderPlayer: 99,
+      levelRank: 'not a number',
+      phase: 'invalid_phase',
+    })
+    const s1 = game.getState()
+    assert('畸形 currentPlayer=99 不应用', s1.currentPlayer === origState.currentPlayer)
+    assert('畸形 firstPlayer=99 不应用', s1.firstPlayer === origState.firstPlayer)
+    assert('畸形 leaderPlayer=99 不应用', s1.leaderPlayer === origState.leaderPlayer)
+    assert('畸形 levelRank 不应用', s1.levelRank === origState.levelRank)
+    assert('畸形 phase 不应用', s1.phase === origState.phase)
+    // 2) 合法数据正常应用
+    game._applySnapshot({
+      currentPlayer: 2,
+      passCount: 1,
+      phase: 'playing',
+    })
+    const s2 = game.getState()
+    assert('合法 currentPlayer=2 应用', s2.currentPlayer === 2)
+    assert('合法 passCount=1 应用', s2.passCount === 1)
+    assert('合法 phase=playing 应用', s2.phase === 'playing')
+    // 3) hands 不是 4 长度数组 → 拒收,保持原 state.hands
+    const beforeHands = JSON.stringify(origState.hands)
+    game._applySnapshot({ hands: [[1, 2]] })
+    const s3 = game.getState()
+    assert('畸形 hands(长度≠4)拒收', JSON.stringify(s3.hands) === beforeHands)
+    // 4) finishedOrder 含非法 seat → 拒收
+    game._applySnapshot({ finishedOrder: [0, 1, 99] })
+    const s4 = game.getState()
+    assert('畸形 finishedOrder(含 99)拒收', JSON.stringify(s4.finishedOrder) === JSON.stringify(origState.finishedOrder))
+  } else {
+    assert('P2-26 测试 skipped', false)
+  }
+}
+
   // ============================================================
   // ★ v2.1 P3:host 迁移相关
   // ============================================================

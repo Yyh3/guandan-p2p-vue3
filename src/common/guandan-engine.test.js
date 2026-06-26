@@ -335,5 +335,33 @@ console.log('\n=== 14. P0-1:canFormWithGhosts 不再崩,返回正确结果 ===')
   assert('canFormWithGhosts 不抛 TypeError', !crashed)
 }
 
+console.log('\n=== 15. P3-1 + P3-2:常量正确性回归 ===')
+{
+  // v3.x 修复:原注释写反(大王=16,小王=15),实际是 大王=17,小王=16
+  eq('RANK_NAMES[16]=小王', E.RANK_NAMES[16], '小王')
+  eq('RANK_NAMES[17]=大王', E.RANK_NAMES[17], '大王')
+  // v3.x 修复:LEVEL_SEQUENCE 不再 export(无调用方,避免误导)
+  assert('LEVEL_SEQUENCE 不在导出中', E.LEVEL_SEQUENCE === undefined)
+}
+
+console.log('\n=== 16. P3-4:王炸简化后仍识别 4 王 ===')
+{
+  // v3.x 修复:去掉冗余 len===4 检查后,仍能识别 4 王
+  const jokers = [
+    { suit: -1, rank: 16 }, { suit: -1, rank: 16 },
+    { suit: -1, rank: 17 }, { suit: -1, rank: 17 },
+  ]
+  const r = E.recognize(jokers)
+  eq('4 王 → KINGS_BOMB', r.type, E.TYPE.KINGS_BOMB)
+  eq('4 王 mainRank=17', r.mainRank, 17)
+  // 也测不规则排序的 4 王
+  const shuffled = [
+    { suit: -1, rank: 17 }, { suit: -1, rank: 16 },
+    { suit: -1, rank: 17 }, { suit: -1, rank: 16 },
+  ]
+  const r2 = E.recognize(shuffled)
+  eq('4 王乱序 → KINGS_BOMB', r2.type, E.TYPE.KINGS_BOMB)
+}
+
 console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)
 process.exit(fail > 0 ? 1 : 0)
