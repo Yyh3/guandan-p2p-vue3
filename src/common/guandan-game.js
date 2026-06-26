@@ -150,7 +150,11 @@ function createGame(opts) {
     if (hand.length === 0) {
       state.finishedOrder.push(seat)
       emit('playerFinished', { seat, order: state.finishedOrder.length })
-      if (state.finishedOrder.length === 4 || (state.finishedOrder.length === 3 && !state.finishedOrder.includes((state.currentPlayer + 1) % 4))) {
+      // v3.x P0-5 修复:掼蛋标准规则 — 3 人出完(任意组合)即结束本局,因为
+      // 必有某队 2 人都已出完(team seat+2)。原条件检查下一家是否 finished
+      // 会漏掉"刚出完的玩家自己就是剩下的最后一个,且下一家已 finished"的情形,
+      // 导致最后一人被迫独自打完手牌,违反标准规则。
+      if (state.finishedOrder.length >= 3) {
         finishRound()
         return
       }
@@ -170,12 +174,20 @@ function createGame(opts) {
 
   /**
    * ★ v3.8 P1:无校验过牌,4-tab 联机同步用
+   *
+   * v3.x P0-4 修复:passCount 阈值由硬编码 3 改为 `activePlayers - 1`,
+   * 其中 activePlayers = 4 - finishedOrder.length。理由:已出完的玩家无法
+   * pass,真正能 pass 的是"除 leader 外的活跃玩家"。
+   *   4 人都活跃 → 需要 3 次 pass
+   *   3 人活跃(1 人 finished) → 需要 2 次 pass
+   *   2 人活跃 → 需要 1 次 pass(残局)
    */
   function applyPass(seat) {
     state.passCount++
     state.trickHistory.push({ seat, pass: true })
     emit('pass', { seat })
-    if (state.passCount >= 3) {
+    const activePlayers = 4 - state.finishedOrder.length
+    if (state.passCount >= activePlayers - 1) {
       const leader = state.lastPlay.who
       state.leaderPlayer = leader
       state.firstPlayer = leader
@@ -193,8 +205,17 @@ function createGame(opts) {
   function nextTurn(isFirstPlayer) {
     let next = (state.currentPlayer + 1) % 4
     // 跳过已出完牌的
+    // v3.x P0-6 修复:加 safety 计数器,极端竞态下 4 人都进 finishedOrder
+    // 时(理论上不该发生,playerPlay 处已 ≥3 直接 finishRound,但兜底)
+    // 不能死循环
+    let safety = 0
     while (state.finishedOrder.includes(next)) {
       next = (next + 1) % 4
+      if (++safety >= 4) {
+        // 所有 4 人都已 finished — 直接结束本局兜底
+        finishRound()
+        return
+      }
     }
     state.currentPlayer = next
     const isTeammateLast = state.lastPlay && ((state.lastPlay.who + 2) % 4 === state.currentPlayer)

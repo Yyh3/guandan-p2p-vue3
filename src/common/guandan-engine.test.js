@@ -293,5 +293,47 @@ console.log('\n=== 13. groupHandByRank: 完整 27 张手牌分组 ===')
   }
 }
 
+console.log('\n=== 14. P0-1:canFormWithGhosts 不再崩,返回正确结果 ===')
+{
+  // v3.x 修复:原 generateGhostAssignments 返回扁平数字数组,导致 assignment.map 抛 TypeError
+  // 现在枚举组合后正确返回 boolean
+  // 语义:concreteCards + ghostCount 张鬼牌 一起能否组成 targetType
+  // 注意:targetLength 是组合牌的张数(PAIR=2, TRIPLE=3, STRAIGHT 5/6/...)
+  const lr = 5  // 打 5
+  // 凑单张 7:0 concrete + 1 鬼 → 鬼变 7
+  let ok = E.canFormWithGhosts(E.TYPE.SINGLE, 1, 7, [], 1, lr)
+  assert('0 concrete + 1 鬼 → 可凑单张 7', ok === true)
+  // 凑单张 7:1 concrete(rank=7) + 0 鬼 → 直接成
+  ok = E.canFormWithGhosts(E.TYPE.SINGLE, 1, 7, [{ suit: 0, rank: 7 }], 0, lr)
+  assert('1 concrete + 0 鬼 → 凑单张 7', ok === true)
+  // 凑对子 9:1 concrete(rank=9) + 1 鬼 → 鬼变 9 = PAIR mainRank=9 length=2
+  ok = E.canFormWithGhosts(E.TYPE.PAIR, 2, 9, [{ suit: 0, rank: 9 }], 1, lr)
+  assert('1 concrete + 1 鬼 → 凑对子 9', ok === true)
+  // 凑对子 7:1 concrete(rank=3) + 1 鬼 → 鬼变 7 + concrete 3 = 2 张不是对子 = false
+  ok = E.canFormWithGhosts(E.TYPE.PAIR, 2, 7, [{ suit: 0, rank: 3 }], 1, lr)
+  assert('1 concrete + 1 鬼 + 凑对子 7 = false(concrete rank 不对)', ok === false)
+  // 0 鬼,concrete = 单张 9,凑单张 9
+  ok = E.canFormWithGhosts(E.TYPE.SINGLE, 1, 9, [{ suit: 0, rank: 9 }], 0, lr)
+  assert('0 鬼纯 concrete = 正常识别', ok === true)
+  // 0 concrete + 2 鬼 → 对子(两鬼变同 rank)
+  ok = E.canFormWithGhosts(E.TYPE.PAIR, 2, 11, [], 2, lr)
+  assert('0 concrete + 2 鬼 → 凑对子 11', ok === true)
+  // 1 concrete + 2 鬼 → 三张(1 concrete + 2 鬼变同 rank)
+  ok = E.canFormWithGhosts(E.TYPE.THREE, 3, 9, [{ suit: 0, rank: 9 }], 2, lr)
+  assert('1 concrete(rank 9) + 2 鬼 → 凑三张 9', ok === true)
+  // 总张数不匹配 → false(concrete+ghost ≠ targetLength)
+  ok = E.canFormWithGhosts(E.TYPE.PAIR, 2, 3, [{ suit: 0, rank: 3 }, { suit: 2, rank: 3 }], 2, lr)
+  assert('2 concrete + 2 鬼 + targetLength=2 = false(总张数不匹配)', ok === false)
+  // ghostCount > 2 不支持,返回 false
+  ok = E.canFormWithGhosts(E.TYPE.SINGLE, 1, 5, [{ suit: 0, rank: 3 }], 3, lr)
+  assert('3 张鬼 = false(不支持)', ok === false)
+  // 不崩溃:大量组合枚举
+  let crashed = false
+  try {
+    E.canFormWithGhosts(E.TYPE.PAIR, 2, 14, [{ suit: 0, rank: 3 }], 1, lr)
+  } catch (e) { crashed = true }
+  assert('canFormWithGhosts 不抛 TypeError', !crashed)
+}
+
 console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)
 process.exit(fail > 0 ? 1 : 0)

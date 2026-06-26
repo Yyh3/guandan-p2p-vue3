@@ -356,6 +356,10 @@ function splitGhosts(hand, levelRank) {
  * 更稳健的做法:用 DP,这里给出基础版
  */
 function canFormWithGhosts(targetType, targetLength, targetMainRank, concreteCards, ghostCount, levelRank) {
+  // ★ v3.x 修复:加总张数 sanity check — concrete.length + ghostCount 必须等于 targetLength
+  // 否则根本凑不出目标牌型(比如 2 concrete + 2 鬼 = 4 张,凑不出 PAIR length=2)
+  if (concreteCards.length + ghostCount !== targetLength) return false
+
   // 先尝试纯 concrete 牌
   if (ghostCount === 0) {
     const r = recognize(concreteCards)
@@ -363,15 +367,15 @@ function canFormWithGhosts(targetType, targetLength, targetMainRank, concreteCar
   }
 
   // 简化:每个鬼都可以变成"想要的 rank"
-  // 枚举"鬼牌需要补成哪些 rank",生成虚拟卡牌再识别
   // 这里限制:只支持 ghostCount <= 2 的情况(2 张红桃级牌就是全部)
   if (ghostCount > 2) return false
 
-  // 暴力枚举(2 张鬼 = 4 种组合,够用)
-  const candidates = generateGhostAssignments(targetType, targetMainRank, targetLength, levelRank)
-  for (const assignment of candidates) {
-    // assignment: [{rank}, ...] 长度 = ghostCount
-    const virtual = concreteCards.concat(assignment.map(rank => ({ suit: 9, rank })))
+  // 枚举 ghostCount 个 rank 的组合(允许重复),逐个验证
+  // ghostCount=1 → 15 种,ghostCount=2 → 120 种非递减组合(鬼牌无序),可控
+  const allRanks = generateGhostAssignments(targetType, targetMainRank, targetLength, levelRank)
+  const combos = combosWithReplacement(allRanks, ghostCount)
+  for (const ranks of combos) {
+    const virtual = concreteCards.concat(ranks.map(rank => ({ suit: 9, rank })))
     const r = recognize(virtual)
     if (r.type === targetType && r.length === targetLength && r.mainRank === targetMainRank) {
       return true
@@ -384,11 +388,26 @@ function canFormWithGhosts(targetType, targetLength, targetMainRank, concreteCar
  * 为"凑出某牌型"枚举鬼牌可补的 rank 候选
  */
 function generateGhostAssignments(targetType, targetMainRank, targetLength, levelRank) {
-  // 普通 rank 范围 3..14
-  const allRanks = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-  // 排除 2(14) 和大小王(15,16)做主牌(某些牌型),但鬼牌本身可以变这些
-  // 简化:鬼牌候选 = 所有 rank
-  return allRanks
+  // 普通 rank 范围 3..15,大小王 16/17
+  // 鬼牌是百搭,可以变任何 rank(包括 2/王)
+  // 但 STRAIGHT 类牌型不能含 2/王(具体由 recognize 保证,这里候选给全部)
+  return [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+}
+
+/**
+ * 枚举从 src 中取 k 个元素(允许重复)的所有组合
+ * 例:combosWithReplacement([1,2], 2) → [[1,1],[1,2],[2,2]]
+ */
+function combosWithReplacement(src, k) {
+  if (k === 0) return [[]]
+  const result = []
+  for (let i = 0; i < src.length; i++) {
+    const rest = combosWithReplacement(src.slice(i), k - 1)
+    for (const r of rest) {
+      result.push([src[i], ...r])
+    }
+  }
+  return result
 }
 
 // ============ 发牌与开局 ============

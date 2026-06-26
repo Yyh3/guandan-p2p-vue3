@@ -202,29 +202,36 @@ function findMinSameType(concrete, ghosts, target, levelRank) {
 
 /**
  * 找最小的同长度顺子,主 rank > targetMain
+ *
+ * Bug fix (P0-2 + P0-3):
+ *   - 用 ghostIdx 索引而不是 slice,避免 start 循环间 ghosts 被耗尽
+ *   - 验证不含 2/王时排除鬼牌本身(鬼牌可充当任意 rank,包括 2/王)
  */
 function findMinStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
+  const ghostSet = new Set(ghosts)
   // 不能含 2/王(levelRank 也不影响 2)
   for (let start = Math.max(3, targetMain - length + 2); start + length - 1 <= 13; start++) {
     let need = length
     const picked = []
+    let ghostIdx = 0
     for (let r = start; r < start + length; r++) {
       const have = cnt[r] || 0
       if (have > 0) {
         picked.push(...cards.filter(c => c.rank === r).slice(0, 1))
         need--
-      } else if (ghosts.length > 0) {
-        picked.push(ghosts[0])
-        ghosts = ghosts.slice(1)
+      } else if (ghostIdx < ghosts.length) {
+        picked.push(ghosts[ghostIdx])
+        ghostIdx++
         need--
       } else {
         break
       }
     }
     if (need === 0) {
-      // 验证不含 2/王
-      if (picked.every(c => c.rank !== 15 && c.rank !== 16 && c.rank !== 17)) {
+      // 鬼牌可充当任意 rank(包括 2/王),但 concrete 不能是 2/王
+      const hasBannedConcrete = picked.some(c => !ghostSet.has(c) && (c.rank === 15 || c.rank === 16 || c.rank === 17))
+      if (!hasBannedConcrete) {
         return picked
       }
     }
@@ -235,25 +242,28 @@ function findMinStraight(cards, ghosts, length, targetMain, levelRank) {
 function findMinPairStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
   const pairCount = length / 2
+  const ghostSet = new Set(ghosts)
   for (let start = Math.max(3, targetMain - pairCount + 2); start + pairCount - 1 <= 13; start++) {
     let need = pairCount
     const picked = []
+    let ghostIdx = 0
     for (let r = start; r < start + pairCount; r++) {
       const have = cnt[r] || 0
       if (have >= 2) {
         picked.push(...cards.filter(c => c.rank === r).slice(0, 2))
         need--
-      } else if (ghosts.length > 0 && have >= 1) {
+      } else if (ghostIdx < ghosts.length && have >= 1) {
         // 1 鬼 + 1 张凑对
-        picked.push(...cards.filter(c => c.rank === r).slice(0, 1), ghosts[0])
-        ghosts = ghosts.slice(1)
+        picked.push(...cards.filter(c => c.rank === r).slice(0, 1), ghosts[ghostIdx])
+        ghostIdx++
         need--
       } else {
         break
       }
     }
     if (need === 0) {
-      if (picked.every(c => c.rank !== 15 && c.rank !== 16 && c.rank !== 17)) {
+      const hasBannedConcrete = picked.some(c => !ghostSet.has(c) && (c.rank === 15 || c.rank === 16 || c.rank === 17))
+      if (!hasBannedConcrete) {
         return picked
       }
     }
@@ -264,25 +274,28 @@ function findMinPairStraight(cards, ghosts, length, targetMain, levelRank) {
 function findMinThreeStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
   const groupCount = length / 3
+  const ghostSet = new Set(ghosts)
   for (let start = Math.max(3, targetMain - groupCount + 2); start + groupCount - 1 <= 13; start++) {
     let need = groupCount
     const picked = []
+    let ghostIdx = 0
     for (let r = start; r < start + groupCount; r++) {
       const have = cnt[r] || 0
       if (have >= 3) {
         picked.push(...cards.filter(c => c.rank === r).slice(0, 3))
         need--
-      } else if (ghosts.length >= 2 && have >= 1) {
+      } else if (ghostIdx + 1 < ghosts.length && have >= 1) {
         // 2 鬼 + 1 张凑三
-        picked.push(...cards.filter(c => c.rank === r).slice(0, 1), ...ghosts.slice(0, 2))
-        ghosts = ghosts.slice(2)
+        picked.push(...cards.filter(c => c.rank === r).slice(0, 1), ghosts[ghostIdx], ghosts[ghostIdx + 1])
+        ghostIdx += 2
         need--
       } else {
         break
       }
     }
     if (need === 0) {
-      if (picked.every(c => c.rank !== 15 && c.rank !== 16 && c.rank !== 17)) {
+      const hasBannedConcrete = picked.some(c => !ghostSet.has(c) && (c.rank === 15 || c.rank === 16 || c.rank === 17))
+      if (!hasBannedConcrete) {
         return picked
       }
     }

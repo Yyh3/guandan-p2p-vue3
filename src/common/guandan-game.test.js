@@ -5,6 +5,7 @@
  * 首家 firstPlayer 是 deal 时随机 (0-3),所以循环 deal 直到 firstPlayer=0 (1/4 概率,30 次内必中)。
  */
 import { createGame } from './guandan-game.js'
+import * as E from './guandan-engine.js'
 
 let pass = 0, fail = 0
 function assert(name, cond) {
@@ -181,16 +182,116 @@ async function main() {
     }
   }
 
-  console.log('\n=== 10. v3.8 P1:addAIPlayer 动态接管 ===')
-  {
-    const game = createGame({ seats: 4, levelRank: 5, aiPlayers: [] })
-    game.deal()
-    assert('初始 aiPlayers 空', game.getAIPlayers().length === 0)
-    game.addAIPlayer(2)
-    assert('addAIPlayer(2) 后 aiPlayers=[2]', game.getAIPlayers().includes(2))
-    game.removeAIPlayer(2)
-    assert('removeAIPlayer(2) 后 aiPlayers 空', game.getAIPlayers().length === 0)
+console.log('\n=== 10. v3.8 P1:addAIPlayer 动态接管 ===')
+{
+  const game = createGame({ seats: 4, levelRank: 5, aiPlayers: [] })
+  game.deal()
+  assert('初始 aiPlayers 空', game.getAIPlayers().length === 0)
+  game.addAIPlayer(2)
+  assert('addAIPlayer(2) 后 aiPlayers=[2]', game.getAIPlayers().includes(2))
+  game.removeAIPlayer(2)
+  assert('removeAIPlayer(2) 后 aiPlayers 空', game.getAIPlayers().length === 0)
+}
+
+// ============================================================
+// ★ v3.x P0:致命 bug 回归测试
+// ============================================================
+
+console.log('\n=== 10.5 v3.x P0-4:applyPass 按活跃玩家数判断 ===')
+{
+  // 修复前:硬编码 passCount >= 3
+  //   - 4 人都活跃 → 需 3 pass (正确)
+  //   - 3 人活跃(1 finished) → 仍要 3 pass (BUG,实际只需 2)
+  // 修复后:activePlayers - 1
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    // 玩家 0 出一张,模拟 3 pass 完结
+    const hand0 = game.getState().hands[0]
+    game.playerPlay(0, [hand0[0]])
+    assert('出牌后轮到 seat 1', game.getState().currentPlayer === 1)
+
+    // 直接 mutate state,把 seat 2 标记为 finished(模拟残局)
+    game.getState().finishedOrder.push(2)
+    // 现在 activePlayers = 3,需 2 pass 才结束 trick
+    game.applyPass(1)  // passCount=1, 不应结束
+    assert('1/2 pass 后还在 trick 中', game.getState().lastPlay !== null)
+    assert('1/2 pass 后轮到 seat 3', game.getState().currentPlayer === 3)
+    game.applyPass(3)  // passCount=2, 应结束(2 = activePlayers - 1)
+    assert('2/2 pass 后 trick 结束', game.getState().lastPlay === null)
+    assert('2/2 pass 后 currentPlayer = leader 0', game.getState().currentPlayer === 0)
+  } else {
+    assert('P0-4 测试 skipped', false)
   }
+}
+
+console.log('\n=== 10.6 v3.x P0-4:残局 2 人活跃只需 1 pass ===')
+{
+  // activePlayers = 2 时,只需 1 pass 结束 trick(只剩 leader + 1 玩家)
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    const hand0 = game.getState().hands[0]
+    game.playerPlay(0, [hand0[0]])
+    // 模拟 seat 2, 3 都已 finished
+    game.getState().finishedOrder.push(2, 3)
+    // activePlayers = 2,需 1 pass
+    game.applyPass(1)  // passCount=1, 应结束
+    assert('残局 1 pass 即结束 trick', game.getState().lastPlay === null)
+  } else {
+    assert('P0-4 残局测试 skipped', false)
+  }
+}
+
+console.log('\n=== 10.7 v3.x P0-5:3 人出完即结束本局 ===')
+{
+  // 修复前:条件 finishedOrder.length===3 && !finishedOrder.includes((current+1)%4)
+  //   - 3 finished 但 (current+1) 是已 finished → finishRound 不触发,最后一人独自打
+  // 修复后:finishedOrder.length >= 3 直接结束
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    // 直接把 finishedOrder 填到 3,模拟其他 3 家都已出完
+    // 把 seat 0 (current) 设为还没 finished
+    const st = game.getState()
+    st.finishedOrder.push(1, 2, 3)
+    // 触发 playerPlay(0) → hand[0] 出完 → 应触发 finishRound
+    const before = st.hands[0].slice()
+    st.hands[0] = [before[0]]  // 留 1 张
+    // 监听 roundEnd 事件
+    let roundEnded = false
+    game.on('roundEnd', () => { roundEnded = true })
+    // 玩家 0 出最后 1 张
+    game.playerPlay(0, before.slice(0, 1))
+    assert('3 finished + 第 4 出完 → roundEnd 触发', roundEnded)
+    assert('phase = finished', game.getState().phase === 'finished')
+  } else {
+    assert('P0-5 测试 skipped', false)
+  }
+}
+
+console.log('\n=== 10.8 v3.x P0-6:nextTurn 4 人全 finished 不死循环 ===')
+{
+  // 修复前:while loop 无退出条件,4 全 finished 时无限循环
+  // 修复后:safety >= 4 时兜底调 finishRound
+  // 测试路径:用 applyPlay(无 finishedOrder.includes 校验,联机同步用)直接
+  // 触发 nextTurn,且 4 人全在 finishedOrder
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    const st = game.getState()
+    // 4 家全 finished(模拟竞态:finishedOrder 在 nextTurn 前被完整填入)
+    st.finishedOrder.push(0, 1, 2, 3)
+    st.currentPlayer = 0
+    // 玩家 0 还有牌可出(让 applyPlay 不走 finished 分支)
+    let hangTimeout = false
+    const hangTimer = setTimeout(() => { hangTimeout = true }, 1000)
+    // applyPlay 不检查 finishedOrder.includes — 直接调用触发 nextTurn 兜底
+    const hand0 = st.hands[0].slice()
+    game.applyPlay(0, [hand0[0]], hand0.slice(1), E.recognize([hand0[0]]))
+    clearTimeout(hangTimer)
+    assert('4 全 finished 时不卡死(1s 内返回)', !hangTimeout)
+    assert('最终 phase = finished(兜底触发)', game.getState().phase === 'finished')
+  } else {
+    assert('P0-6 测试 skipped', false)
+  }
+}
 
   // ============================================================
   // ★ v2.1 P3:host 迁移相关

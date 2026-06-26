@@ -309,5 +309,61 @@ console.log('\n=== 19. autoPlayGrouped: 空手牌 pass ===')
   eq('空手牌 = pass', r.type, 'pass')
 }
 
+console.log('\n=== 20. P0-2:findMinStraight 鬼牌不耗尽(多 start 候选间) ===')
+{
+  // 测试:第 1 个 start 失败时,鬼牌仍可用于第 2 个 start
+  // 桌面要求 3 张顺子 main > 5(concrete 给不出,必须用鬼)
+  // 之前 bug:第 1 个 start 用完鬼牌后,后续 start 没鬼牌可用
+  const lr = 5
+  const ghost = { suit: 1, rank: lr }
+  // 手牌:concrete 7,8 + 鬼
+  // 顺子 main > 5 → 候选 start:6(需 6,7,8),7(需 7,8,9)
+  // 第 1 个 start=6:concrete 有 7,8,缺 6 → 用鬼补 6 → 成功 (但 main=6)
+  // 实际我们想要 main > target,所以用更高 target 测
+  // target main=6 → start 候选 7(7,8,9):concrete 有 7,8,缺 9 → 用鬼补 9
+  const target = { type: E.TYPE.STRAIGHT, mainRank: 6, length: 3 }
+  // 用 decide 测试,验证能出牌
+  const r = AI.decide([c(7, 0), c(8, 2), ghost], target, lr)
+  assert('decide 能出 7,8,鬼 顺子压 6', r.type === 'play')
+  eq('出 3 张', r.cards.length, 3)
+}
+
+console.log('\n=== 21. P0-3:打 2 时鬼牌(rank=15)允许在顺子里 ===')
+{
+  // bug:打 2 时鬼牌是红心 2(rank=15),filter 15/16/17 会错误拒绝
+  // 修后:鬼牌允许充当 2/王,顺子里的 concrete 不能是 2/王 即可
+  const lr = 15  // 打 2
+  const ghost = { suit: 1, rank: 15 }  // 红心 2 = 鬼
+  // 手牌:7,8 + 鬼,跟 5 起顺子(target mainRank=5)
+  const target = { type: E.TYPE.STRAIGHT, mainRank: 5, length: 3 }
+  const r = AI.decide([c(7, 0), c(8, 2), ghost], target, lr)
+  assert('打 2 时鬼牌可补顺子', r.type === 'play')
+  eq('出 3 张', r.cards.length, 3)
+  // 验证出牌 rank = [7,8,15] 或等价排列
+  const ranks = r.cards.map(x => x.rank).sort((a, b) => a - b)
+  eq('ranks 含 15(鬼)', ranks.includes(15), true)
+}
+
+console.log('\n=== 22. P0-2 多鬼牌版:findMinPairStraight 鬼牌不耗尽 ===')
+{
+  // 跟牌:连对 target mainRank=5
+  // 第 1 个 pair 候选 start=6(6,7,8 三对),第 2 个 start=7(7,8,9)
+  // concrete: 7x2, 8x2, 9x2 + 1 鬼(打 5 时鬼=红心 5)
+  // start=7 需要 7,8,9 三对 → 都用 concrete 凑出,不需要鬼
+  // 这场景是测鬼牌不被无谓消耗
+  const lr = 5
+  const ghost = { suit: 1, rank: lr }
+  const target = { type: E.TYPE.PAIR_STRAIGHT, mainRank: 5, length: 6 }  // 3 对
+  const h = [
+    c(7, 0), c(7, 2),  // 7 对
+    c(8, 0), c(8, 2),  // 8 对
+    c(9, 0), c(9, 2),  // 9 对
+    ghost,
+  ]
+  const r = AI.decide(h, target, lr)
+  assert('连对 7-8-9 可出', r.type === 'play')
+  eq('出 6 张', r.cards.length, 6)
+}
+
 console.log(`\n========== AI 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)
 process.exit(fail > 0 ? 1 : 0)
