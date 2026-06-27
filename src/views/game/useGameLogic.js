@@ -276,9 +276,11 @@ export function useGameLogic(opts = {}) {
         if (myTurn.value) {
           if (myHand.value.length > 0) {
             const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-            game.value.playerPlay(selfSeat.value, [sorted[0]])
+            // ★ BUG-003:超时自动出牌走 commitPlay 统一广播
+            commitPlay(selfSeat.value, [sorted[0]], 'timeout')
           } else {
-            game.value.playerPass(selfSeat.value)
+            // ★ BUG-003:超时自动过牌走 commitPass 统一广播
+            commitPass(selfSeat.value, 'timeout')
           }
         }
       }
@@ -356,7 +358,18 @@ export function useGameLogic(opts = {}) {
   }
 
   function finishDeal() {
-    myHand.value = E.sortHandGrouped(game.value.getState().hands[0].slice())
+    // ★ BUG-002 修复:非房主发牌后读 hands[0] 会拿到 host 的牌 — 必须按 selfSeat 读
+    //   P2P 联机时 joiner seat=1/2/3,只有 host 才看 hands[0]
+    //   单机 AI 模式 selfSeat 默认 0,也走同一路径,行为不变
+    const st = game.value?.getState()
+    const seat = Number.isInteger(selfSeat.value) ? selfSeat.value : 0
+    const hand = st?.hands?.[seat]
+    if (!Array.isArray(hand)) {
+      console.warn('finishDeal: invalid hand for selfSeat', seat, 'st=', !!st)
+      myHand.value = []
+    } else {
+      myHand.value = E.sortHandGrouped(hand.slice())
+    }
     selected.value = new Array(myHand.value.length).fill(false)
     selectedColKeys.value = {}
     phase.value = 'playing'
@@ -523,7 +536,39 @@ export function useGameLogic(opts = {}) {
     mainActionsRef.value?.setShowing(false)
   }
 
-  function onAutoFindBest() {
+  // ===== BUG-003 修复:统一 commitPlay / commitPass =====
+/**
+ * ★ 唯一出牌入口。所有出牌路径(手动 onPlay / 自动 onAutoPlay / 提示 onAutoFindBest /
+ *   AI 接管)必须走 commitPlay 或 commitPass,确保 P2P 模式下广播统一触发。
+ *
+ * 修法:
+ *   - 手动出牌 / 自动出牌 / AI 接管都通过 commitPlay(seat, cards, source) 走同一路径
+ *   - commitPlay 内部:game.playerPlay → isP2PMode 时 net.broadcast PLAY
+ *   - commitPass 同理
+ *
+ * source 参数('manual' / 'auto' / 'ai' / 'timeout')用于 debug / 统计 / 以后做回放,
+ *   当前实现只用作 payload 字段,不改变网络层行为。
+ */
+function commitPlay(seat, cards, source = 'manual') {
+  if (!game.value) return { ok: false, error: 'game not initialized' }
+  const r = game.value.playerPlay(seat, cards)
+  if (!r || !r.ok) return r || { ok: false, error: 'playerPlay 失败' }
+  if (isP2PMode.value) {
+    net.broadcast({ type: 'PLAY', payload: { seat, cards, source } })
+  }
+  return r
+}
+function commitPass(seat, source = 'manual') {
+  if (!game.value) return { ok: false, error: 'game not initialized' }
+  const r = game.value.playerPass(seat)
+  if (!r || !r.ok) return r || { ok: false, error: 'playerPass 失败' }
+  if (isP2PMode.value) {
+    net.broadcast({ type: 'PASS', payload: { seat, source } })
+  }
+  return r
+}
+
+function onAutoFindBest() {
     if (!myTurn.value) return
     const r = AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false })
     if (r?.type === 'play' && Array.isArray(r.cards) && r.cards.length > 0) {
@@ -531,16 +576,19 @@ export function useGameLogic(opts = {}) {
       const remove = new Set(cards.map(c => cardKey(c)))
       const actual = myHand.value.filter(c => remove.has(cardKey(c)))
       if (actual.length === cards.length) {
-        const pr = game.value.playerPlay(selfSeat.value, actual)
+        // ★ BUG-003:走 commitPlay 统一广播
+        const pr = commitPlay(selfSeat.value, actual, 'auto')
         if (!pr.ok) alert(pr.error || '出牌失败')
       } else {
         alert('无可出的牌型组合')
       }
     } else if (lastPlay.value) {
-      game.value.playerPass(selfSeat.value)
+      // ★ BUG-003:走 commitPass 统一广播
+      commitPass(selfSeat.value, 'auto')
     } else {
       const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-      game.value.playerPlay(selfSeat.value, [sorted[0]])
+      // ★ BUG-003:走 commitPlay 统一广播
+      commitPlay(selfSeat.value, [sorted[0]], 'auto')
     }
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
@@ -606,7 +654,8 @@ export function useGameLogic(opts = {}) {
     if (hintCards.value.length === 0) { mainActionsRef.value?.setShowing(false); return }
     const cards = myHand.value.filter(c => hintCards.value.includes(cardKey(c)))
     if (cards.length === 0) { hintCards.value = []; return }
-    const r = game.value.playerPlay(selfSeat.value, cards)
+    // ★ BUG-003:走 commitPlay 统一广播
+    const r = commitPlay(selfSeat.value, cards, 'auto')
     if (!r.ok) alert(r.error || '出牌失败')
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
@@ -615,12 +664,9 @@ export function useGameLogic(opts = {}) {
   function onPlay() {
     const cards = selectedCardsFromColumns()
     if (cards.length === 0) { alert('请先选牌'); return }
-    const seat = selfSeat.value
-    const r = game.value.playerPlay(seat, cards)
+    // ★ BUG-003:走 commitPlay 统一广播 (保留本地 selected 重置)
+    const r = commitPlay(selfSeat.value, cards, 'manual')
     if (!r.ok) { alert(r.error || '出牌失败'); return }
-    if (isP2PMode.value) {
-      net.broadcast({ type: 'PLAY', payload: { seat, cards } })
-    }
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
     selectedColKeys.value = {}
@@ -628,12 +674,9 @@ export function useGameLogic(opts = {}) {
   }
   function onPass() {
     if (!lastPlay.value) { alert('首家不能过牌'); return }
-    const seat = selfSeat.value
-    const r = game.value.playerPass(seat)
+    // ★ BUG-003:走 commitPass 统一广播
+    const r = commitPass(selfSeat.value, 'manual')
     if (!r.ok) { alert(r.error || '过牌失败'); return }
-    if (isP2PMode.value) {
-      net.broadcast({ type: 'PASS', payload: { seat } })
-    }
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
   }
@@ -777,10 +820,11 @@ export function useGameLogic(opts = {}) {
             }
             import_AI().then(AI => {
               const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx)
+              // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
               if (r.type === 'play') {
-                game.value.playerPlay(seat, r.cards)
+                commitPlay(seat, r.cards, 'ai')
               } else {
-                game.value.playerPass(seat)
+                commitPass(seat, 'ai')
               }
             })
           }
@@ -888,5 +932,7 @@ export function useGameLogic(opts = {}) {
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
+    // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
+    commitPlay, commitPass,
   }
 }
