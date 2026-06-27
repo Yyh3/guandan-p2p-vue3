@@ -70,6 +70,23 @@
           >{{ opt.label }}</button>
         </div>
       </div>
+      <!-- ★ v0.4.9:音效模式(合成 vs 真实采样) -->
+      <div class="row">
+        <span class="row-label">
+          <span class="row-icon">🔊</span>
+          音效风格
+        </span>
+        <div class="seg-group">
+          <button
+            v-for="opt in sfxModes"
+            :key="opt.id"
+            class="seg-btn"
+            :class="{ active: sfxMode === opt.id, disabled: !sfxEnabled }"
+            :disabled="!sfxEnabled"
+            @click="setSfxMode(opt.id)"
+          >{{ opt.label }}</button>
+        </div>
+      </div>
     </section>
 
     <!-- 视觉(占位) -->
@@ -137,11 +154,16 @@
         掼蛋 P2P 局域网版 v0.4.8<br>
         离线 4 人掼蛋,无网/无流量/无服务器
       </p>
-      <p class="card-hint">
-        🎵 背景音乐:BGM by Kevin MacLeod (incompetech.com),Licensed under
-        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
-      </p>
-    </section>
+  <p class="card-hint">
+    🎵 背景音乐:BGM by Kevin MacLeod (incompetech.com),Licensed under
+    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+  </p>
+  <p class="card-hint">
+    🔊 音效占位(f sine + white noise),用户可换真实采样。
+    <a href="https://opengameart.org/" target="_blank" rel="noopener">OpenGameArt</a> /
+    <a href="https://freesound.org/" target="_blank" rel="noopener">Freesound</a> 找 CC0 扑克音效
+  </p>
+</section>
 
     <p class="footer">设置仅保存到本机,不同步到云端</p>
   </div>
@@ -161,6 +183,8 @@ const sfxEnabled = ref(true)
 const bgmVolume = ref(50)
 const sfxVolume = ref(70)
 const bgmStyle = ref('energetic')
+// ★ v0.4.9:SFX 模式(synth 合成 / real 真实采样)
+const sfxMode = ref('synth')
 const animationEnabled = ref(true)
 const theme = ref('dark')
 const historyCount = ref(0)
@@ -177,6 +201,11 @@ const bgmStyles = [
   { id: 'warm', label: '温暖民谣' },       // bgm-firesong.mp3 大厅
   { id: 'casual', label: '爱尔兰风笛' },   // bgm-galway.mp3 休闲
 ]
+// ★ v0.4.9:SFX 风格(合成 vs 真实采样)
+const sfxModes = [
+  { id: 'synth', label: '合成' },
+  { id: 'real', label: '真实' },
+]
 const themes = [
   { id: 'dark', label: '深色' },
   { id: 'light', label: '浅色' },
@@ -190,6 +219,8 @@ onMounted(() => {
   sfxVolume.value = Math.round((s.sfxVolume ?? 0.7) * 100)
   // 优先用 storage 持久化的值,fallback 到 audio 模块当前值
   bgmStyle.value = s.bgmStyle || audio.getBgmStyle() || 'energetic'
+  // ★ v0.4.9:SFX 模式(synth / real)
+  sfxMode.value = s.sfxMode || audio.getSfxMode() || 'synth'
   animationEnabled.value = s.animationEnabled !== false
   theme.value = s.theme || 'dark'
   historyCount.value = (storage.getHistory() || []).length
@@ -197,6 +228,8 @@ onMounted(() => {
   avatar.value = storage.getAvatar()
   // 把持久化的 BGM 风格同步到 audio 模块
   audio.setBgmStyle(bgmStyle.value)
+  // ★ v0.4.9:把 SFX 模式同步到 audio 模块
+  audio.setSfxMode(sfxMode.value)
 })
 
 function saveAll() {
@@ -206,6 +239,7 @@ function saveAll() {
     bgmVolume: bgmVolume.value / 100,
     sfxVolume: sfxVolume.value / 100,
     bgmStyle: bgmStyle.value,
+    sfxMode: sfxMode.value,
     animationEnabled: animationEnabled.value,
     theme: theme.value,
   })
@@ -221,6 +255,14 @@ function setStyle(id) {
   if (!bgmEnabled.value) return
   bgmStyle.value = id
   audio.setBgmStyle(id)
+  saveAll()
+}
+
+// ★ v0.4.9:SFX 模式切换
+function setSfxMode(id) {
+  if (!sfxEnabled.value) return
+  sfxMode.value = id
+  audio.setSfxMode(id)
   saveAll()
 }
 

@@ -219,5 +219,61 @@ for (const t of allTypes) {
 }
 assert(`playSfxForType(8 牌型 × 7 count = 56 组) 全部不抛错(${comboPass} pass)`, comboPass === 56)
 
+// ============================================================
+// v0.4.9:真实 SFX 模式测试
+// ============================================================
+console.log('\n=== 11. SFX 模式切换: synth/real API 表面 ===')
+{
+  // 默认模式
+  eq('★ 默认 SFX 模式 = synth', audio.getSfxMode(), 'synth')
+  eq('★ isSfxModeReal() 默认 false', audio.isSfxModeReal(), false)
+  // 切换到 real
+  audio.setSfxMode('real')
+  eq('★ setSfxMode("real") 后 getSfxMode() = real', audio.getSfxMode(), 'real')
+  eq('★ isSfxModeReal() = true', audio.isSfxModeReal(), true)
+  // 切回 synth
+  audio.setSfxMode('synth')
+  eq('★ setSfxMode("synth") 后 = synth', audio.getSfxMode(), 'synth')
+  // 非法值不改变
+  audio.setSfxMode('real')
+  audio.setSfxMode('invalid')
+  eq('★ setSfxMode("invalid") 不改变(real 不变)', audio.getSfxMode(), 'real')
+  audio.setSfxMode('synth')  // 恢复
+}
+
+console.log('\n=== 12. SFX 真实采样:Node 环境安全 noop ===')
+{
+  // 在 Node 环境(无 window)调 playSfxForType 不抛错
+  let threw = false
+  try {
+    audio.setSfxMode('real')
+    audio.playSfxForType('SINGLE', 1)
+    audio.playSfxForType('PAIR', 2)
+    audio.playSfxForType('BOMB_4', 4)
+    audio.playSfxForType('JOKER_BOMB')
+    audio.playSfxForType('STRAIGHT_FLUSH', 5)
+    audio.setSfxMode('synth')
+    audio.playSfxForType('SINGLE', 1)  // synth 路径也不抛
+  } catch (e) {
+    threw = true
+    console.log('  [err]', e.message)
+  }
+  eq('★ Node 环境 playSfxForType 不抛错(real/synth 都 OK)', threw, false)
+}
+
+console.log('\n=== 13. SFX 资源存在性:占位 MP3 已生成 ===')
+{
+  // 真实 SFX 占位 ffmpeg 生成(0.06-1.5s 短采样)
+  // Node 静态检查文件存在
+  const fs = await import('fs')
+  const path = await import('path')
+  const sfxFiles = ['sfx-single', 'sfx-pair', 'sfx-bomb', 'sfx-joker-bomb', 'sfx-deal', 'sfx-tick']
+  for (const name of sfxFiles) {
+    const p = path.resolve(`./src/assets/audio/${name}.mp3`)
+    const exists = fs.existsSync(p)
+    assert(`★ ${name}.mp3 存在`, exists)
+  }
+}
+
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
 if (fail > 0) process.exit(1)

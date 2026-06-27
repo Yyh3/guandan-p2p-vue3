@@ -47,6 +47,9 @@ let bgmVol = 0.25
 let sfxVol = 0.5
 let masterVol = 1.0
 
+// ★ v0.4.9:SFX 模式 — 'synth'(默认,Web Audio 合成) | 'real'(MP3 真实采样,加载失败降级 synth)
+let sfxMode = 'synth'
+
 // BGM 风格 ('energetic' 激昂 / 'calm' 平静)
 let bgmStyle = 'energetic'
 let bgmTimer = null
@@ -80,6 +83,71 @@ const BGM_TRACKS = {
   drums:     'bgm-asian-drums.mp3',
   warm:      'bgm-firesong.mp3',    // 温暖民谣 — 大厅/房间等待
   casual:    'bgm-galway.mp3',      // 爱尔兰风笛 — 轻松休闲
+}
+
+// ★ v0.4.9:真实 SFX 采样表
+//   - 占位用 ffmpeg sine + noise 合成(0.06-1.5s 短采样)
+//   - 用户后续可用真实扑克音效替换:摔牌声、洗牌声、出牌声等
+//   - 缺失时降级 Web Audio 合成(原 sfxSingle/sfxPair/sfxBomb 等函数)
+const SFX_TRACKS = {
+  SINGLE: 'sfx-single.mp3',           // 单张 — 720Hz 0.18s
+  PAIR: 'sfx-pair.mp3',               // 对子 — 660+720Hz 双击 0.14s
+  STRAIGHT: 'sfx-pair.mp3',           // 顺子复用 pair(短连击)
+  TRIPLE: 'sfx-pair.mp3',             // 三张复用 pair
+  TRIPLE_PAIR: 'sfx-pair.mp3',        // 三带二复用 pair
+  STRAIGHT_PAIR: 'sfx-pair.mp3',
+  STRAIGHT_TRIPLE: 'sfx-pair.mp3',
+  STRAIGHT_FLUSH: 'sfx-single.mp3',   // 同花顺复用 single
+  BOMB_4: 'sfx-bomb.mp3',            // 4-6 张炸 — 80Hz 0.5s 低频轰炸
+  BOMB_5: 'sfx-bomb.mp3',
+  BOMB_6: 'sfx-bomb.mp3',
+  BOMB_7: 'sfx-bomb.mp3',
+  BOMB_8: 'sfx-bomb.mp3',
+  JOKER_BOMB: 'sfx-joker-bomb.mp3',  // 王炸 — 200Hz 0.5s 高频上扫
+  DEAL: 'sfx-deal.mp3',              // 发牌(白噪声 1.5s 模拟洗牌)
+  TICK: 'sfx-tick.mp3',              // 报数 tick — 880Hz 60ms
+}
+
+// v0.4.9:真实 SFX 加载 — 同 BGM 模式,new URL 处理 + Node fallback
+function sfxTrackUrl(name) {
+  try {
+    return new URL(`../assets/audio/${name}`, import.meta.url).href
+  } catch (e) {
+    return `../assets/audio/${name}`  // Node fallback
+  }
+}
+
+// 当前 SFX 用 <audio> 元素
+let sfxAudioEl = null
+let sfxAudioCache = new Map()  // 缓存:trackName → Audio element(避免重复创建)
+
+function playMp3Sfx(trackName) {
+  if (typeof window === 'undefined' || typeof window.Audio !== 'function') {
+    return false  // Node 环境 / 无 Audio
+  }
+  if (sfxMode !== 'real') return false  // 仅 real 模式用 MP3
+  if (!SFX_TRACKS[trackName] && !SFX_TRACKS[trackName.split('_')[0]]) return false
+  const fileName = SFX_TRACKS[trackName]
+  if (!fileName) return false
+  try {
+    let el = sfxAudioCache.get(fileName)
+    if (!el) {
+      el = new window.Audio()
+      el.src = sfxTrackUrl(fileName)
+      el.volume = sfxVol
+      el.preload = 'auto'
+      sfxAudioCache.set(fileName, el)
+    }
+    // 重置播放位置 + play()(允许多次快速播放)
+    el.currentTime = 0
+    const p = el.play()
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => { /* autoplay 阻止,不报错 */ })
+    }
+    return true
+  } catch (e) {
+    return false  // 失败,降级合成
+  }
 }
 
 // 把 MP3 文件名解析成 Vite 可处理的 URL
@@ -846,12 +914,22 @@ function sfxUrgentBeep() {
 
 /**
  * 根据牌型播放对应声效
+ * ★ v0.4.9:优先尝试真实 MP3 采样(sfxMode === 'real'),失败/未启用降级 Web Audio 合成
  * @param {string} type - guandan-engine 的 TYPE 常量
  * @param {number} [count] - 牌张数,可选(用于音高递增)
  */
 function playSfxForType(type, count) {
-  if (!ctx || !sfxEnabled) return
-  if (!type) { sfxSingle(count); return }
+  if (!sfxEnabled) return
+  if (!type) {
+    if (sfxMode === 'real' && playMp3Sfx('SINGLE')) return
+    sfxSingle(count); return
+  }
+  // ★ v0.4.9:real 模式优先 MP3
+  if (sfxMode === 'real') {
+    if (playMp3Sfx(type)) return  // MP3 播放成功,直接返回
+    // MP3 失败(sfxMode='real' 但文件不在/load 失败)→ 降级合成
+  }
+  if (!ctx) return  // 合成路径需要 ctx
   if (type === 'JOKER_BOMB') return sfxJokerBomb()
   if (typeof type === 'string' && type.startsWith('BOMB')) {
     // BOMB_6+ 用 sfxSuperBomb
@@ -868,10 +946,33 @@ function playSfxForType(type, count) {
   sfxSingle(count)
 }
 
+/**
+ * ★ v0.4.9:设置 SFX 模式 + 音量同步
+ * @param {string} mode - 'synth'(默认,Web Audio 合成) | 'real'(MP3 真实采样)
+ */
+function setSfxMode(mode) {
+  if (mode !== 'synth' && mode !== 'real') return
+  sfxMode = mode
+  // real 模式:同步所有缓存 audio 元素音量
+  if (mode === 'real') {
+    for (const el of sfxAudioCache.values()) {
+      try { el.volume = sfxVol } catch (e) { /* ignore */ }
+    }
+  }
+}
+function getSfxMode() { return sfxMode }
+function isSfxModeReal() { return sfxMode === 'real' }
+
 function setSfxEnabled(on) { sfxEnabled = !!on }
 function setSfxVolume(v) {
   sfxVol = clamp01(v)
   if (sfxGain) sfxGain.gain.value = sfxVol
+  // ★ v0.4.9:real 模式同步所有缓存 audio 元素
+  if (sfxMode === 'real') {
+    for (const el of sfxAudioCache.values()) {
+      try { el.volume = sfxVol } catch (e) { /* ignore */ }
+    }
+  }
 }
 function setMasterVolume(v) {
   masterVol = clamp01(v)
@@ -893,6 +994,8 @@ export {
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
+  // ★ v0.4.9:SFX 模式切换(synth / real)
+  setSfxMode, getSfxMode, isSfxModeReal,
   setMasterVolume,
   getCtx,
   destroyAudio,
@@ -905,6 +1008,7 @@ const audio = {
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
+  setSfxMode, getSfxMode, isSfxModeReal,
   setMasterVolume,
   getCtx,
 }

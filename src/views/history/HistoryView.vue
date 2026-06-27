@@ -4,14 +4,64 @@
     <h1 class="title">本地战绩</h1>
     <p class="subtitle">只存本机,不上传任何服务器</p>
 
-    <div v-if="history.length > 0" class="stat-card">
-      <div class="stat-item"><div class="stat-num">{{ history.length }}</div><div class="stat-label">总对局</div></div>
-      <div class="stat-item"><div class="stat-num">{{ winCount }}</div><div class="stat-label">胜方次数</div></div>
-      <div class="stat-item"><div class="stat-num">{{ totalLevelUp }}</div><div class="stat-label">累计升级</div></div>
+    <!-- ★ v0.4.9:扩展统计区(胜率 / 平均升级 / 连胜 / 名次分布) -->
+    <div v-if="history.length > 0" class="stat-card stat-card-extended">
+      <div class="stat-item">
+        <div class="stat-num">{{ summary.totalGames }}</div>
+        <div class="stat-label">总对局</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ summary.wins }}</div>
+        <div class="stat-label">胜方次数</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num highlight">{{ (summary.winRate * 100).toFixed(1) }}%</div>
+        <div class="stat-label">胜率</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ summary.avgLevelUp.toFixed(2) }}</div>
+        <div class="stat-label">平均升级/局</div>
+      </div>
+    </div>
+
+    <!-- ★ v0.4.9:连胜 + 最近 5 局胜负形 -->
+    <div v-if="history.length > 0" class="form-card">
+      <div class="form-row">
+        <span class="form-label">当前连胜</span>
+        <span class="form-value" :class="streakClass">
+          <template v-if="summary.streak > 0">🔥 {{ summary.streak }} 连胜</template>
+          <template v-else-if="summary.streak < 0">❄️ {{ -summary.streak }} 连败</template>
+          <template v-else>— 平</template>
+        </span>
+      </div>
+      <div class="form-row">
+        <span class="form-label">最近 5 局</span>
+        <span class="form-value form-recent">
+          <span v-for="(r, i) in summary.recentForm" :key="i" :class="['form-cell', r === 'W' ? 'win' : 'lose']">
+            {{ r }}
+          </span>
+          <span v-if="summary.recentForm.length === 0" class="form-empty">—</span>
+        </span>
+      </div>
+      <div class="form-row">
+        <span class="form-label">名次分布</span>
+        <span class="form-value form-rank">
+          <span class="rank-tag gold">头 {{ summary.rankDistribution.first }}</span>
+          <span class="rank-tag silver">二 {{ summary.rankDistribution.second }}</span>
+          <span class="rank-tag bronze">三 {{ summary.rankDistribution.third }}</span>
+          <span class="rank-tag last">末 {{ summary.rankDistribution.last }}</span>
+        </span>
+      </div>
     </div>
 
     <!-- v3.7 P2:战绩图表(柱状 + 折线,零依赖 SVG) -->
     <HistoryChart :history="history" />
+
+    <!-- ★ v0.4.9:升级速度趋势图(纯 SVG,无依赖) -->
+    <div v-if="history.length >= 2" class="trend-card">
+      <h3 class="trend-title">升级速度趋势(滚动平均 5 局)</h3>
+      <LevelUpTrendChart :records="history" :window-size="5" />
+    </div>
 
     <div v-if="history.length === 0" class="empty">
       <div class="empty-icon">📋</div>
@@ -48,15 +98,21 @@
 import { ref, computed, onMounted } from 'vue'
 import storage from '@/common/storage.js'
 import HistoryChart from '@/components/HistoryChart.vue'
+import LevelUpTrendChart from '@/components/LevelUpTrendChart.vue'
+import { computeSummary, isMyTeamWin } from '@/common/history.js'
+
 const history = ref([])
-const winCount = computed(() => history.value.filter(r => isMyTeamWin(r, 0)).length)
-const totalLevelUp = computed(() => history.value.reduce((s, r) => s + r.levelUp, 0))
+
+// ★ v0.4.9:用 computeSummary 一次拿全部统计
+const summary = computed(() => computeSummary(history.value, 0))
+const streakClass = computed(() => {
+  const s = summary.value.streak
+  if (s > 0) return 'streak-win'
+  if (s < 0) return 'streak-lose'
+  return ''
+})
+
 onMounted(() => { history.value = storage.getHistory() })
-function isMyTeamWin(rec, mySeat) {
-  const myTeam = mySeat % 2
-  const winnerSeat = rec.ranks[0]
-  return myTeam === winnerSeat % 2
-}
 function rankColor(pos) { return ['gold','silver','bronze','last'][pos] }
 function formatTime(t) {
   const d = new Date(t)
@@ -99,7 +155,62 @@ function onClear() {
 }
 .stat-item { flex: 1; text-align: center; }
 .stat-num { font-size: 28px; font-weight: bold; color: #ffeb3b; }
+.stat-num.highlight { color: #4caf50; }
 .stat-label { font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 2px; }
+/* ★ v0.4.9:扩展统计(4 项:总/胜/胜率/平均升级) */
+.stat-card-extended { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+.stat-card-extended .stat-num { font-size: 22px; }
+
+/* ★ v0.4.9:连胜 / 最近 5 局 / 名次分布 */
+.form-card {
+  position: relative; z-index: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+  color: #fff;
+}
+.form-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.form-row + .form-row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.form-label { color: rgba(255, 255, 255, 0.7); }
+.form-value { font-weight: 700; }
+.streak-win { color: #4caf50; }
+.streak-lose { color: #e94560; }
+.form-recent { display: flex; gap: 4px; }
+.form-cell {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px;
+  border-radius: 4px; font-size: 12px; font-weight: 900;
+}
+.form-cell.win { background: rgba(76, 175, 80, 0.3); color: #4caf50; }
+.form-cell.lose { background: rgba(244, 67, 54, 0.25); color: #e57373; }
+.form-empty { color: rgba(255, 255, 255, 0.4); }
+.form-rank { display: flex; gap: 6px; flex-wrap: wrap; }
+.rank-tag {
+  display: inline-block; padding: 2px 8px;
+  border-radius: 10px; font-size: 12px;
+}
+.rank-tag.gold { background: rgba(255, 215, 0, 0.18); color: #ffd700; }
+.rank-tag.silver { background: rgba(192, 192, 192, 0.18); color: #c0c0c0; }
+.rank-tag.bronze { background: rgba(205, 127, 50, 0.18); color: #cd7f32; }
+.rank-tag.last { background: rgba(255, 255, 255, 0.1); color: #999; }
+
+/* ★ v0.4.9:升级速度趋势卡片 */
+.trend-card {
+  position: relative; z-index: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+  color: #fff;
+}
+.trend-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
 .empty { text-align: center; padding: 60px 0; color: #fff; }
 .empty-icon { font-size: 60px; opacity: 0.5; }
 .empty-text { font-size: 18px; margin-top: 12px; }
