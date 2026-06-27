@@ -232,15 +232,22 @@ function onBack() {
 .page {
   position: relative;
   min-height: 100vh;
-  background: linear-gradient(180deg, #1a2a5e 0%, #2a3464 50%, #1a3a2a 100%);
+  /* v3.x:页面底色用 felt 翡翠椭圆 + 木纹边 — 跟 RoomView/GameView 视觉语言一致 */
+  background: var(--bg-deep);
   padding: 60px 20px 40px;
   color: #fff;
 }
 .bg {
   position: fixed; inset: 0;
+  /* v3.x:felt 椭圆牌桌 + 金色径向聚光(中央)+ 木纹外圈 */
   background:
-    radial-gradient(circle at 30% 20%, rgba(108, 195, 245, 0.15), transparent 50%),
-    radial-gradient(circle at 70% 80%, rgba(47, 138, 79, 0.3), transparent 50%);
+    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
+    radial-gradient(ellipse 95% 70% at 50% 55%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%),
+    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
+  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4));
   z-index: 0;
 }
 .topbar, .card, .footer { position: relative; z-index: 1; }
@@ -330,17 +337,19 @@ function onBack() {
 .vol-slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 16px; height: 16px;
-  background: linear-gradient(180deg, #6cc3f5, #2a85d0);
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
   border: 2px solid #fff;
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
 }
 .vol-slider::-moz-range-thumb {
   width: 16px; height: 16px;
-  background: linear-gradient(180deg, #6cc3f5, #2a85d0);
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
   border: 2px solid #fff;
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
 }
 .vol-slider:disabled { cursor: not-allowed; }
 .vol-val {
@@ -404,9 +413,11 @@ function onBack() {
 }
 .seg-btn:hover:not(.disabled):not(:disabled) { color: #fff; }
 .seg-btn.active {
-  background: linear-gradient(180deg, #6cc3f5, #2a85d0);
-  color: #fff;
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
+  color: #1a1a1a;
   font-weight: bold;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
 }
 .seg-btn.disabled, .seg-btn:disabled {
   opacity: 0.4;

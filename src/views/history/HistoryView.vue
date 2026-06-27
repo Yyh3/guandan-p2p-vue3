@@ -75,8 +75,15 @@ function onClear() {
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: #2a3464; padding: 70px 20px 30px; }
-.bg { position: fixed; inset: 0; background: radial-gradient(circle at 30% 20%, rgba(108, 195, 245, 0.15), transparent 50%), radial-gradient(circle at 70% 80%, rgba(47, 138, 79, 0.3), transparent 50%); }
+.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
+.bg { position: fixed; inset: 0; background:
+    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
+    radial-gradient(ellipse 95% 70% at 50% 55%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%),
+    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
+  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
 .title, .subtitle, .stat-card, .empty, .history-list, .action { position: relative; z-index: 1; }
 /* v3.7 P2:让图表卡片也浮在 bg 之上 */
 .chart-card { position: relative; z-index: 1; }
