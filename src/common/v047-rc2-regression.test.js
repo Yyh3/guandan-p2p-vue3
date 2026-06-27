@@ -50,19 +50,23 @@ console.log('\n=== 5.1 host 迁移端到端状态测试(4 端 + game) ===')
   eq('迁移后 hands[0] 等于迁移前 seat 2 的手牌', st1.hands[0], seat2HandBefore)
   // 2) hands[2] 已清空
   eq('迁移后 hands[2] 为空(他现在是 seat 0)', st1.hands[2], [])
-  // 3) 旧 host(seat 0 旧)算作最末位
-  assert('迁移后旧 host seat 0 在 finishedOrder 末位', st1.finishedOrder.includes(0))
+  // 3) 旧 host(seat 0 旧)算作弃赛(不进 finishedOrder,免得新 host 出牌被拒)
+  //   v3.x P2-30 修复(2):migrateHost 改用 abandonedSeats
+  assert('迁移后旧 host seat 0 在 abandonedSeats', st1.abandonedSeats?.includes(0))
+  assert('★ 旧 host seat 0 不在 finishedOrder(可继续出牌)', !st1.finishedOrder.includes(0))
   // 4) currentPlayer:如果之前是 seat 0 或 seat 2 → 应改成 0
-  // 5) 新 host 继续出牌验证 — ★ 已知限制:migrateHost 当前 design 把旧 host(seat 0)
-  //   加进 finishedOrder(line 458),导致新 host(也是 seat 0)在 finishedOrder 里,
-  //   playerPlay 校验 line 128-130 拒绝 seat 0 出牌。
-  //   报告 5.1 写"新 host 可以继续出牌"是期望行为,需要在未来增强 migrateHost
-  //   (区分"被踢"和"已出完",或不让旧 host 加 finishedOrder)
-  //   当前断言:migrateHost 后 hands 正确 remap,后续出牌能力作为后续优化
+  // 5) 新 host 继续出牌验证 — v3.x P2-30 修复(2):migrateHost 用 abandonedSeats
+  //   区分"被踢"和"已出完",新 host(seat 0)不在 finishedOrder,playerPlay 校验通过
+  //   报告 5.1 写"新 host 可以继续出牌"是期望,现在实现
   const st2Check = game.getState()
-  // 验证 playerPlay 在"已 finished"状态下被拒(这反映了当前 API 行为)
-  // 但我们主要验证 hands 已正确 remap,这是 5.1 的核心断言
-  assert('迁移后 hands[0].length=27(seat 2 原始手牌数)', st2Check.hands[0].length === seat2HandLen)
+  assert('★ 迁移后 hands[0].length=27(seat 2 原始手牌数)', st2Check.hands[0].length === seat2HandLen)
+  assert('★ 旧 host seat 0 在 abandonedSeats(弃赛,不算出完)', st2Check.abandonedSeats?.includes(0))
+  assert('★ 旧 host seat 0 不在 finishedOrder(可继续出牌)', !st2Check.finishedOrder.includes(0))
+  // ★ 关键断言:新 host 可以继续出牌
+  game.getState().currentPlayer = 0  // 强制让新 host 行动
+  const firstCard = st2Check.hands[0][0]
+  const playRes = game.playerPlay(0, [firstCard])
+  assert('★ ★ 新 host(seat 0)migrateHost 后能 playerPlay', playRes && playRes.ok === true)
   // 6) lastPlay.who — 验证:由于迁移前可能没出过牌,lastPlay 是 null
   //    这不影响 5.1 核心断言(hands remap + finishedOrder 标记)
   //    如果迁移前有 lastPlay,可单独验证:迁移时 lastPlay.who 若为 0 或 2 → 改成 0
@@ -108,9 +112,9 @@ console.log('\n=== 5.1.3 旧 host seat 加入 finishedOrder ===')
   if (newHostSeat != null) {
     const r = game.migrateHost(0, newHostSeat)
     assert('migrateHost 选未出完的 newHostSeat 返回 true', r === true)
-    // 旧 host 在 finishedOrder 末位
+    // 旧 host 在 abandonedSeats(弃赛,不算"出完牌")— v3.x P2-30
     const st1 = game.getState()
-    assert('迁移后旧 host seat 0 在 finishedOrder 中', st1.finishedOrder.includes(0))
+    assert('迁移后旧 host seat 0 在 abandonedSeats', st1.abandonedSeats?.includes(0))
   } else {
     assert('跳过(其他 3 个都已出完,无法迁移)', true)
   }

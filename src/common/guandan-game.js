@@ -42,6 +42,14 @@ function createGame(opts) {
     leaderPlayer: 0,         // 本局领出者(头游)
     trickHistory: [],        // 历次出牌
     finishedOrder: [],       // 出完牌的顺序 [seat, seat, seat, seat]
+    // ★ v3.x P2-30 修复(2):区分"出完牌"和"弃赛"
+    //   finishedOrder 严格表示"打完全局已出完手牌"的玩家
+    //   abandonedSeats 表示"中途弃赛/被踢"的玩家(本局手牌作废)
+    //   之前 migrateHost 把旧 host 加进 finishedOrder,导致新 host(seat 0)也在
+    //   finishedOrder 里,playerPlay 校验 line 128-130 拒绝 seat 0 出牌。
+    //   修法:migrateHost 改用 abandonedSeats,playerPlay 仍查 finishedOrder
+    //   (只拒绝"已出完牌"玩家),"弃赛"玩家不影响新 host 出牌。
+    abandonedSeats: [],      // 弃赛/被踢的 seat 列表(中途,不算出完)
     passCount: 0,            // 连续 pass 数
     tribute: null,           // 进贡信息
     ghost: null,             // 逢人配(红桃级牌)
@@ -94,6 +102,8 @@ function createGame(opts) {
     state.tableCards = []
     state.lastPlay = null
     state.finishedOrder = []
+    // v3.x P2-30 修复(2):新一局清空 abandonedSeats
+    state.abandonedSeats = []
     state.passCount = 0
     state.trickHistory = []
     state.tribute = null
@@ -225,7 +235,9 @@ function createGame(opts) {
       //   改用 includes(i) 正确判断"玩家 i 是否已出完牌"。
       emit('trickEnd', {
         leader,
-        handsRemaining: state.hands.map((h, i) => state.finishedOrder.includes(i) ? 0 : h.length),
+        handsRemaining: state.hands.map((h, i) =>
+          (state.finishedOrder.includes(i) || state.abandonedSeats.includes(i)) ? 0 : h.length
+        ),
       })
       // ★ 静态审查 BUG-B 修复:一墩结束后只 emit('trickEnd') 不 emit('turn'),
       //   useGameLogic 主要通过 'turn' 事件同步 currentPlayer / lastPlay /
@@ -244,15 +256,16 @@ function createGame(opts) {
 
   function nextTurn(isFirstPlayer) {
     let next = (state.currentPlayer + 1) % 4
-    // 跳过已出完牌的
+    // 跳过已出完牌 + 弃赛的
     // v3.x P0-6 修复:加 safety 计数器,极端竞态下 4 人都进 finishedOrder
     // 时(理论上不该发生,playerPlay 处已 ≥3 直接 finishRound,但兜底)
     // 不能死循环
+    // v3.x P2-30 修复(2):弃赛玩家(abandonedSeats)也要跳过,避免 nextTurn 落到旧 host
     let safety = 0
-    while (state.finishedOrder.includes(next)) {
+    while (state.finishedOrder.includes(next) || state.abandonedSeats.includes(next)) {
       next = (next + 1) % 4
       if (++safety >= 4) {
-        // 所有 4 人都已 finished — 直接结束本局兜底
+        // 所有 4 人都已 finished / 弃赛 — 直接结束本局兜底
         finishRound()
         return
       }
@@ -326,9 +339,11 @@ function createGame(opts) {
       return
     }
     state.phase = 'finished'
-    // 末位补齐
+    // 末位补齐 — 排除已弃赛玩家(他们手牌已废,不是"出完牌"末位)
     if (state.finishedOrder.length === 3) {
-      const last = [0, 1, 2, 3].find(s => !state.finishedOrder.includes(s))
+      const last = [0, 1, 2, 3].find(s =>
+        !state.finishedOrder.includes(s) && !state.abandonedSeats.includes(s)
+      )
       if (last != null) state.finishedOrder.push(last)
     }
     const ranks = state.finishedOrder.slice()
@@ -450,12 +465,13 @@ function createGame(opts) {
       // 防御:手牌不存在时不做(空 hands)
       if (!state.hands[oldHostSeat] || !state.hands[newHostSeat]) return false
 
-      // 1) 旧 host 走人 → 他的 27 张牌"弃牌" → 加入 finishedOrder 末位(算最末)
-      //    这样 finishedOrder 长度可推进(让其他玩家计算"末位补齐"逻辑)
+      // 1) 旧 host 走人 → 他的 27 张牌"弃牌" → 加入 abandonedSeats
+      //    v3.x P2-30 修复(2):改用 abandonedSeats 而不是 finishedOrder,
+      //    避免新 host(seat 0)也在 finishedOrder 里导致 playerPlay 拒绝出牌
+      //    finishedOrder 严格表示"出完牌"语义,弃赛不算出完
       const oldHostHand = state.hands[oldHostSeat]
-      // 把旧 host 算作最末位(若他还不在 finishedOrder 里)
-      if (!state.finishedOrder.includes(oldHostSeat)) {
-        state.finishedOrder.push(oldHostSeat)
+      if (!state.abandonedSeats.includes(oldHostSeat)) {
+        state.abandonedSeats.push(oldHostSeat)
       }
       // 旧 host 的 27 张牌作废(清空)
       state.hands[oldHostSeat] = []
@@ -504,7 +520,7 @@ state.trickHistory = state.trickHistory.map(h => {
         if (i >= 0) aiPlayers.splice(i, 1)
       }
 
-      emit('host:migrated', { oldHostSeat, newHostSeat, finishedOrder: state.finishedOrder.slice() })
+      emit('host:migrated', { oldHostSeat, newHostSeat, finishedOrder: state.finishedOrder.slice(), abandonedSeats: state.abandonedSeats.slice() })
       return true
     },
 
@@ -529,6 +545,10 @@ state.trickHistory = state.trickHistory.map(h => {
         // finishedOrder 必须是 0..3 的子集
         const ok = Array.isArray(snap.finishedOrder) && snap.finishedOrder.every(s => isValidSeat(s))
         if (ok) state.finishedOrder = snap.finishedOrder.slice()
+      }
+      // v3.x P2-30 修复(2):snapshot 应用 abandonedSeats(支持 P2P 同步 host 迁移)
+      if (Array.isArray(snap.abandonedSeats) && snap.abandonedSeats.every(s => isValidSeat(s))) {
+        state.abandonedSeats = snap.abandonedSeats.slice()
       }
       if (typeof snap.passCount === 'number') state.passCount = snap.passCount
       // ★ BUG-RC2-005 修复:nullable 字段用 'in' 判断,支持清空到 null
