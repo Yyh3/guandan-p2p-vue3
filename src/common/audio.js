@@ -1,20 +1,29 @@
 /**
- * Web Audio API 合成音频
+ * 音频系统 — v0.4.8 N-3 真实音乐集成
  *
- * 设计原则:
- *   - 零外部依赖 / 零音频文件
- *   - 全部用 OscillatorNode + GainNode + AudioBufferSourceNode + BiquadFilterNode + DelayNode 实时合成
- *   - 版权干净,无第三方音频资源
+ * BGM 部分:
+ *   - v0.4.8 前:Web Audio API 合成(零文件依赖,但质感有限)
+ *   - v0.4.8 起:7 首 Kevin MacLeod CC-BY BGM(MP3 真实音频,128kbps 压缩后 ~27MB)
+ *     加载失败时自动降级 Web Audio 合成(不会让游戏无声音)
+ *   - 风格对应:
+ *     - 'energetic' / 'normal' / 'main'  → bgm-chinese.mp3 (Shenyang,中式器乐主对局)
+ *     - 'calm'      / 'idle'    / 'lobby' → bgm-carefree.mp3 (Carefree,轻快明快,开局/等待/结算)
+ *     - 'bossa'                              → bgm-bossa.mp3 (Bossa Antigua,慵懒闲适备选)
+ *     - 'ripples'                            → bgm-ripples.mp3 (舒缓氛围,残局紧张)
+ *     - 'intense' / 'drums'                  → bgm-asian-drums.mp3 (亚洲鼓乐,炸弹连击)
+ *     - 'lobby' / 'warm'                     → bgm-firesong.mp3 (温暖民谣,大厅/房间等待)
+ *     - 'casual'                             → bgm-galway.mp3 (爱尔兰风笛,轻松休闲)
  *
- * 模块:
- *   - BGM:  鼓点循环(C 大调激昂 loop,280ms 拍 + kick + hi-hat + snare + 旋律)
- *   - SFX:  5 种牌型不同音色 + 炸弹层级 + 王炸 + 超级炸弹 + 报数 tick + 警告 + 紧急蜂鸣
+ * SFX 部分:
+ *   - 仍是 Web Audio API 合成(5 种牌型 + 炸弹层级 + 王炸 + 超级炸弹 + 报数 tick + 警告 + 蜂鸣)
+ *
+ * 致谢:BGM 全部来自 Kevin MacLeod (incompetech.com),CC BY 4.0 授权
  *
  * 用法:
  *   import audio from '@/common/audio.js'
  *   audio.unlock()                          // 首次用户交互后调用,解锁 AudioContext
  *   audio.startBgm()                        // 开背景音乐(默认 energetic 风格)
- *   audio.setBgmStyle('energetic'|'calm')    // 切换 BGM 风格
+ *   audio.setBgmStyle('energetic'|'calm'|...) // 切换 BGM 风格(支持 7 种 key)
  *   audio.stopBgm()
  *   audio.setBgmEnabled(bool)
  *   audio.setBgmVolume(0..1)
@@ -51,6 +60,81 @@ let bgmPadIdx = 0
 // 报数 tick cooldown(避免连续出牌爆音)
 let lastTickAt = 0
 const TICK_COOLDOWN_MS = 500
+
+// v0.4.8 N-3:真实 BGM 加载 — Kevin MacLeod CC-BY 7 首 MP3
+//   - Vite 用 new URL(import.meta.url) 静态资源处理,会自动 hash + 复制到 dist/assets/
+//   - Node 测试环境跑 audio.test.js 时不会触发 startBgmMp3,但 new URL 调用本身不 throw
+//   - 用 key → URL map 风格切换;加载失败时降级 Web Audio 合成
+const BGM_TRACKS = {
+  // 核心 3 首(终审建议保留)
+  energetic: 'bgm-chinese.mp3',     // 主对局 — 中式器乐,茶馆打牌氛围
+  normal:    'bgm-chinese.mp3',
+  main:      'bgm-chinese.mp3',
+  calm:      'bgm-carefree.mp3',    // 开局/等待/结算 — 轻快明快
+  idle:      'bgm-carefree.mp3',
+  lobby:     'bgm-carefree.mp3',
+  bossa:     'bgm-bossa.mp3',       // 备选 — Bossa Antigua 慵懒闲适
+  // 备用 4 首
+  ripples:   'bgm-ripples.mp3',     // 舒缓氛围 — 残局紧张时刻
+  intense:   'bgm-asian-drums.mp3', // 亚洲鼓乐 — 炸弹连击
+  drums:     'bgm-asian-drums.mp3',
+  warm:      'bgm-firesong.mp3',    // 温暖民谣 — 大厅/房间等待
+  casual:    'bgm-galway.mp3',      // 爱尔兰风笛 — 轻松休闲
+}
+
+// 把 MP3 文件名解析成 Vite 可处理的 URL
+//   Vite 编译时把 new URL('../assets/audio/foo.mp3', import.meta.url) 替换成打包后 URL
+//   Node 测试环境(无 import.meta.url 时)降级到相对路径,不会 throw
+function bgmTrackUrl(name) {
+  try {
+    return new URL(`../assets/audio/${name}`, import.meta.url).href
+  } catch (e) {
+    return `../assets/audio/${name}`  // Node fallback
+  }
+}
+
+// 当前 BGM 用 <audio> 元素(浏览器原生,无需 Web Audio 依赖)
+let bgmAudioEl = null
+// 是否正在使用真实 MP3(true) / Web Audio 合成 fallback(false)
+let bgmUseMp3 = false
+
+function stopMp3Bgm() {
+  if (bgmAudioEl) {
+    try { bgmAudioEl.pause() } catch (e) { /* swallow */ }
+    try { bgmAudioEl.removeAttribute('src') } catch (e) { /* swallow */ }
+    bgmAudioEl = null
+  }
+  bgmUseMp3 = false
+}
+
+function startMp3Bgm(style) {
+  if (typeof window === 'undefined' || typeof window.Audio !== 'function') {
+    return false  // Node 环境 / 无 Audio 全局,放弃 MP3
+  }
+  const fileName = BGM_TRACKS[style] || BGM_TRACKS.energetic
+  const url = bgmTrackUrl(fileName)
+  try {
+    stopMp3Bgm()  // 关旧 audio
+    const el = new window.Audio()
+    el.src = url
+    el.loop = true
+    el.volume = bgmVol
+    el.preload = 'auto'
+    // 自动播放可能被浏览器策略阻止 → catch 不报错
+    const playPromise = el.play()
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        // 用户没交互前 play 失败,标记为 not-started,等 unlock() 后再试
+        bgmUseMp3 = false
+      })
+    }
+    bgmAudioEl = el
+    bgmUseMp3 = true
+    return true
+  } catch (e) {
+    return false  // 加载失败,降级合成
+  }
+}
 
 function getCtx() {
   if (ctx) return ctx
@@ -107,12 +191,23 @@ function destroyAudio() {
  * 解锁 AudioContext(浏览器策略要求用户首次交互后才能播放音频)
  */
 function unlock() {
+  // v0.4.8 N-3:解锁 AudioContext + 触发 MP3 audio.play()(浏览器策略要求)
+  let ok = false
   const c = getCtx()
-  if (!c) return false
-  if (c.state === 'suspended') {
-    c.resume().catch(() => {})
+  if (c) {
+    if (c.state === 'suspended') {
+      c.resume().catch(() => {})
+    }
+    ok = true
   }
-  return true
+  // 如果之前 MP3 因策略被拒,这里再 play 一次
+  if (bgmAudioEl && bgmAudioEl.paused) {
+    try {
+      const p = bgmAudioEl.play()
+      if (p && typeof p.catch === 'function') p.catch(() => {})
+    } catch (e) { /* swallow */ }
+  }
+  return ok
 }
 
 // ====== Reverb 总线(共享,挂到 sfxGain) ======
@@ -383,15 +478,22 @@ function bgmTick() {
 
 function startBgm() {
   if (bgmStarted) return
+  bgmStarted = true
+  // v0.4.8 N-3:优先尝试 MP3 真实音频,失败降级 Web Audio 合成
+  if (startMp3Bgm(bgmStyle)) {
+    return  // MP3 启动成功,直接返回(不再走合成)
+  }
+  // 降级:Web Audio 合成
   const c = getCtx()
   if (!c) return
   if (c.state === 'suspended') c.resume().catch(() => {})
-  bgmStarted = true
   bgmBeatCount = 0
   bgmTick()
 }
 
 function stopBgm() {
+  // v0.4.8 N-3:同时停 MP3 和合成 BGM
+  stopMp3Bgm()
   if (bgmTimer) {
     clearTimeout(bgmTimer)
     bgmTimer = null
@@ -406,18 +508,38 @@ function setBgmEnabled(on) {
 }
 
 function setBgmStyle(style) {
-  if (style !== 'energetic' && style !== 'calm') return
+  // v0.4.8 N-3:支持 7 种 BGM 风格 key(任何 BGM_TRACKS 里的 key 都接受)
+  //   兼容旧版 'energetic' | 'calm'
+  const allowed = Object.keys(BGM_TRACKS)
+  if (!allowed.includes(style)) return
+  const changed = bgmStyle !== style
   bgmStyle = style
+  // 如果当前在播放,且 style 改了,无缝切歌
+  if (changed && bgmStarted) {
+    if (bgmUseMp3) {
+      // 切 MP3
+      startMp3Bgm(style)
+    } else if (bgmTimer) {
+      // 切合成 — 清掉旧 timer,从新 tempo 重启
+      clearTimeout(bgmTimer)
+      bgmTimer = null
+      bgmBeatCount = 0
+      bgmTick()
+    }
+  }
 }
 
 function isBgmEnabled() { return bgmEnabled }
 function isSfxEnabled() { return sfxEnabled }
 function isBgmStarted() { return bgmStarted }
 function getBgmStyle() { return bgmStyle }
+function isBgmMp3() { return bgmUseMp3 }  // v0.4.8 N-3:用于诊断/测试
 
 function setBgmVolume(v) {
   bgmVol = clamp01(v)
   if (bgmGain) bgmGain.gain.value = bgmVol
+  // v0.4.8 N-3:同步 MP3 音量
+  if (bgmAudioEl) bgmAudioEl.volume = bgmVol
 }
 
 // ====== SFX ======
@@ -767,7 +889,7 @@ function clamp01(v) {
 export {
   unlock,
   startBgm, stopBgm, setBgmEnabled, setBgmVolume, isBgmEnabled, isBgmStarted,
-  setBgmStyle, getBgmStyle,
+  setBgmStyle, getBgmStyle, isBgmMp3,
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
@@ -779,7 +901,7 @@ export {
 const audio = {
   unlock,
   startBgm, stopBgm, setBgmEnabled, setBgmVolume, isBgmEnabled, isBgmStarted,
-  setBgmStyle, getBgmStyle,
+  setBgmStyle, getBgmStyle, isBgmMp3,
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,

@@ -130,6 +130,19 @@
       <p class="card-hint">清空后不可恢复,本机操作不影响对局进行</p>
     </section>
 
+    <!-- 关于 / 致谢 (v0.4.8 N-3) -->
+    <section class="card">
+      <h2 class="card-title">ℹ️ 关于</h2>
+      <p class="card-hint">
+        掼蛋 P2P 局域网版 v0.4.8<br>
+        离线 4 人掼蛋,无网/无流量/无服务器
+      </p>
+      <p class="card-hint">
+        🎵 背景音乐:BGM by Kevin MacLeod (incompetech.com),Licensed under
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+      </p>
+    </section>
+
     <p class="footer">设置仅保存到本机,不同步到云端</p>
   </div>
 </template>
@@ -154,9 +167,15 @@ const historyCount = ref(0)
 const nickname = ref('')
 const avatar = ref('')
 
+// v0.4.8 N-3:7 首真实 BGM(Kevin MacLeod CC-BY),用户可在设置页切换
 const bgmStyles = [
-  { id: 'calm', label: '平静' },
-  { id: 'energetic', label: '激昂' },
+  { id: 'energetic', label: '中式器乐' },  // bgm-chinese.mp3 主对局
+  { id: 'calm', label: '轻快明快' },       // bgm-carefree.mp3 等待/结算
+  { id: 'bossa', label: 'Bossa 爵士' },    // bgm-bossa.mp3 慵懒闲适
+  { id: 'ripples', label: '舒缓氛围' },    // bgm-ripples.mp3 残局
+  { id: 'intense', label: '亚洲鼓乐' },    // bgm-asian-drums.mp3 炸弹连击
+  { id: 'warm', label: '温暖民谣' },       // bgm-firesong.mp3 大厅
+  { id: 'casual', label: '爱尔兰风笛' },   // bgm-galway.mp3 休闲
 ]
 const themes = [
   { id: 'dark', label: '深色' },
