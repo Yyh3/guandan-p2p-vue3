@@ -362,6 +362,13 @@ function _handleHostMessage(msg) {
       const updated = { ...peers.get(assignedSeat), ...msg.payload, uuid: newUuid }
       peers.set(assignedSeat, updated)
       lastHeartbeat.set(assignedSeat, Date.now())
+      // ★ GD-RC-002 修复:host 端 _kickedSeats 在新玩家分配/复用 seat 时清理。
+      //   之前清理代码写在 joiner 端 SYNC handler(line 468 附近),
+      //   joiner 端 _kickedSeats 通常为空,清没意义;host 端残留未真正清理
+      //   → 新玩家 HEARTBEAT 仍被 host 忽略 → 再次踢人返回 already kicked
+      if (_kickedSeats.has(assignedSeat)) {
+        _kickedSeats.delete(assignedSeat)
+      }
       emit('peer:update', { seat: assignedSeat, info: updated })
       // ★ WebSocket:告诉 transport 这个 ws 对应哪个 seat,后续定向消息才能路由
       if (transport && typeof transport.bindLastSenderSeat === 'function') {
@@ -390,6 +397,10 @@ function _handleHostMessage(msg) {
     }
     peers.set(assignedSeat, msg.payload)
     lastHeartbeat.set(assignedSeat, Date.now())
+    // ★ GD-RC-002 修复:同上,新分配 seat 时清理 _kickedSeats
+    if (_kickedSeats.has(assignedSeat)) {
+      _kickedSeats.delete(assignedSeat)
+    }
     if (transport && typeof transport.bindLastSenderSeat === 'function') {
       transport.bindLastSenderSeat(assignedSeat)
     }

@@ -309,6 +309,15 @@ function createGame(opts) {
    *   且 finishedOrder 已满 4 人),直接 return,不再 round++ / levelRank / emit('roundEnd')
    *   防御:虽然 useGameLogic 已有 suppressRoundEndBroadcast 标志,但作为底层 API
    *   仍需自带幂等性,避免上层漏调标志或未来新加的调用方重入
+   *
+   * ★ GD-RC-003 修复:加 applyRoundEndFromPayload(p) 权威结算接口。
+   *   旧版 applyRoundEnd() 无参,会按本地 state.finishedOrder 重新计算 levelUp /
+   *   newLevelRank,如果 joiner 端本地状态延迟 / 丢消息导致和 host 不一致,
+   *   会用本地错误数据覆盖 UI ref(只有 UI ref 跟 payload 同步,内部 game.state
+   *   仍然错误),后续继续用错误 game.state 导致状态分叉。
+   *   修法:加权威结算接口,接 host 发的完整 payload(ranks/levelUp/newLevelRank
+   *   /tribute/teamLevels/roundId),不去读本地 state 重新算。同时 roundId
+   *   去重防止重复应用(同一 ROUND_END 被多次重传)。
    */
   function applyRoundEnd() {
     // 幂等性:已结算完成(phase=finished) → 直接返回
@@ -364,6 +373,39 @@ function createGame(opts) {
     // ★ 静态审查 v0.4.5 N-3 闭环:加 applySnapshot 别名(去掉下划线,跟报告建议一致),
     //   原 _applySnapshot 保留(向后兼容旧调用)。语义:接 joiner 端 snapshot 后灌回 state。
     applySnapshot(snap) { return this._applySnapshot(snap) },
+    // ★ GD-RC-003:权威结算 — 接 host 发的完整 payload,不去读本地 state 重新算
+    applyRoundEndFromPayload(p) {
+      if (!p) return
+      const rid = p.roundId
+      // 同一 roundId 已应用过则跳过(去重)
+      if (rid != null) {
+        if (state.lastAppliedRoundId === rid) return
+        state.lastAppliedRoundId = rid
+      }
+      if (Array.isArray(p.ranks) && p.ranks.length === 4) {
+        // 末位补齐(防御)
+        const ranks = p.ranks.slice()
+        state.finishedOrder = ranks
+      }
+      if (typeof p.levelUp === 'number') state.levelUp = p.levelUp
+      if (typeof p.newLevelRank === 'number') state.levelRank = p.newLevelRank
+      if (p.tribute) state.tribute = p.tribute
+      if (Array.isArray(p.teamLevels) && p.teamLevels.length === 2) {
+        state.teamLevels = p.teamLevels.slice()
+      }
+      state.phase = 'finished'
+      // round 不在此处自增(round++ 在 host 端的 applyRoundEnd 走),权威语义:
+      // host 端本地 round 已经走完一轮并 round++,joiner 端只接收结果
+      if (typeof p.round === 'number') state.round = p.round
+      emit('roundEnd', {
+        ranks: state.finishedOrder.slice(),
+        levelUp: state.levelUp,
+        tribute: state.tribute,
+        newLevelRank: state.levelRank,
+        teamLevels: state.teamLevels.slice(),
+        roundId: rid,
+      })
+    },
     // ★ v3.8 P1:运行时把某 seat 加入 AI 列表(断线接管)
     addAIPlayer(seat) {
       if (!aiPlayers.includes(seat)) aiPlayers.push(seat)

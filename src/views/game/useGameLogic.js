@@ -44,6 +44,14 @@ export function useGameLogic(opts = {}) {
     disposers.push(() => { try { net.off(event, handler) } catch (e) {} })
   }
 
+  // ★ GD-RC-001 修复:"网络 host 身份"独立变量,不与 selfSeat 绑定。
+  //   之前大量代码用 `selfSeat === 0` 判定"是否是 host/权威端",但 host 换队友后
+  //   selfSeat 变成 2,本机仍是网络 host,旧判定会误判成"不是 host",导致
+  //   准备 / 开局 / 发牌 / 下一局 / AI 接管 / 快照异常。
+  //   修法:用 net.isHost() 取网络 host 身份(在 useGameLogic 整个生命周期
+  //   都不会变,除非 host 迁移)。后续 host 迁移可单独处理。
+  const isNetworkHost = ref((() => { try { return net.isHost ? !!net.isHost() : false } catch { return false } })())
+
   // ===== 顶层 state =====
   const round = ref(1)
   const levelRank = ref(15)
@@ -147,8 +155,8 @@ export function useGameLogic(opts = {}) {
   //   竞态:network 内部 PROMOTE_HOST_REQUEST 处理会"先到先得"(peers.get(0) 已有新 host 时后到者让位)
   function onPeerLeave(payload) {
     if (!payload || payload.seat !== 0) return
-    // 只 joiner 端触发(selfSeat !== 0 且当前不是 host)
-    if (selfSeat.value === 0) return
+    // ★ GD-RC-001 修复:用 isNetworkHost 判定(原 selfSeat===0 在 host 换队友后失效)
+    if (isNetworkHost.value) return
     if (!isP2PMode.value) return
     // 当前对局已结束 → 不再触发(避免无效迁移)
     if (!game.value) return
@@ -458,10 +466,13 @@ export function useGameLogic(opts = {}) {
     const seed = opts2.seed
     const me = isP2P ? (selfSeat.value || 0) : 0
     if (opts2.forcedLevelRank != null) levelRank.value = opts2.forcedLevelRank
+    // ★ GD-RC-001 修复:isHost 判定用 net.isHost()(网络 host 身份),不用 selfSeat === 0。
+    //   host 换队友后 selfSeat 变成 2,但本机仍是网络 host,isHost 应仍为 true。
+    const isNetworkHost = (() => { try { return net.isHost ? net.isHost() : !isP2P } catch { return !isP2P } })()
     game.value = createGame({
       seats: 4,
       levelRank: levelRank.value,
-      isHost: !isP2P || me === 0,
+      isHost: isNetworkHost,
       aiPlayers: isP2P ? [] : aiPlayers,
       seed: seed,
     })
@@ -548,13 +559,26 @@ export function useGameLogic(opts = {}) {
       stopTimer()
       hintCards.value = []
       mainActionsRef.value?.setShowing(false)
-      // ★ 静态审查 BUG-A 修复:接收到远端 ROUND_END 后再调 applyRoundEnd
-      //   会触发本机 roundEnd 监听器,如果不抑制会再次广播 ROUND_END → 死循环
-      //   suppressRoundEndBroadcast 由 onP2PRoundEnd 在调 applyRoundEnd 前置 true
+      // ★ GD-RC-003 修复:权威 ROUND_END — 携带完整 payload + roundId 去重
+      //   旧版只发 { ranks, levelUp, newLevelRank },joiner 端用本地 state 重算,
+      //   如果 joiner 状态延迟/丢消息,会用本地错误数据覆盖。
+      //   新版加 roundId + tribute + teamLevels + round,joiner 端用
+      //   applyRoundEndFromPayload 不读本地 state,直接用 host 的权威结果。
       if (isP2PMode.value && !suppressRoundEndBroadcast) {
-        net.broadcast({ type: 'ROUND_END', payload: { ranks, levelUp: lu, newLevelRank } })
+        const st = game.value && game.value.getState ? game.value.getState() : null
+        const payload = {
+          ranks,
+          levelUp: lu,
+          newLevelRank,
+          roundId: `r${Date.now()}-${st?.round ?? 0}-${(ranks || []).join('-')}`,
+          tribute: st?.tribute ?? null,
+          teamLevels: st?.teamLevels ?? [newLevelRank, newLevelRank],
+          round: st?.round ?? 0,
+        }
+        net.broadcast({ type: 'ROUND_END', payload })
       }
-      if (!isP2PMode.value || selfSeat.value === 0) {
+      // ★ GD-RC-001 修复:网络 host 才写历史(原 selfSeat===0 在 host 换队友后失效)
+      if (!isP2PMode.value || isNetworkHost.value) {
         storage.addHistory({
           time: Date.now(),
           ranks, levelUp: lu, levelRank: newLevelRank,
@@ -737,7 +761,8 @@ function onAutoFindBest() {
   function onNext() {
     phase.value = 'playing'
     if (isP2PMode.value) {
-      if (selfSeat.value === 0) {
+      // ★ GD-RC-001 修复:下一局发牌由网络 host 负责(原 selfSeat===0 失效)
+      if (isNetworkHost.value) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         initGame({ isP2P: true, seed: pendingSeed })
         setTimeout(() => {
@@ -792,7 +817,8 @@ function onAutoFindBest() {
 
   function onP2PDeal(payload, from, msg) {
     if (!payload || payload.seed == null) return
-    if (selfSeat.value === 0) return
+    // ★ GD-RC-001 修复:网络 host 跳过(自己发的),用 isNetworkHost 判定
+    if (isNetworkHost.value) return
     initGame({ isP2P: true, seed: payload.seed, forcedLevelRank: payload.levelRank })
   }
   function onP2PPlay(payload) {
@@ -810,12 +836,26 @@ function onAutoFindBest() {
     try { game.value.applyPass(payload.seat) } catch (e) { console.warn('applyPass err', e) }
   }
   // ★ 静态审查 BUG-A 修复:远端 ROUND_END 调 applyRoundEnd 时抑制再次广播
+  // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false
   function onP2PRoundEnd(payload) {
     if (!payload || !game.value) return
     suppressRoundEndBroadcast = true
     try {
-      game.value.applyRoundEnd()
+      // 优先用权威接口(接 host 完整 payload),fallback 旧 applyRoundEnd
+      if (game.value.applyRoundEndFromPayload) {
+        game.value.applyRoundEndFromPayload({
+          ranks: payload.ranks,
+          levelUp: payload.levelUp,
+          newLevelRank: payload.newLevelRank,
+          roundId: payload.roundId,
+          tribute: payload.tribute,
+          teamLevels: payload.teamLevels,
+          round: payload.round,
+        })
+      } else {
+        game.value.applyRoundEnd()
+      }
     } catch (e) { console.warn('applyRoundEnd err', e) }
     finally {
       suppressRoundEndBroadcast = false
@@ -829,13 +869,45 @@ function onAutoFindBest() {
     phase.value = 'finished'
     stopTimer()
   }
+  // ★ GD-RC-005 修复:snapshot 接收端用 targetSeat 判定(原 seat: 0 语义混乱)
+  //   host 定向 sendTo(connSeat, { type: 'STATE_SNAPSHOT', targetSeat, snapshot })
+  //   joiner 收到后判断 targetSeat === selfSeat 才应用,避免非目标 joiner 也被覆盖
   function onP2PStateSnapshot(payload) {
     if (!payload || !game.value || !payload.snapshot) return
-    if (payload.seat === selfSeat.value) return
+    // 旧版本(无 targetSeat 字段)是 broadcast,所有非发送方都应用;新版本定向
+    // 旧字段 payload.seat 仍兼容:payload.seat 是发送方 seat,跳过自己
+    if (payload.targetSeat != null) {
+      // 新版定向:只 targetSeat 等于自己时应用
+      if (payload.targetSeat !== selfSeat.value) return
+    } else if (payload.seat != null) {
+      // 旧版 broadcast:跳过发送方
+      if (payload.seat === selfSeat.value) return
+    }
     try {
-      if (game.value._applySnapshot) {
-        game.value._applySnapshot(payload.snapshot)
+      // ★ GD-RC-004 修复:_applySnapshot 之后必须同步刷新 UI refs。
+      //   之前 _applySnapshot 写内部 state + emit('turn') → useGameLogic turn 监听
+      //   只更新 currentPlayer / lastPlay / 计时器 / 选中态,不更新 myHand /
+      //   tableCards / finishedOrder / phase / levelUp。断线重连后 UI 会和
+      //   内部 state 不同步(下次出牌校验失败或 UI 卡住)。
+      if (game.value._applySnapshot || game.value.applySnapshot) {
+        if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
+        else game.value._applySnapshot(payload.snapshot)
+        // 同步刷新 UI refs
+        const st = game.value.getState()
+        currentPlayer.value = st.currentPlayer
+        lastPlay.value = st.lastPlay
+        tableCards.value = st.tableCards || []
+        finishedOrder.value = st.finishedOrder || []
+        phase.value = st.phase
+        levelRank.value = st.levelRank
+        levelUp.value = st.levelUp || 0
+        if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
+          myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+          selected.value = new Array(myHand.value.length).fill(false)
+          selectedColKeys.value = {}
+        }
       } else {
+        // 旧 fallback(没有 _applySnapshot / applySnapshot 的情况)
         const st = game.value.getState()
         currentPlayer.value = payload.snapshot.currentPlayer ?? st.currentPlayer
         lastPlay.value = payload.snapshot.lastPlay ?? st.lastPlay
@@ -867,7 +939,8 @@ function onAutoFindBest() {
       players.value = next
     }
     const cur = game.value.getState().currentPlayer
-    if (cur === seat && selfSeat.value === 0) {
+    // ★ GD-RC-001 修复:网络 host 端自动出牌判定
+    if (cur === seat && isNetworkHost.value) {
       const st = game.value.getState()
       if (st.phase === 'playing') {
         setTimeout(() => {
@@ -940,20 +1013,29 @@ function onAutoFindBest() {
       onNet('host:migrated', onHostMigrated)
       // ★ v3.x P2-29(N-3 闭环):joiner 端监听 host 离开,调 requestPromoteToHost 兜底
       onNet('peer:leave', onPeerLeave)
-      if (selfSeat.value === 0) {
+      // ★ GD-RC-001 修复:网络 host 才接 connect 发 snapshot + 初始发牌
+      //   原 selfSeat===0 在 host 换队友后失效,导致 snapshot 由错误端发 / DEAL 由错误端发
+      if (isNetworkHost.value) {
         // ★ 静态审查 BUG-G 修复:connect 监听器改命名函数 + 加入 disposers,
         //   卸载时 onNet disposers 一起清,避免匿名监听器无法清理导致重复发快照
+        // ★ GD-RC-005 修复:reconnect snapshot 定向发送给新连接 seat 而非广播
         const onConnectSnapshot = ({ seat: connSeat }) => {
           if (!game.value) return
           setTimeout(() => {
             if (!game.value) return
             const st = game.value.getState()
-            net.broadcast({ type: 'STATE_SNAPSHOT', payload: { seat: 0, snapshot: st } })
+            // 定向:用 sendTo + targetSeat 标记接收方,接收端判断 target 决定是否应用
+            try {
+              net.sendTo && net.sendTo(connSeat, {
+                type: 'STATE_SNAPSHOT',
+                payload: { targetSeat: connSeat, snapshot: st },
+              })
+            } catch (e) { /* fallback to broadcast if sendTo not available */ }
           }, 200)
         }
         onNet('connect', onConnectSnapshot)
       }
-      if (selfSeat.value === 0) {
+      if (isNetworkHost.value) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         initGame({ isP2P: true, seed: pendingSeed })
         setTimeout(() => {

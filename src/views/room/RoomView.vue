@@ -572,10 +572,12 @@ function showCopyToast(msg) {
 }
 function onToggleReady() {
   myReady.value = !myReady.value
-  // ★ v3.8 P1 修复:同步自己到 peers(房主自己点"开局"时 ready 也要进 allReady 检查)
-  // 否则 every(p => p.ready) 会因为 peers[0].ready=undefined 永远 false
-  if (isHost.value && peers.has(0)) {
-    peers.set(0, { ...peers.get(0), ready: myReady.value })
+  // ★ GD-RC-001 修复:同步自己到 peers 应该用当前 selfSeat(网络 host 换座后
+  //   selfSeat 可能 = 2 而不是 0)。原来硬编码 peers[0] 会导致 host 换队友后
+  //   准备状态错位(自己点准备但 peers[selfSeat].ready 没更新,tryStartGame 失败)
+  const myCurrentSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
+  if (myCurrentSeat != null && peers.has(myCurrentSeat)) {
+    peers.set(myCurrentSeat, { ...peers.get(myCurrentSeat), ready: myReady.value })
   }
   net.broadcast({ type: 'READY', payload: { ready: myReady.value } })
   tryStartGame()
