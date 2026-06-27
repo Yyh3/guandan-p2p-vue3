@@ -95,8 +95,15 @@ function onJoin() {
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: #2a3464; padding: 70px 20px 30px; }
-.bg { position: fixed; inset: 0; background: radial-gradient(circle at 50% 20%, rgba(108, 195, 245, 0.15), transparent 50%); }
+.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
+.bg { position: fixed; inset: 0; background:
+    radial-gradient(circle at 50% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
+    radial-gradient(ellipse 95% 70% at 50% 55%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%),
+    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
+  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
 .title, .card, .action { position: relative; z-index: 1; }
 .title { font-size: 28px; font-weight: bold; color: #fff; text-align: center; margin-bottom: 24px; }
 .card {
@@ -123,17 +130,19 @@ function onJoin() {
 }
 .qr-row { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
 .action-btn-small {
-  background: rgba(108,195,245,0.25);
+  background: rgba(212, 175, 55, 0.25);
   color: #fff; border: none; border-radius: 6px;
   padding: 4px 10px; font-size: 12px; cursor: pointer;
 }
 .action { margin-top: 24px; }
 .action-btn {
   width: 100%; height: 56px;
-  background: linear-gradient(135deg, #4caf50, #2e7d32);
-  color: #fff; border: none; border-radius: 14px;
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
+  color: #1a1a1a; border: none; border-radius: 14px;
   font-size: 17px; font-weight: bold;
   cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 215, 0, 0.35);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .action-btn.disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
 </style>

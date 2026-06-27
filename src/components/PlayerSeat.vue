@@ -353,7 +353,7 @@ function formatCoins(n) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: linear-gradient(180deg, #2a3a6a, #0a1233);
+  background: linear-gradient(180deg, var(--emerald-deep, #0a3d2c), var(--emerald-base, #14533b));
   border: 2px solid var(--gold-primary, #d4af37);
   box-shadow:
     0 0 8px rgba(255, 215, 0, 0.4),

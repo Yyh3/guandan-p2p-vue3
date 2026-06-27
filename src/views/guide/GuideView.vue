@@ -58,8 +58,15 @@ const rules = [
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: #2a3464; padding: 70px 20px 30px; }
-.bg { position: fixed; inset: 0; background: radial-gradient(circle at 30% 20%, rgba(108, 195, 245, 0.15), transparent 50%), radial-gradient(circle at 70% 80%, rgba(47, 138, 79, 0.3), transparent 50%); }
+.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
+.bg { position: fixed; inset: 0; background:
+    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
+    radial-gradient(ellipse 95% 70% at 50% 55%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%),
+    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
+  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
 .title, .subtitle, .step-card, .rules-card { position: relative; z-index: 1; }
 .title { font-size: 28px; font-weight: bold; color: #fff; text-align: center; }
 .subtitle { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center; margin-top: 6px; }
@@ -75,11 +82,13 @@ const rules = [
 .step-num {
   flex-shrink: 0;
   width: 36px; height: 36px;
-  background: linear-gradient(135deg, #4caf50, #2e7d32);
-  color: #fff;
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
+  color: #1a1a1a;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 20px; font-weight: bold;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
 }
 .step-body { flex: 1; }
 .step-title { font-size: 16px; font-weight: bold; margin-bottom: 8px; }
