@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <div class="bg"></div>
+    <div class="bg app-half-table-bg"></div>
 
     <!-- 顶部返回 -->
     <header class="topbar">
@@ -293,22 +293,12 @@ function onBack() {
 .page {
   position: relative;
   min-height: 100vh;
-  /* v3.x:页面底色用 felt 翡翠椭圆 + 木纹边 — 跟 RoomView/GameView 视觉语言一致 */
-  background: var(--bg-deep);
+  background: #080b16;
   padding: 60px 20px 40px;
   color: #fff;
+  overflow: hidden;
 }
 .bg {
-  position: fixed; inset: 0;
-  /* v3.x:felt 椭圆牌桌 + 金色径向聚光(中央)+ 木纹外圈 */
-  background:
-    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
-    radial-gradient(ellipse 95% 70% at 50% 55%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%),
-    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
-  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4));
   z-index: 0;
 }
 .topbar, .card, .footer { position: relative; z-index: 1; }
@@ -319,8 +309,8 @@ function onBack() {
   margin-bottom: 24px;
 }
 .back-btn {
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(4, 8, 22, 0.36);
+  border: 1px solid rgba(255,255,255,0.16);
   border-radius: 10px;
   padding: 8px 14px;
   color: #fff;
@@ -330,22 +320,25 @@ function onBack() {
 }
 .back-btn:hover { background: rgba(255,255,255,0.18); }
 .topbar-title {
-  font-size: 18px; font-weight: bold; margin: 0;
+  font-size: 18px; font-weight: 900; margin: 0;
   letter-spacing: 1px;
+  text-shadow: 0 3px 12px rgba(0,0,0,0.35);
 }
 .topbar-spacer { width: 70px; }
 
 /* ====== 卡片 ====== */
 .card {
-  background: rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
   border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 14px 16px 18px;
   margin-bottom: 16px;
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(14px);
 }
 .card-title {
-  font-size: 14px; font-weight: bold;
-  color: rgba(255,255,255,0.85);
+  font-size: 14px; font-weight: 800;
+  color: #ffe37c;
   margin: 4px 0 12px;
   letter-spacing: 1px;
 }
@@ -455,7 +448,7 @@ function onBack() {
 /* ====== 按钮组(segmented) ====== */
 .seg-group {
   display: inline-flex;
-  background: rgba(0,0,0,0.25);
+  background: rgba(4, 8, 22, 0.36);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 10px;
   padding: 2px;
@@ -474,8 +467,8 @@ function onBack() {
 }
 .seg-btn:hover:not(.disabled):not(:disabled) { color: #fff; }
 .seg-btn.active {
-  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
-  color: #1a1a1a;
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308;
   font-weight: bold;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
   box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);

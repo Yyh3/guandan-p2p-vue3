@@ -674,10 +674,10 @@ function onKickPlayer(seat) {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  /* v3.x:深蓝星空 + 翡翠 felt 双重径向渐变 */
-  background:
-    radial-gradient(ellipse at top, var(--room-bg-mid) 0%, var(--room-bg-deep) 35%, transparent 65%),
-    radial-gradient(ellipse at bottom, var(--emerald-bright) 0%, var(--emerald-base) 50%, var(--emerald-deep) 100%);
+  background: var(--room-bg-deep);
+  background-image:
+    radial-gradient(ellipse at 50% 18%, rgba(119, 142, 222, 0.45), transparent 45%),
+    linear-gradient(180deg, #222744 0%, #19152a 56%, #090910 100%);
   color: #fff;
   font: var(--font-body);
 }
@@ -702,15 +702,21 @@ function onKickPlayer(seat) {
   50%      { transform: scale(1.25); opacity: 1; }
 }
 .bg-felt {
-  /* v3.x:felt 椭圆(深翡翠径向渐变 + 内阴影)— 给中下部座位区做桌面感 */
   position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%, -45%);
-  width: 220vw; height: 130vw;
-  max-width: 1400px; max-height: 800px;
+  left: 50%; top: -82vh;
+  transform: translateX(-50%);
+  width: 124vw; height: 160vh;
+  min-width: 720px;
   border-radius: 50%;
   background: var(--felt-base);
-  box-shadow: var(--felt-inner-shadow);
+  background-image:
+    radial-gradient(ellipse at 50% 38%, rgba(156, 184, 255, 0.36), transparent 28%),
+    repeating-radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.035) 0 1px, transparent 1px 7px),
+    radial-gradient(ellipse at 50% 42%, #7387ce 0%, #435690 44%, #2f3768 74%, #202548 100%);
+  box-shadow:
+    0 34px 0 22px rgba(110, 64, 36, 0.7),
+    inset 0 -34px 72px rgba(0,0,0,0.42),
+    inset 0 4px 16px rgba(255,255,255,0.12);
   z-index: 0;
   pointer-events: none;
 }

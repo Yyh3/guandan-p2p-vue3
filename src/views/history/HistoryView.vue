@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <div class="bg"></div>
+    <div class="bg app-half-table-bg"></div>
     <h1 class="title">本地战绩</h1>
     <p class="subtitle">只存本机,不上传任何服务器</p>
 
@@ -131,30 +131,25 @@ function onClear() {
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
-.bg { position: fixed; inset: 0; background:
-    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
-    radial-gradient(ellipse 95% 70% at 50% 55%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%),
-    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
-  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
+.page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
+.bg { z-index: 0; }
 .title, .subtitle, .stat-card, .empty, .history-list, .action { position: relative; z-index: 1; }
 /* v3.7 P2:让图表卡片也浮在 bg 之上 */
 .chart-card { position: relative; z-index: 1; }
-.title { font-size: 28px; font-weight: bold; color: #fff; text-align: center; }
-.subtitle { font-size: 13px; color: rgba(255,255,255,0.5); text-align: center; margin-top: 6px; }
+.title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }
+.subtitle { font-size: 13px; color: rgba(255,255,255,0.7); text-align: center; margin-top: 6px; }
 .stat-card {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
   padding: 16px;
   margin-top: 24px;
   display: flex; color: #fff;
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(14px);
 }
 .stat-item { flex: 1; text-align: center; }
-.stat-num { font-size: 28px; font-weight: bold; color: #ffeb3b; }
+.stat-num { font-size: 28px; font-weight: bold; color: #ffe37c; }
 .stat-num.highlight { color: #4caf50; }
 .stat-label { font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 2px; }
 /* ★ v0.4.9:扩展统计(4 项:总/胜/胜率/平均升级) */
@@ -217,18 +212,20 @@ function onClear() {
 .empty-hint { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px; }
 .history-list { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .history-item {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 12px;
   padding: 14px;
   color: #fff;
+  box-shadow: 0 14px 26px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.14);
+  backdrop-filter: blur(14px);
 }
 .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .item-time { font-size: 12px; color: rgba(255,255,255,0.6); }
 .item-level { font-size: 14px; font-weight: bold; color: #4caf50; }
 .item-level.big { color: #ffeb3b; }
 .item-ranks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.rank-cell { background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; }
+.rank-cell { background: rgba(4, 8, 22, 0.36); padding: 6px 10px; border-radius: 6px; }
 .rank-pos { display: block; font-size: 12px; font-weight: bold; }
 .rank-name { display: block; font-size: 12px; margin-top: 2px; }
 .rank-cell.gold { border-left: 3px solid #ffd700; }
@@ -245,9 +242,9 @@ function onClear() {
 .action { margin-top: 24px; }
 .action-btn {
   width: 100%; height: 48px;
-  background: rgba(244, 67, 54, 0.2);
-  color: #e57373;
-  border: 1px solid #e57373;
+  background: rgba(225, 75, 80, 0.18);
+  color: #ffaaa8;
+  border: 1px solid rgba(255, 132, 128, 0.55);
   border-radius: 12px;
   font-size: 15px; font-weight: bold;
   cursor: pointer;

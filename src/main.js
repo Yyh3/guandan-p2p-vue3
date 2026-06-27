@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
+import './styles/tokens.css'
+import './styles/app-theme.css'
 
 import HomeView from './views/index/HomeView.vue'
 import RoomView from './views/room/RoomView.vue'
@@ -10,6 +12,8 @@ import AIView from './views/ai/AIView.vue'
 import GuideView from './views/guide/GuideView.vue'
 import HistoryView from './views/history/HistoryView.vue'
 import SettingsView from './views/settings/SettingsView.vue'
+import MobileTablePreview from './views/ui-preview/MobileTablePreview.vue'
+import RestartAfterAPreview from './views/ui-preview/RestartAfterAPreview.vue'
 
 const routes = [
   { path: '/', component: HomeView },
@@ -20,6 +24,8 @@ const routes = [
   { path: '/guide', component: GuideView },
   { path: '/history', component: HistoryView },
   { path: '/settings', component: SettingsView },
+  { path: '/ui-preview/table', component: MobileTablePreview },
+  { path: '/ui-preview/restart-after-a', component: RestartAfterAPreview },
 ]
 
 const router = createRouter({

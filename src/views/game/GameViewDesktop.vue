@@ -363,55 +363,45 @@ function onNickEditorConfirmed(p) {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 90% 78% at 50% 50%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%);
+    radial-gradient(ellipse at 50% 18%, rgba(119, 142, 222, 0.45), transparent 45%),
+    linear-gradient(180deg, #222744 0%, #19152a 56%, #090910 100%);
   z-index: 0;
-  /* inset 内阴影模拟 felt 凹陷质感 */
-  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4));
 }
 
-/* v3.x:桌面外圈 — 深绿径向渐变到 --bg-deep(spec §3.1 末段) */
 .bg-felt::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center,
-    transparent 50%,
-    rgba(10, 18, 51, 0.55) 88%,
-    var(--bg-deep, #0a1233) 100%);
+  left: 50%;
+  top: -86vh;
+  width: 124vw;
+  height: 160vh;
+  min-width: 720px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(156, 184, 255, 0.36), transparent 28%),
+    repeating-radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.035) 0 1px, transparent 1px 7px),
+    radial-gradient(ellipse at 50% 42%, #7387ce 0%, #435690 44%, #2f3768 74%, #202548 100%);
+  box-shadow:
+    inset 0 -34px 72px rgba(0,0,0,0.42),
+    inset 0 4px 16px rgba(255,255,255,0.12);
   pointer-events: none;
   z-index: 1;
 }
 
-/* v3.x:木纹边 — 8-12px 厚边框(--wood-edge 渐变到 --wood-edge-light) */
 .bg-wood-edge {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: -98vh;
+  width: 132vw;
+  height: 178vh;
+  min-width: 760px;
+  transform: translateX(-50%);
+  border-radius: 50%;
   background:
-    /* 上下两道 8-12px 厚木纹条 */
-    linear-gradient(180deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) top center / 100% 10px no-repeat,
-    linear-gradient(180deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) bottom center / 100% 10px no-repeat,
-    /* 左右木纹条 */
-    linear-gradient(90deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) left center / 10px 100% no-repeat,
-    linear-gradient(90deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) right center / 10px 100% no-repeat;
-  /* 木纹内阴影: 模拟木条厚度 */
-  box-shadow:
-    inset 0 0 18px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+    radial-gradient(ellipse at 50% 48%, transparent 0 66%, rgba(67, 40, 24, 0.94) 67%, #c18b51 71%, #6e4024 76%, transparent 77%),
+    conic-gradient(from 18deg, #754425, #c18b51, #6d3e21, #ad7441, #553019, #c7965b, #754425);
+  box-shadow: 0 28px 54px rgba(0, 0, 0, 0.56), inset 0 0 28px rgba(255, 235, 180, 0.17);
   z-index: 1;
   pointer-events: none;
 }
@@ -945,11 +935,12 @@ function onNickEditorConfirmed(p) {
 }
 .result-card {
   width: 90%; max-width: 400px;
-  background: linear-gradient(180deg, #fff, #f0f4ff);
-  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,244,255,0.94));
+  border: 1px solid rgba(255,255,255,0.55);
+  border-radius: 16px;
   padding: 24px;
   color: var(--text-on-card);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 24px 50px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.7);
 }
 .result-title { font-size: 22px; font-weight: bold; text-align: center; }
 .result-meta { font-size: 14px; color: #ff7e3d; text-align: center; margin: 8px 0 16px; }
@@ -970,8 +961,8 @@ function onNickEditorConfirmed(p) {
 .result-row.last .result-rank { color: #999; }
 .result-actions { display: flex; gap: 12px; margin-top: 16px; }
 .r-btn { flex: 1; height: 48px; border: none; border-radius: var(--radius-md); font-size: 15px; font-weight: bold; cursor: pointer; }
-.r-btn.primary { background: linear-gradient(180deg, #4caf50, #2e7d32); color: #fff; }
-.r-btn.ghost { background: #eef0f5; color: #888; }
+.r-btn.primary { background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%); color: #3a2308; box-shadow: 0 8px 18px rgba(255, 178, 24, 0.32); }
+.r-btn.ghost { background: #eef0f5; color: #667; }
 
 /* 发牌中:手牌 + 座位牌背 隐藏
  * v2.5:加 transition: none 确保发牌完 .dealing class 移除时,手牌区"立刻"恢复 opacity 1,

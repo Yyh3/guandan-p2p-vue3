@@ -176,30 +176,44 @@ async function closeScanner() {
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
+.page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
 .bg { position: fixed; inset: 0; background:
-    radial-gradient(circle at 50% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
-    radial-gradient(ellipse 95% 70% at 50% 55%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%),
-    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
-  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
+    radial-gradient(ellipse at 50% 18%, rgba(119, 142, 222, 0.45), transparent 45%),
+    linear-gradient(180deg, #222744 0%, #19152a 56%, #090910 100%); overflow: hidden; }
+.bg::before, .bg::after { content: ''; position: absolute; left: 50%; pointer-events: none; transform: translateX(-50%); border-radius: 50%; }
+.bg::before {
+  top: -98vh; width: 132vw; height: 178vh; min-width: 760px;
+  background:
+    radial-gradient(ellipse at 50% 48%, transparent 0 66%, rgba(67, 40, 24, 0.94) 67%, #c18b51 71%, #6e4024 76%, transparent 77%),
+    conic-gradient(from 18deg, #754425, #c18b51, #6d3e21, #ad7441, #553019, #c7965b, #754425);
+  box-shadow: 0 28px 54px rgba(0, 0, 0, 0.56), inset 0 0 28px rgba(255, 235, 180, 0.17);
+}
+.bg::after {
+  top: -86vh; width: 124vw; height: 160vh; min-width: 720px;
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(156, 184, 255, 0.36), transparent 28%),
+    repeating-radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.035) 0 1px, transparent 1px 7px),
+    radial-gradient(ellipse at 50% 42%, #7387ce 0%, #435690 44%, #2f3768 74%, #202548 100%);
+  box-shadow: inset 0 -34px 72px rgba(0,0,0,0.42), inset 0 4px 16px rgba(255,255,255,0.12);
+}
 .title, .card, .action { position: relative; z-index: 1; }
-.title { font-size: 28px; font-weight: bold; color: #fff; text-align: center; margin-bottom: 24px; }
+.title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 24px; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }
 .card {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
   color: #fff;
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(14px);
 }
-.card-title { font-size: 17px; font-weight: bold; margin-bottom: 14px; }
-.card-hint { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 8px; }
+.card-title { font-size: 17px; font-weight: 800; margin-bottom: 14px; color: #ffe37c; }
+.card-hint { font-size: 12px; color: rgba(255,255,255,0.68); margin-top: 8px; line-height: 1.6; }
 .input-row {
   display: flex; align-items: center; gap: 10px;
-  background: rgba(255,255,255,0.1);
+  background: rgba(4, 8, 22, 0.36);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 8px;
   padding: 10px 14px;
 }
@@ -211,19 +225,19 @@ async function closeScanner() {
 }
 .qr-row { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
 .action-btn-small {
-  background: rgba(212, 175, 55, 0.25);
+  background: rgba(255, 210, 78, 0.22);
   color: #fff; border: none; border-radius: 6px;
   padding: 4px 10px; font-size: 12px; cursor: pointer;
 }
 .action { margin-top: 24px; }
 .action-btn {
   width: 100%; height: 56px;
-  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
-  color: #1a1a1a; border: none; border-radius: 14px;
-  font-size: 17px; font-weight: bold;
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308; border: none; border-radius: 12px;
+  font-size: 17px; font-weight: 900;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(255, 215, 0, 0.35);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 8px 18px rgba(255, 178, 24, 0.38), inset 0 1px 0 rgba(255,255,255,0.72);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .action-btn.disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
 

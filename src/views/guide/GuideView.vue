@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <div class="bg"></div>
+    <div class="bg app-half-table-bg"></div>
     <h1 class="title">新手引导</h1>
     <p class="subtitle">3 步搞定,4 人高铁/隧道也能开局</p>
 
@@ -58,52 +58,49 @@ const rules = [
 </script>
 
 <style scoped>
-.page { position: relative; min-height: 100vh; background: var(--bg-deep); padding: 70px 20px 30px; }
-.bg { position: fixed; inset: 0; background:
-    radial-gradient(circle at 30% 20%, rgba(255, 215, 0, 0.10), transparent 55%),
-    radial-gradient(ellipse 95% 70% at 50% 55%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%),
-    linear-gradient(180deg, var(--bg-deep) 0%, var(--emerald-deep, #0a3d2c) 100%);
-  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4)); }
+.page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
+.bg { z-index: 0; }
 .title, .subtitle, .step-card, .rules-card { position: relative; z-index: 1; }
-.title { font-size: 28px; font-weight: bold; color: #fff; text-align: center; }
-.subtitle { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center; margin-top: 6px; }
+.title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }
+.subtitle { font-size: 13px; color: rgba(255,255,255,0.7); text-align: center; margin-top: 6px; }
 .step-card {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
   padding: 18px;
   margin-top: 16px;
   display: flex; gap: 14px;
   color: #fff;
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(14px);
 }
 .step-num {
   flex-shrink: 0;
   width: 36px; height: 36px;
-  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
-  color: #1a1a1a;
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 20px; font-weight: bold;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+  box-shadow: 0 8px 18px rgba(255, 178, 24, 0.32), inset 0 1px 0 rgba(255,255,255,0.72);
 }
 .step-body { flex: 1; }
-.step-title { font-size: 16px; font-weight: bold; margin-bottom: 8px; }
-.step-content p { font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.7; }
+.step-title { font-size: 16px; font-weight: 800; margin-bottom: 8px; color: #ffe37c; }
+.step-content p { font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.7; }
 .rules-card {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
   padding: 20px;
   margin-top: 16px;
   color: #fff;
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(14px);
 }
-.rules-title { font-size: 17px; font-weight: bold; margin-bottom: 12px; }
+.rules-title { font-size: 17px; font-weight: 800; margin-bottom: 12px; color: #ffe37c; }
 .rule-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .rule-item:last-child { border-bottom: none; }
-.rule-label { flex-shrink: 0; font-size: 13px; color: #ffeb3b; font-weight: bold; width: 60px; }
+.rule-label { flex-shrink: 0; font-size: 13px; color: #ffe37c; font-weight: bold; width: 60px; }
 .rule-text { flex: 1; font-size: 13px; color: rgba(255,255,255,0.8); line-height: 1.5; }
 </style>

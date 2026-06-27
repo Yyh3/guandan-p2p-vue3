@@ -410,49 +410,44 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 95% 70% at 50% 50%,
-      var(--emerald-bright, #1f7a55) 0%,
-      var(--emerald-base, #14533b) 55%,
-      var(--emerald-deep, #0a3d2c) 100%);
+    radial-gradient(ellipse at 50% 18%, rgba(119, 142, 222, 0.45), transparent 45%),
+    linear-gradient(180deg, #222744 0%, #19152a 56%, #090910 100%);
   z-index: 0;
-  box-shadow: var(--felt-inner-shadow, inset 0 0 60px rgba(0, 0, 0, 0.4));
 }
 .bg-felt::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center,
-    transparent 50%,
-    rgba(10, 18, 51, 0.5) 88%,
-    var(--bg-deep, #0a1233) 100%);
+  left: 50%;
+  top: -86vh;
+  width: 124vw;
+  height: 160vh;
+  min-width: 720px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(156, 184, 255, 0.36), transparent 28%),
+    repeating-radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.035) 0 1px, transparent 1px 7px),
+    radial-gradient(ellipse at 50% 42%, #7387ce 0%, #435690 44%, #2f3768 74%, #202548 100%);
+  box-shadow:
+    inset 0 -34px 72px rgba(0,0,0,0.42),
+    inset 0 4px 16px rgba(255,255,255,0.12);
   pointer-events: none;
   z-index: 1;
 }
 
-/* v3.x:木纹边 — 移动端用更窄的 6-8px 边框,贴合小屏 */
 .bg-wood-edge {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: -98vh;
+  width: 132vw;
+  height: 178vh;
+  min-width: 760px;
+  transform: translateX(-50%);
+  border-radius: 50%;
   background:
-    linear-gradient(180deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) top center / 100% 8px no-repeat,
-    linear-gradient(180deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) bottom center / 100% 8px no-repeat,
-    linear-gradient(90deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) left center / 8px 100% no-repeat,
-    linear-gradient(90deg,
-      var(--wood-edge, #8B5A2B) 0%,
-      var(--wood-edge-light, #b07a3f) 50%,
-      var(--wood-edge, #8B5A2B) 100%) right center / 8px 100% no-repeat;
-  box-shadow:
-    inset 0 0 14px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+    radial-gradient(ellipse at 50% 48%, transparent 0 66%, rgba(67, 40, 24, 0.94) 67%, #c18b51 71%, #6e4024 76%, transparent 77%),
+    conic-gradient(from 18deg, #754425, #c18b51, #6d3e21, #ad7441, #553019, #c7965b, #754425);
+  box-shadow: 0 28px 54px rgba(0, 0, 0, 0.56), inset 0 0 28px rgba(255, 235, 180, 0.17);
   z-index: 1;
   pointer-events: none;
 }

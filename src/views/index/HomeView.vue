@@ -9,7 +9,7 @@
    -->
   <div class="page">
     <!-- 背景层:深翡翠绿径向 + 菱形金色纹样(opacity 8-12%) -->
-    <div class="bg"></div>
+    <div class="bg app-half-table-bg"></div>
     <div class="bg-pattern" aria-hidden="true"></div>
 
     <!-- 顶部 Logo:牌叠 + "掼蛋" 金色金属渐变 -->
@@ -160,23 +160,15 @@ function onSettings() { router.push('/settings') }
 .page {
   position: relative;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow: hidden;
   padding: 56px 24px 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--emerald-deep);
+  background: #080b16;
 }
 
-/* 背景:深翡翠绿径向渐变 */
 .bg {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    var(--emerald-base) 0%,
-    var(--emerald-deep) 70%
-  );
   z-index: 0;
 }
 
@@ -188,7 +180,8 @@ function onSettings() { router.push('/settings') }
   z-index: 0;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><defs><pattern id='diamond' x='0' y='0' width='60' height='60' patternUnits='userSpaceOnUse'><path d='M 30 6 L 54 30 L 30 54 L 6 30 Z' fill='none' stroke='%23d4af37' stroke-width='1' opacity='0.35'/><circle cx='30' cy='30' r='2' fill='%23d4af37' opacity='0.4'/></pattern></defs><rect width='200' height='200' fill='url(%23diamond)'/></svg>");
   background-repeat: repeat;
-  opacity: 0.1;
+  opacity: 0.08;
+  mix-blend-mode: screen;
 }
 
 /* 顶部内容上浮 */
