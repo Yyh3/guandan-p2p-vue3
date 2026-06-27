@@ -366,6 +366,43 @@ pod install --repo-update
 
 如果还报错，删 `ios/Pods/` 和 `ios/Podfile.lock` 后重试。
 
+### 6.4 Gradle 编译报 `Unsupported class file major version` 或 `requires Java 21+`(v3.x / 2026-06-27 加)
+
+**症状**：
+```
+> Failed to apply plugin 'com.android.internal.application'.
+> Android Gradle plugin requires Java 21 to run. You are currently using Java 18.
+```
+或
+```
+java.lang.UnsupportedClassVersionError: ... class file version 65.0
+```
+
+**原因**：Capacitor 8 / Android Gradle Plugin 8.13.0 强制要求 JDK 21。系统默认 `java` 是 18 或更早。
+
+**修法**：
+```bash
+# 1. 装 openjdk@21
+brew install openjdk@21
+
+# 2. 设 JAVA_HOME(写入 ~/.zshrc 永久生效)
+echo 'export JAVA_HOME=/opt/homebrew/opt/openjdk@21' >> ~/.zshrc
+echo 'export PATH="$JAVA_HOME/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# 3. 验证
+java -version   # 应输出 openjdk version "21.x.x"
+cd android && ./gradlew --version  # 应输出 "JVM: 21.x.x"
+```
+
+Intel Mac 把 `/opt/homebrew/opt/openjdk@21` 换成 `/usr/local/opt/openjdk@21`。Linux 用 apt 装 `openjdk-21-jdk` 后 `export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`。
+
+如果只想临时切 JDK(不影响 ~/.zshrc),Gradle 跑前:
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+cd android && ./gradlew assembleDebug
+```
+
 ---
 
 ## 七、Vue 编译错误

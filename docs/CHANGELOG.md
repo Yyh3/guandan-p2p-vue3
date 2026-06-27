@@ -4,6 +4,113 @@
 
 ---
 
+## v0.4.0 (2026-06-27) — v3.x UI 重做(翡翠绿 + 金 + 深蓝星空,5 阶段全落地)
+
+> 一个版本内含第三方代码审查 + 用户 4 张效果图 → 完整 UI 重做 spec,5 阶段渐进实施。**架构级变化**:UI 从「基础可用」升到「高端棋牌游戏质感」(参考欢乐斗地主 / JJ 比赛),Java 环境从 JDK 18 升到 JDK 21(Capacitor 8 / AGP 8.13 强制要求)。
+
+### 新增
+
+#### v3.x spec + 审计(commits 7185580 → 5f6794f)
+
+- `docs/UI-REDESIGN-V3-SPEC.md`(新)— 第三方审查报告 + 用户 4 张效果图,综合出 5 阶段完整 spec
+  - 4 屏规格:HomeView / GameView / RoomView / CardPlay
+  - 设计 token 扩展:emerald-* / gold-* / card-cream / 星空深蓝 room-bg-*
+  - 文件影响清单:4506 → ~5500 行,+22%
+- `src/styles/tokens.css` — 新增 v3.x token(emerald/gold/cream/星空深蓝)
+- v3.x 审计 P0/P1/P2/P3 bug 修复(`5f6794f`):
+  - P0-5:game finishedOrder 边界(>=3 触发 finishRound)
+  - P1-5 / P1-9:AI 主动出牌结构化 + 按长度+rank 选炸弹
+  - P1-11 / P1-12:host joiner 断连立即感知 + ws 指数退避重连
+  - P2-15 / P2-19 / P2-22:isLevelCard 红桃对齐 / off 可选 handler / 独立 teamLevels
+  - P3-5/6/10/11/13/14/15:UI 视觉/响应式小修
+
+#### 阶段 1 — tokens.css + CardPlay.vue(`7d3b2ba`)
+
+- `src/styles/tokens.css` 追加新 v3.x token(emerald/gold/cream/星空深蓝 40+ props)
+- `src/components/CardPlay.vue` 重构 ~50%(330 行,60×84 桌面 / 48×68 移动)
+  - 牌面:奶油白底 + 1.5px 金边 + 8px 圆角 + 阴影
+  - 牌面花纹:内联 SVG `<pattern>` 卷草纹 opacity 6-10%
+  - 牌背:深红 #8B1A1A → #5C0E0E 渐变 + 金色传统纹 + 中央徽章
+  - 大王:金色金属渐变 / 小王:银灰金属渐变
+  - 选中态:translateY(-12px) + 阴影增强 + 顶部金色亮线
+- producer→verifier PASS
+
+#### 阶段 2 — HomeView + PlayerSeat(`ae931f0`)
+
+- `src/views/index/HomeView.vue` 重做 — 玻璃拟态 4 按钮(开房/加入/AI/规则)
+- `src/components/PlayerSeat.vue` 加头像光环 + `isUrgent` + `allowEdit` props
+- self 座位 pulse-glow 金色脉冲
+- producer→verifier PASS
+
+#### 阶段 3 — RoomView + room-ui 测试(`1a202c5`,救火 commit)
+
+- `src/views/room/RoomView.vue` 739 → 1209 行
+  - 4 菱形座位(top/left/right/bottom)+ 深蓝星空背景(50 颗星动画)+ 玻璃面板 + 金色按钮
+  - 信息卡:房间号 + 主机 IP + 复制按钮(玻璃)
+  - 保留所有现有 data-testid / emit / props
+  - 1 个 position: fixed(只允许 copy-toast,守住 v2.2 红线)
+- `src/common/room-ui.test.js` 141 → 391 行(断言更新以匹配新模板,断言数不减少)
+- QrFallbackCard.vue 现有功能保留
+- owner 救火:coder 15min timeout 前已完成所有 spec §4 改动 + 测试通过,owner 把 work commit(verifier 因 plan cycle 4 收尾 OWNER-SKIP)
+- 救火 commit review:范围清晰 / spec §4 全覆盖 / 无回归
+
+#### 阶段 4 — GameView Desktop+Mobile + HudTop + MainActions(`60f93cc`,救火 commit)
+
+- `src/views/game/GameViewDesktop.vue` 加 `.bg-felt`(椭圆 felt 翡翠绿)+ `.bg-wood-edge`(木纹边)+ `.table-stage` + `.table-glow`(径向白光聚光)
+- `src/views/game/GameViewMobile.vue` 同步桌面端视觉语言,只调整椭圆比例
+- `src/components/HudTop.vue` 加 `.badge-gold` 级别徽章(金色金属渐变 + 黑字)+ 房间号 A3K7 显示(net 单例只读,降级空)
+- `src/components/MainActions.vue` 147 行重做(出牌/过牌/提示玻璃按钮)
+- 救火 commit review:spec §3.1+§3.5+§3.6 全覆盖 / 无 data-testid 契约破坏 / net 单例只读 try/catch 降级
+
+#### 阶段 5 — final integration + 视觉验证(`final-integration` task)
+
+- verifier agent 跑全套:`npm test` 16 套件 862/0 + `npm run build` 成功
+- 4 张视觉对比截图(`docs/screenshots/v3-ui-redesign-final/`):
+  - 01-home-final.png — 首页玻璃按钮 + 翡翠渐变
+  - 02-room-final.png — 房间菱形座位 + 深蓝星空
+  - 03-game-final.png — 对局页椭圆 felt 桌面
+  - 04-card-hover-final.png — 卡牌选中态金边高光
+- baseline 对照(`docs/screenshots/v3-baseline/`)保留 8 张 v3.0 前截图
+
+### 改动
+
+- `src/styles/tokens.css` — 追加新 v3.x token 段(老 token 全部保留)
+- `src/views/index/HomeView.vue` — 重做(v3.x 玻璃按钮)
+- `src/views/room/RoomView.vue` — 重做(v3.x 菱形 + 星空 + 玻璃)
+- `src/views/game/GameViewDesktop.vue` — 重做背景层(v3.x felt + 聚光)
+- `src/views/game/GameViewMobile.vue` — 重做背景层(同视觉语言)
+- `src/components/CardPlay.vue` — 重做(v3.x 金边奶油白 + 红色传统牌背)
+- `src/components/PlayerSeat.vue` — 加 isUrgent / allowEdit / 头像光环
+- `src/components/HudTop.vue` — 级别徽章金色 + 房间号显示
+- `src/components/MainActions.vue` — 重做(玻璃按钮)
+- `package.json` — version 0.3.0 → 0.4.0
+
+### 环境
+
+- **JDK 18 → JDK 21**(Capacitor 8 / AGP 8.13.0 强制要求):
+  - 装 `brew install openjdk@21`(21.0.11 已装)
+  - `~/.zshrc` 末尾加:`export JAVA_HOME=/opt/homebrew/opt/openjdk@21`
+  - `./gradlew assembleDebug` / `npx cap sync android` 都读这个变量
+  - 详见 `BUILD.md` §〇
+
+### 测试
+
+- engine 109 / ai 54 / game 102 / deal-animation 13 / audio 117 / card-api 19
+- network 89 / network-multitab 28 / network-kick-player 51 / network-cross-device 50 / network-ws-http 29
+- ws-server 29 / qr-fallback 36 / GameView 65 / room-ui 60 / RoomView 11
+- **总计 16 套件 / 862 用例 / 0 失败**(v0.3.0 的 701 → 862,+161 用例)
+- `npm run build` 成功(dist/ 1.0s)
+
+### 已知 follow-up
+
+- ⚠️ **救火 commit(1a202c5 + 60f93cc)** — owner review 过,质量接近 producer 交付,无回归,verifier 未单独跑(已通过 final-integration 全套测试 + build 间接验证)
+- 💭 **AI 难度分档** — 当前只有中等难度(规则 + 贪心),Easy / Hard 暂未实现
+- 💭 **录像回放** — 一局打完后无法回看每手牌决策路径
+- 💭 **iOS 脚手架** — Capacitor iOS 工程未建,Mac + Xcode 走一遍
+- 💭 **多语言** — 当前中文 UI 硬编码,英文/繁体未抽 i18n
+
+---
+
 ## v0.3.0 (2026-06-13) — v2.x 收官(真机跨设备 + 房主控制 + QR 兜底)
 
 > 一个版本内含 v2.0 / v2.1 / v2.2 三个里程碑,17 个 commit。**架构级变化**:网络层从 BroadcastChannel 单机换成"开发态 BC + 真机/跨设备态 WebSocket"双轨,打包链路从纯 H5 升级到 Capacitor Android APK 可发。

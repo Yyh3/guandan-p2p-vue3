@@ -12,7 +12,7 @@
 |---|---|---|
 | Node.js | 18+ | Vite 构建 |
 | npm | 9+ | 包管理（随 Node 自带） |
-| JDK | 17 | Android 打包（仅打 APK 需要） |
+| JDK | **21** | Android 打包（仅打 APK 需要,Capacitor 8 / AGP 8.13 强制要求） |
 | Android Studio | 任意新版本 | APK 构建 + 签名（仅打 APK 需要） |
 | Xcode | 15+ | iOS 打包（仅打 IPA，且必须 macOS） |
 | CocoaPods | 最新 | iOS 依赖（仅打 IPA 需要） |
@@ -21,8 +21,36 @@
 ```bash
 node -v       # 应 >= v18
 npm -v        # 应 >= 9
-java -version # 应 >= 17（仅打 APK）
+java -version # 应 = 21（仅打 APK）
 ```
+
+**JDK 21 安装（macOS Apple Silicon,2026-06-27 加）**：
+
+Capacitor 8 / Android Gradle Plugin 8.13 要求 JDK 21。JDK 17/18 不够，会报
+`Unsupported class file major version` 或 `requires Java 21+`。
+
+```bash
+# 装 openjdk@21(已装可跳)
+brew install openjdk@21
+
+# 写入 ~/.zshrc 让 JAVA_HOME 永久生效
+cat >> ~/.zshrc <<'EOF'
+
+# JDK 21 — Capacitor 8 / Android Gradle Plugin 8.13 需要(2026-06-27 加)
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+export PATH="$JAVA_HOME/bin:$PATH"
+EOF
+source ~/.zshrc
+
+# 验证
+java -version   # 应输出 openjdk version "21.x.x"
+echo $JAVA_HOME # 应输出 /opt/homebrew/opt/openjdk@21
+
+# 跑一次 gradle wrapper 确认能找到 Java
+cd android && ./gradlew --version   # 输出应包含 "JVM: 21.x.x"
+```
+
+Intel Mac 把 `/opt/homebrew/opt/openjdk@21` 换成 `/usr/local/opt/openjdk@21`。
 
 ---
 
@@ -204,11 +232,12 @@ sendTo(seat, msg)    // 定向发送
 ## 五、发布检查清单
 
 - [ ] `npm run build` 成功，`dist/` 里有 `index.html` 和 `assets/`
-- [ ] `npm test` 全过（engine 60 + ai 17 + game 4 = 81 个测试）
+- [ ] `npm test` 全过（16 套件 / 862 用例 / 0 失败）
 - [ ] `npm run bench` 性能基线无明显回退
 - [ ] 浏览器版手测一遍：开房 → 4 标签加入 → 完整打 1 局 → 查看战绩
 - [ ] APK/IPA 真机手测一遍（如果已实现真机网络层）
-- [ ] README.md / BUILD.md / TROUBLESHOOTING.md 同步更新
+- [ ] 视觉回归对比 v3.x baseline(`docs/screenshots/v3-baseline/`)vs v3.x final(`docs/screenshots/v3-ui-redesign-final/`)
+- [ ] README.md / BUILD.md / TROUBLESHOOTING.md / docs/CHANGELOG.md 同步更新
 - [ ] keystore / 证书安全备份
 
 ---

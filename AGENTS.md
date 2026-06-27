@@ -25,7 +25,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（13 套件 / 701 通过 / 0 失败，v2.3 收官基线）
+# 跑全部测试（16 套件 / 862 通过 / 0 失败，v0.4.0 / v3.x 收官基线）
 npm test
 
 # 跑单个测试套件
@@ -52,7 +52,7 @@ guandan-p2p-vue3/
 ├── README.md                # 项目入口说明
 ├── BUILD.md                 # 打包 / 部署教程
 ├── TROUBLESHOOTING.md       # 排错指南
-├── CHANGELOG.md             # 版本变更日志（v0.3.0 起每版本一段）
+├── CHANGELOG.md             # 版本变更日志（v0.3.0 起每版本一段,在 docs/CHANGELOG.md）
 ├── package.json             # npm 配置
 ├── vite.config.js           # Vite 构建配置
 ├── capacitor.config.json    # Capacitor 配置（v2.0+，APK 构建）
@@ -76,7 +76,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 13 套件 Node assert 单测（701 case 全过）
+│   │   └── *.test.js               # 16 套件 Node assert 单测（862 case 全过）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -123,18 +123,19 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v2.3 收官：13 套件 / 701 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.0 / v3.x 收官：16 套件 / 862 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
-| `npm run test:engine` | 规则引擎：牌组 / 牌型识别 / 大小比较 / 升级 / 进贡 / 种子发牌 / groupHandByRank | 93 |
-| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 / autoPlayGrouped | 44 |
-| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass / v3.8 P1 联机同步 / v2.1 P3 host 迁移 | 78 |
-| `npm run test:anim` | 发牌动画 + 音效（playSfxForType × 牌型 × count 全覆盖） | 11 + 117 |
+| `npm run test:engine` | 规则引擎：牌组 / 牌型识别 / 大小比较 / 升级 / 进贡 / 种子发牌 / groupHandByRank | 109 |
+| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 / autoPlayGrouped | 54 |
+| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass / v3.8 P1 联机同步 / v2.1 P3 host 迁移 | 102 |
+| `npm run test:anim` | 发牌动画 + 音效（playSfxForType × 牌型 × count 全覆盖） | 13 + 117 |
 | `npm run test:ws` | WebSocket server + 真机 transport 桥接 + parseHostAddress + joinRemoteRoom | 29 + 50 |
-| `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 56 |
+| `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
-| `npm test` | 全部 | **701 / 0 fail** |
+| `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
+| `npm test` | 全部 | **862 / 0 fail** |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -348,7 +349,7 @@ Mavis 多 agent 团队配置在 `.harness/`：
 
 ### 测试时间预算（v2.2 cross-device + kick 教训）
 
-- 跨实例 mock BC 测试加 2-3s 到 npm test（13 套件 701 case 总耗时 ~10s 还能接受）
+- 跨实例 mock BC 测试加 2-3s 到 npm test（16 套件 862 case 总耗时 ~10s 还能接受）
 - 不要无脑加 mock 跨实例测试，先看现有 mock 是否够用
 - 真 BroadcastChannel 跨实例需要 `globalThis.BroadcastChannel` 注入 + dynamic-import cache-bust (`?tag=xxx&t=Date.now()`)
 
