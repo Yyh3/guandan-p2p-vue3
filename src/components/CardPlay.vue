@@ -2,7 +2,7 @@
   <!--
     v3.x 单张扑克牌:奶油白底 + 金边 + 传统卷草纹
     - 桌面 60×84(默认 md / lg)/ 移动 48×68(由父组件 --hand-card-w/h 控制)
-    - 大小王:v0.4.2 起金/银金属渐变 + 卡通小丑 PNG(红/紫)+ 小号"大/小王"字
+    - 大小王:v0.4.3 起金/银金属渐变 + 卡通小丑 PNG(红/紫,kawaii 风格,无字,占满牌面 ~90%)
     - 牌背:深红渐变 + 金色传统纹 + 中央"掼"字徽章
     - 选中态 / 可打出态 / 不可打出态按 spec §5.5 实现
   -->
@@ -44,8 +44,8 @@
       <!-- 中央装饰 -->
       <div class="center-area">
         <template v-if="isJoker">
-          <!-- v0.4.2:卡通小丑 PNG + 小号"大/小王"字
-                 红鼻子橙帽 = 大王 / 紫鼻子蓝帽 = 小王(颜色已分,字号精简) -->
+          <!-- v0.4.3:卡通小丑 PNG,占满牌面 ~90%,无文字
+                 红鼻子橙帽 = 大王 / 紫鼻子蓝帽 = 小王,颜色即可区分 -->
           <div class="joker-content">
             <img
               class="joker-face"
@@ -53,7 +53,6 @@
               :alt="isBigJoker ? '大王' : '小王'"
               draggable="false"
             />
-            <div class="joker-label">{{ isBigJoker ? '大' : '小' }}王</div>
           </div>
         </template>
         <template v-else>
@@ -277,40 +276,27 @@ const sizeClass = computed(() => `size-${props.size}`)
 .is-small-joker .card-pattern { opacity: 0.12; }
 .is-small-joker .joker-content { color: #1a1a1a; }
 
-/* ----- 大小王中央内容(v0.4.2 卡通小丑 PNG + 小号字)----- */
+/* ----- 大小王中央内容(v0.4.3 卡通小丑 PNG 占满牌面 ~90%,无字)----- */
 .joker-content {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 1px;
+  justify-content: center;
   position: relative;
   z-index: 1;
+  width: 100%;
+  height: 100%;
 }
 .joker-face {
-  /* 卡通小丑 PNG,透明背景,contain 适配;
-     大王/小王共用同一尺寸,颜色靠 PNG 本身区分 */
-  width: 70%;
-  height: 70%;
-  max-width: 56px;
-  max-height: 56px;
+  /* v0.4.3:卡通小丑占满牌面,无文字。
+     object-fit: contain 保证透明 PNG 居中显示且不被裁切。*/
+  width: 92%;
+  height: 88%;
   object-fit: contain;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
   user-select: none;
   -webkit-user-drag: none;
+  pointer-events: none;
 }
-.size-sm .joker-face { max-width: 24px; max-height: 24px; }
-.size-lg .joker-face { max-width: 72px; max-height: 72px; }
-.joker-label {
-  font-family: "Songti SC", "STSong", "KaiTi", serif;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  line-height: 1;
-  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
-  margin-top: -2px;
-}
-.size-sm .joker-label { font-size: 7px; }
-.size-lg .joker-label { font-size: 14px; letter-spacing: 2px; }
 
 /* ----- 选中态(桌面端)spec §5.5 ----- */
 .card-play.selected {
