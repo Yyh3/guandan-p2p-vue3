@@ -201,14 +201,16 @@ console.log('\n=== 5. BUG-F: READY 已在 RELAY_TYPES 中(常量级验证) ===')
 }
 
 // ============== BUG-H:package.json version ==============
-console.log('\n=== 6. BUG-H: package.json version 0.4.4 ===')
+// 2026-06-28: BUG-RC3-005 修复后,package.json version 已升到 0.4.8
+//   反映 v0.4.8 收官状态(7 首真实 BGM + 8 BUG 修复 + BUG-RC3 修复)
+console.log('\n=== 6. BUG-H: package.json version (v0.4.8) ===')
 {
   // 静态文件读取验证
   const fs = await import('fs')
   const path = await import('path')
   const pkgPath = path.resolve('./package.json')
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-  eq('package.json version = 0.4.4', pkg.version, '0.4.4')
+  eq('package.json version = 0.4.8', pkg.version, '0.4.8')
 }
 
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============

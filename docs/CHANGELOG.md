@@ -4,6 +4,61 @@
 
 ---
 
+## v0.4.8 (2026-06-28) — BUG-RC3 修复 + 真实 BGM 集成确认(21 套件 / 972 单测全过)
+
+> 复审报告 `guandan-p2p-vue3-recheck-after-latest-claimed-fixes-20260627.md` 列出 5 个残留 bug。本轮集中修 001/002/004/005,003 在 master 已修,真实 BGM 已在 master 接入。
+
+### BUG 清单
+
+#### BUG-RC3-002 — `onHostMigrated` 顺序错误(hand remap 被覆盖)
+
+- 现象:`useGameLogic.js` 原顺序先 `migrateHost` 再 `applySnapshot`。joiner 端在迁移前取的 `payload.snapshot` 是旧 seat 映射,applySnapshot 会把刚搬到 `hands[0]` 的新 host 手牌覆盖回旧 host 的空牌。
+- 修复:`src/views/game/useGameLogic.js` 第 178-187 行改为「先 `applySnapshot` 再 `migrateHost`」,先恢复到"迁移前"完整状态,再做座位重映射。
+- 验证:`v047-rc2-regression.test.js` §5.5 共 8 case,直接对比两种顺序下 `hands[0]` 的最终手牌,断言只有正确顺序时新 host 看到自己的牌。
+
+#### BUG-RC3-003 — `migrateHost` 用 `abandonedSeats` 区分弃赛(已修,本轮加测试)
+
+- 现象:旧 host 加入 `finishedOrder` 导致新 host(seat 0)被标记为已出完,`playerPlay(0, ...)` 被拒。
+- 修复:master 已在 `guandan-game.js:488-495` 改为用 `abandonedSeats`,`playerPlay` 仍只查 `finishedOrder`。
+- 验证:`v047-rc2-regression.test.js` §5.6 共 6 case,迁移后 `playerPlay(0, [card])` 返回 `ok:true` 且 `currentPlayer` 推进到下一位。
+
+#### BUG-RC3-004 — host 迁移回归测试覆盖不足(本轮补)
+
+- 现象:原测试只覆盖 `migrateHost` 内部 remap,没覆盖 useGameLogic 顺序、network API 存在性、新 host 出牌。
+- 修复:§5.5/5.6/5.7 三块共 19 case 覆盖三大场景(顺序 / 出牌 / API)。
+- 验证:v047-rc2-regression.test.js 48 case 全过(原 29 + 新 19)。
+
+#### BUG-RC3-005 — README / package.json / 测试数不一致(本轮修)
+
+- 现象:package.json version 0.4.4,README 写 27 套件 / 1296 用例 / 22 套件 / 1222 用例,v0.4.6/v0.4.x 混用,实际 master HEAD 是 21 套件 / 953 case。
+- 修复:
+  - `package.json` `version: 0.4.4` → `0.4.8`
+  - `README.md` 6 处过时数字统一为 21 套件 / 972 用例 / v0.4.8
+  - `AGENTS.md` 测试基线改为 21 套件 / 972 case
+  - `docs/CHANGELOG.md` 新增本段
+
+### BUG-RC3-001 — `network.requestPromoteToHost` 存在性(master 已修,本轮加测试)
+
+- 现象:报告指出 useGameLogic 调 `net.requestPromoteToHost` 但 network.js 无该 API。
+- 修复:master 已在 `network.js:1246` 实现,带 snapshot 参数,BC 模式本地回环处理升级。
+- 验证:`v047-rc2-regression.test.js` §5.7 5 case,`typeof === 'function'` + `selectNextHostCandidate` 默认行为。
+
+### 真实 BGM 集成确认
+
+- master HEAD `842e421` `feat(audio): v0.4.8 N-3 真实 BGM — 7 首 Kevin MacLeod CC-BY MP3` 已在 `audio.js` 接入:
+  - `startMp3Bgm()` 用 `<audio>` 加载 22MB MP3
+  - 加载失败时降级 Web Audio 合成(保留旧版)
+  - 7 种 BGM_TRACKS key(energetic / calm / bossa / ripples / intense / warm / casual)对应 7 首 MP3
+  - SettingsView.vue:141-142 已加致谢 `BGM by Kevin MacLeod (incompetech.com), CC BY 4.0`
+  - v048-mp3-bgm.test.js 50 case 全过(MP3 合法性 / 风格映射 / 降级 / 音量同步)
+
+### 测试基线
+
+- **21 测试套件 / 972 用例 / 0 失败**(master 953 + BUG-RC3-002/003/004 回归 +19)
+- `npm test` 全过,`npm run build` 7 首 MP3 全打入 dist/assets/
+
+---
+
 ## v0.4.x (2026-06-27) — P2P 同步修复(8 个连环 bug,22 套件 1222 单测全过)
 
 > v3.8 / v2.x 收官后实地复测,4-tab 联机 + 跨设备联机仍有 8 个连环 bug。本段集中记录 BUG-001~008 的 commit、修复概要、回归测试。**架构级变化**:把 v3.x UI 重做之外的 P2P 联机层做了一次"二次审计 + 回归测试加固",从 862 → 1222 单测(+360,+221 来自本次),把"看起来过的联机"变成"测试覆盖的联机"。

@@ -123,7 +123,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.0 / v3.x 收官：16 套件 / 862 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.8 收官：21 套件 / 972 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
