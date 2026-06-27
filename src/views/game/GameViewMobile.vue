@@ -173,9 +173,11 @@
           :style="{ minHeight: colMinHeight(col) + 'px' }"
           @click="toggleCol(col)"
         >
+          <!-- v0.4.3:大小王列隐藏 col-rank 标签(卡通小丑已自带视觉标识) -->
           <div
+            v-if="!col.isJoker"
             class="col-rank"
-            :class="{ 'is-level-rank': !col.isJoker && isLevel({ suit: 0, rank: col.rank }) }"
+            :class="{ 'is-level-rank': isLevel({ suit: 0, rank: col.rank }) }"
           >{{ colRankLabel(col) }}</div>
           <div class="col-count">×{{ col.cards.length }}</div>
           <div

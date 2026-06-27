@@ -60,10 +60,12 @@
           :style="{ minHeight: colMinHeight(col) + 'px' }"
           @click="toggleCol(col)"
         >
-          <!-- v3.6:列顶 rank 数字标签(7/9/10/K/2/王)-->
+          <!-- v3.6:列顶 rank 数字标签(7/9/10/K/2)
+                 v0.4.3:大小王列隐藏 rank 标签(卡通小丑占满牌面已自带视觉标识,不需要"王"字) -->
           <div
+            v-if="!col.isJoker"
             class="col-rank"
-            :class="{ 'is-level-rank': !col.isJoker && isLevel({ suit: 0, rank: col.rank }) }"
+            :class="{ 'is-level-rank': isLevel({ suit: 0, rank: col.rank }) }"
           >{{ colRankLabel(col) }}</div>
           <!-- v3-3:列底 ×N 小气泡,强化"一列一列"概念 -->
           <div class="col-count">×{{ col.cards.length }}</div>
