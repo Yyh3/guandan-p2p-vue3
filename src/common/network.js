@@ -254,8 +254,62 @@ function _onTransportMessage(msg) {
   emit('message:' + msg.type, msg.payload, msg.from, msg)
   if (isHostFlag) {
     _handleHostMessage(msg)
+    // ★ BUG-001:host 处理完本机状态后,把 joiner 消息转发给其它 joiner
+    //   必须在 _handleHostMessage 之后调用 — 这样 host 自己的 peers/heartbeat 更新完毕
+    //   转发时目标 seat 列表才是最新状态
+    //   注:BC 模式下 transport.send 天然广播,relayFromClient 内部已识别 BC 不重复发
+    relayFromClient(msg)
   } else {
     _handleJoinerMessage(msg)
+  }
+}
+
+// ============== BUG-001 修复:host relay joiner 消息 ==============
+/**
+ * ★ P0 修复:真机 WS 星型拓扑下,joiner 之间的消息(PLAY / PASS / 等)需要 host 转发,
+ *   否则 joiner A 出牌,joiner B / C 完全看不见 → 4 人局跑不通。
+ *
+ * 在 _handleHostMessage 末尾对白名单内的消息调一次,host 把收到的 joiner 消息
+ * 转发给其它 joiner(from != msg.from)。
+ *
+ * 设计要点:
+ *   - 只在 isHost 时 relay(joiner 端不转发,避免回环)
+ *   - 白名单 RELAY_TYPES 严格控制(防止把 HEARTBEAT / JOIN / _DISCONNECT 等 host-only
+ *     消息错误广播给 joiner,这些消息走 host.send 路径即可)
+ *   - 转发时覆盖 from(保留原 from),覆盖 to(定向到每个目标 joiner),ts 更新
+ *     — 不能直接 transport.send(msg),否则 last sender ws 路由会错乱
+ *   - 单 seat 失败不中断其他(try/catch 包住 transport.send)
+ *
+ * 注:BC 模式下消息天然广播给所有 tab,会自然到达其它 joiner;
+ *   WS 模式下 host 必须显式 relay,这是 BUG-001 的修复目标。
+ */
+const RELAY_TYPES = new Set([
+  'PLAY', 'PASS', 'STATE_SNAPSHOT', 'ROUND_END', 'CHAT', 'NICK_UPDATE',
+])
+
+function relayFromClient(msg) {
+  if (!isHostFlag || !transport || !msg || !RELAY_TYPES.has(msg.type)) return
+  if (msg.from == null || msg.from <= 0) return
+  // ★ BC 模式天然广播,无需显式 relay(否则会变成 2 倍消息,joiner 端 _handleJoinerMessage
+  //   会收到双份,触发双倍 apply)。
+  // 只有 WS-like host (server mode)需要显式定向 relay:
+  //   - WebSocketTransport host (_mode='self' + _wss != null)
+  //   - AndroidWsTransport host (_mode='self',plugin sendToClient)
+  // 判定:transport._mode === 'self' 且 transport._channel == null (BroadcastChannelTransport 才有 _channel)
+  const isWsLikeHost = transport._mode === 'self' && transport._channel == null
+  if (!isWsLikeHost) return
+  for (const [seat] of peers.entries()) {
+    if (seat <= 0 || seat === msg.from) continue  // 跳过 host 自己 + 原 sender
+    try {
+      transport.send({
+        ...msg,
+        from: msg.from,
+        to: seat,
+        ts: Date.now(),
+      })
+    } catch (e) {
+      // 单 seat 失败不中断其他 — WS 路径下某 joiner ws 可能已 close
+    }
   }
 }
 
