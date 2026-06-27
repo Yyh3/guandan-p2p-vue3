@@ -13,6 +13,26 @@
             @click="levelRank = lv.rank">打 {{ lv.label }}</button>
         </div>
       </div>
+      <!-- ★ v0.4.9:AI 难度选择(medium 默认 / hard 防守+炸弹保留) -->
+      <div class="config-row">
+        <span class="config-label">AI 难度</span>
+        <div class="config-options">
+          <button
+            class="config-chip"
+            :class="{ active: difficulty === 'medium' }"
+            @click="difficulty = 'medium'">
+            中等
+            <small class="chip-hint">规则 + 贪心</small>
+          </button>
+          <button
+            class="config-chip"
+            :class="{ active: difficulty === 'hard' }"
+            @click="difficulty = 'hard'">
+            困难
+            <small class="chip-hint">防守 + 炸弹保留</small>
+          </button>
+        </div>
+      </div>
     </div>
     <div class="action">
       <button class="action-btn" @click="onStart">开始对局</button>
@@ -32,8 +52,10 @@ const levelOptions = [
   { rank: 10, label: '10' },
   { rank: 15, label: '2' },
 ]
+// ★ v0.4.9:AI 难度(默认 medium)
+const difficulty = ref('medium')
 function onStart() {
-  router.push(`/game?levelRank=${levelRank.value}&ai=1`)
+  router.push(`/game?levelRank=${levelRank.value}&ai=1&difficulty=${difficulty.value}`)
 }
 </script>
 
@@ -74,6 +96,17 @@ function onStart() {
   background: var(--emerald-base, #14533b);
   border-color: var(--gold-primary, #d4af37);
   box-shadow: 0 0 10px rgba(31, 122, 85, 0.5);
+}
+.chip-hint {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 2px;
+  letter-spacing: 0;
+}
+.config-chip.active .chip-hint {
+  color: var(--gold-primary, #d4af37);
 }
 .action { margin-top: 24px; }
 .action-btn {

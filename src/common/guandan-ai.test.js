@@ -393,5 +393,139 @@ console.log('\n=== 22. P0-2 多鬼牌版:findMinPairStraight 鬼牌不耗尽 ===
   eq('出 6 张', r.cards.length, 6)
 }
 
+// ============================================================
+// v0.4.9 Hard 难度测试
+// ============================================================
+console.log('\n=== 23. Hard 难度:API 存在性 + 默认行为 ===')
+{
+  const AI = await import('./guandan-ai.js')
+  assert('★ chooseLeadHard 是 function', typeof AI.chooseLeadHard === 'function')
+  assert('★ findMinBeatHard 是 function', typeof AI.findMinBeatHard === 'function')
+  // hard 难度 decide 路由
+  const hand = [{ suit: 0, rank: 3 }, { suit: 1, rank: 5 }, { suit: 2, rank: 7 }, { suit: 3, rank: 9 }]
+  const r1 = AI.decide(hand, null, 2, {}, 'hard')
+  assert('★ hard 首家:有出牌结果', r1.type === 'play')
+  // medium 难度 decide 默认行为(无 difficulty 参数)
+  const r2 = AI.decide(hand, null, 2, {})
+  assert('★ medium 首家:有出牌结果', r2.type === 'play')
+}
+
+console.log('\n=== 24. Hard 难度:炸弹保留(手牌 ≤ 6 张且有炸弹) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 6 张手牌:含 4 张 3 (4 炸) + 2 张单牌 5/7
+  // hard 难度:不出 4 张炸(留作关键时刻),改出对子 5/7?没有对子 → 出单张
+  const hand = [
+    { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
+    { suit: 0, rank: 5 }, { suit: 1, rank: 7 },
+  ]
+  const rHard = AI.chooseLeadHard(hand, 2)
+  // hard 不出 4 张炸(preserveBomb 触发),应出 1 张单牌
+  assert('★ hard 手牌 6 张含 4 炸:不出 4 张炸', rHard.cards.length < 4)
+}
+
+console.log('\n=== 25. Hard 难度:手牌 > 6 张时主动出炸弹 ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 10 张手牌:含 4 张 3 (4 炸) + 6 张单牌
+  const hand = [
+    { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
+    { suit: 0, rank: 5 }, { suit: 1, rank: 6 }, { suit: 2, rank: 7 },
+    { suit: 3, rank: 8 }, { suit: 0, rank: 9 }, { suit: 1, rank: 10 },
+  ]
+  const rHard = AI.chooseLeadHard(hand, 2)
+  console.log('  [debug 25] rHard.cards =', rHard.cards.map(c => `${c.suit}-${c.rank}`))
+  // hard 手牌 > 6 张:可以出 4 张炸
+  assert('★ hard 手牌 10 张含 4 炸:出 4 张炸(不 preserve)', rHard.cards.length === 4)
+  assert('★ hard 出的 4 张炸是 rank 最小(3)', rHard.cards.every(c => c.rank === 3))
+}
+
+console.log('\n=== 26. Hard 难度:优先出小成组(对子/三张 rank <= 10) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 7 张手牌:含 K 对子(2 张 K) + 9 对子(2 张 9) + 5/6/7 单张
+  //   hard:优先出"小成组"(9 对子,rank<=10),不出 K 对子(大对子)
+  const hand = [
+    { suit: 0, rank: 13 }, { suit: 1, rank: 13 },  // K 对子
+    { suit: 0, rank: 9 }, { suit: 1, rank: 9 },    // 9 对子
+    { suit: 2, rank: 5 }, { suit: 3, rank: 6 }, { suit: 0, rank: 7 },
+  ]
+  const rHard = AI.chooseLeadHard(hand, 2)
+  // hard 应出 9 对子(2 张,rank 9)
+  assert('★ hard 优先出小成组对子(不是大 K 对子)',
+    rHard.cards.length === 2 && rHard.cards.every(c => c.rank === 9))
+}
+
+console.log('\n=== 27. Hard 难度:鬼牌保留(2+ 张鬼牌时不出) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 7 张手牌:2 张鬼牌(逢人配=levelRank=14 红桃) + 5 张小牌
+  const hand = [
+    { suit: 1, rank: 14 }, { suit: 1, rank: 14 },  // 2 张鬼(红桃级牌)
+    { suit: 0, rank: 3 }, { suit: 1, rank: 5 }, { suit: 2, rank: 7 },
+    { suit: 3, rank: 9 }, { suit: 0, rank: 11 },
+  ]
+  const rHard = AI.chooseLeadHard(hand, 14)
+  // hard 应出 concrete 单牌,不出鬼牌
+  const hasGhost = rHard.cards.some(c => c.suit === 1 && c.rank === 14)
+  assert('★ hard 有 2 张鬼牌时不出鬼(preserveGhosts)', !hasGhost)
+}
+
+console.log('\n=== 28. Hard 难度:跟牌 findMinBeatHard 炸弹保护(手牌 ≤ 6) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 6 张手牌:含 4 张 5 炸弹 + 2 张小牌
+  //   对手出单张 7,findMinBeatHard 应:
+  //     - 不出 4 张 5 炸弹(对手单张 7,浪费炸弹,留作关键时刻)
+  //     - 返回 null 让 AI pass
+  const hand = [
+    { suit: 0, rank: 5 }, { suit: 1, rank: 5 }, { suit: 2, rank: 5 }, { suit: 3, rank: 5 },
+    { suit: 0, rank: 9 }, { suit: 1, rank: 11 },
+  ]
+  const currentPlay = { type: 'SINGLE', mainRank: 7, length: 1, cards: [{ suit: 0, rank: 7 }] }
+  const beatHard = AI.findMinBeatHard(hand, currentPlay, 0, 2)
+  // hard 不出 4 张炸 → findMinBeatHard 返回 null(让 AI pass)
+  assert('★ hard 跟单张不出 4 张炸(PASS)', beatHard === null)
+  // 反向:不传鬼牌时 findMinBeat(medium 默认)应该能跟(出 9 或其他)
+  const beatNoGhost = AI.findMinBeat(hand, currentPlay, 0, 2)
+  assert('★ findMinBeat(跟单张 7) 不为 null(能跟)',
+    beatNoGhost !== null && beatNoGhost.length > 0)
+}
+
+console.log('\n=== 29. Hard 难度:autoPlayGrouped 保留王炸/同花顺(手牌 > 8) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 10 张手牌:含 4 王(王炸) + 5 张同花顺 + 1 张单牌
+  const hand = [
+    { suit: 0, rank: 16 }, { suit: 1, rank: 17 },  // 2 张王
+    { suit: 2, rank: 16 }, { suit: 3, rank: 17 },  // 凑齐 4 王
+    // 同花顺 ♠ 3-4-5-6-7
+    { suit: 0, rank: 3 }, { suit: 0, rank: 4 }, { suit: 0, rank: 5 }, { suit: 0, rank: 6 }, { suit: 0, rank: 7 },
+    { suit: 1, rank: 9 },
+  ]
+  // hard 手牌 > 8:不出王炸/同花顺/炸弹 → 应该出最大 4 张炸?手牌没有 4 张炸 → 出 3 张 / 对子 / 单张
+  const rHard = AI.autoPlayGrouped(hand, null, 2, {}, 'hard')
+  console.log('  [debug 29] rHard.cards =', rHard.cards.map(c => `${c.suit}-${c.rank}`))
+  // 简化断言:hard 不出 4 王(王炸),也不出 5 张同花顺
+  const isJokerBomb = rHard.cards.length === 4 && rHard.cards.every(c => c.rank >= 16)
+  const isFlush = rHard.cards.length === 5 && rHard.cards.every(c => c.suit === 0 && c.rank <= 7)
+  assert('★ hard 一键理不出 4 王炸', !isJokerBomb)
+  assert('★ hard 一键理不出 5 张同花顺', !isFlush)
+}
+
+console.log('\n=== 30. Hard 难度:decide(hand, currentPlay, levelRank, ctx, difficulty) 路由 ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 6 张手牌:含 4 张 5 炸弹 + 2 张小牌;对手出单张 7
+  const hand = [
+    { suit: 0, rank: 5 }, { suit: 1, rank: 5 }, { suit: 2, rank: 5 }, { suit: 3, rank: 5 },
+    { suit: 0, rank: 9 }, { suit: 1, rank: 11 },
+  ]
+  const currentPlay = { type: 'SINGLE', mainRank: 7, length: 1, cards: [{ suit: 0, rank: 7 }] }
+  // hard 跟牌:不出 4 张炸(返回 pass)
+  const rHard = AI.decide(hand, currentPlay, 2, {}, 'hard')
+  assert('★ hard decide(跟单张 7) → pass(不出 4 炸)', rHard.type === 'pass')
+}
+
 console.log(`\n========== AI 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)
 process.exit(fail > 0 ? 1 : 0)

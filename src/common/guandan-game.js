@@ -24,16 +24,23 @@ import * as E from './guandan-engine.js'
 import * as AI from './guandan-ai.js'
 
 function createGame(opts) {
-  const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null } = opts
+  const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null, difficulty = 'medium' } = opts
   // ★ v3.8 P1:aiPlayers 用可变数组(支持运行时加 seat,例如断线 AI 接管)
   let aiPlayers = initialAI.slice()
   // ★ v3.8 P1:AI 出的牌要广播给其他 tab(由 GameView 注入)
   let aiBroadcast = null
+  // ★ v0.4.9:AI 难度等级 'medium'(默认,原行为) | 'hard'(防守 + 炸弹保留)
+  //   存到 state 里随 snapshot 同步,所有端共享
+  if (difficulty !== 'medium' && difficulty !== 'hard') {
+    throw new Error(`createGame: invalid difficulty "${difficulty}", must be 'medium' or 'hard'`)
+  }
 
   const state = {
     phase: 'idle',           // idle | dealing | playing | trick_end | finished
     round: 1,                // 当前局数
     levelRank,               // 当前级牌 rank
+    // ★ v0.4.9:AI 难度等级(随 snapshot 同步)
+    difficulty,              // 'medium' | 'hard'
     hands: [[], [], [], []], // 4 个玩家手牌
     tableCards: [],          // 当前桌面已出牌(一轮)
     lastPlay: null,          // 当前桌面牌型 {type, mainRank, length, who, cards}
@@ -561,6 +568,10 @@ state.trickHistory = state.trickHistory.map(h => {
       if (isValidSeat(snap.firstPlayer)) state.firstPlayer = snap.firstPlayer
       if (isValidSeat(snap.leaderPlayer)) state.leaderPlayer = snap.leaderPlayer
       if (snap.trickHistory) state.trickHistory = snap.trickHistory.slice()
+      // ★ v0.4.9:difficulty 字段同步(默认值 'medium' 兜底)
+      if ('difficulty' in snap && (snap.difficulty === 'medium' || snap.difficulty === 'hard')) {
+        state.difficulty = snap.difficulty
+      }
       if (snap.finishedOrder) {
         // finishedOrder 必须是 0..3 的子集
         const ok = Array.isArray(snap.finishedOrder) && snap.finishedOrder.every(s => isValidSeat(s))

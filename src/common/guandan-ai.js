@@ -470,6 +470,162 @@ function chooseLead(cards, levelRank) {
 }
 
 /**
+ * Hard 难度领出策略 v1
+ *
+ * 设计目标:防守意识 + 炸弹保留 + 不浪费大牌
+ * 与 medium 区别:
+ *   - 优先出"小成组牌型"(rank<=10 的对子/三张),不出大对子/大三张
+ *   - 炸弹保留:手牌 ≤ 6 张时不出炸弹(关键时刻才打)
+ *   - 鬼牌保留:有 2+ 张鬼牌时不出鬼牌(留作凑牌)
+ *   - 跟牌更倾向于 PASS(见 decideHard)
+ *
+ * @param {Array} cards 我的手牌(已 sortHand)
+ * @param {Number} levelRank 当前级牌 rank
+ * @returns {Object} { type: 'play' | 'pass', cards?: [...] }
+ */
+function chooseLeadHard(cards, levelRank) {
+  if (cards.length === 0) return { type: 'pass' }
+  const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
+  const cnt = E.countByRank(concrete)
+
+  // 炸弹保留:手牌 ≤ 6 张且有炸弹 → 不主动出炸弹(留作关键时刻)
+  const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 4 && r <= 15)
+  const preserveBomb = bombRanks.length > 0 && cards.length <= 6
+
+  // 鬼牌保留:有 2+ 张鬼牌 → 不出鬼牌(留作凑牌)
+  const preserveGhosts = ghosts.length >= 2
+
+  // 0. 手牌 > 6 张 + 有 4 张炸 + 不 preserve → 主动出 4 张炸(清牌 + 对手压不住)
+  //    这一步优先于"小成组对子",因为 4 张炸能把对手直接炸死,是关键牌
+  if (!preserveBomb && bombRanks.length > 0 && cards.length > 6) {
+    const r = bombRanks.sort((a, b) => a - b)[0]
+    return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
+  }
+
+  // 1. 优先出"小成组" — 对子/三张(rank <= 10,避免出大牌)
+  //    注意:4 张同 rank 不算 3 张(cnt 区分 3 张 vs 4 张炸)
+  if (concrete.length >= 2) {
+    // 优先 pair (cnt===2)
+    const pairRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 2 && r <= 10).sort((a, b) => a - b)
+    if (pairRanks.length > 0) {
+      const r = pairRanks[0]
+      return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 2) }
+    }
+    // 严格 3 张(cnt===3,不是 4 张炸)
+    const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 3 && r <= 10).sort((a, b) => a - b)
+    if (tripleRanks.length > 0) {
+      const r = tripleRanks[0]
+      const tripleCards = concrete.filter(c => c.rank === r).slice(0, 3)
+      // 三带二:还剩别的 rank 可以凑配对
+      const otherRanks = Object.keys(cnt).map(Number).filter(r2 => r2 !== r && cnt[r2] >= 2)
+      if (otherRanks.length > 0) {
+        const r2 = otherRanks.sort((a, b) => a - b)[0]
+        return { type: 'play', cards: [...tripleCards, ...concrete.filter(c => c.rank === r2).slice(0, 2)] }
+      }
+      return { type: 'play', cards: tripleCards }
+    }
+  }
+
+  // 2. 小单张(有 concrete 时)
+  if (concrete.length > 0) {
+    const sortedConcrete = E.sortHand(concrete)
+    // 倒数第二小(倒数最小可能太憋手,留 1 张凑牌)
+    return { type: 'play', cards: [sortedConcrete[sortedConcrete.length - 1]] }
+  }
+
+  // 3. 鬼牌(只有 1 张时才出)
+  if (ghosts.length === 1) {
+    return { type: 'play', cards: [ghosts[0]] }
+  }
+
+  // 4. 炸弹(只在手牌 > 6 张时考虑主动出,且取 rank 最小)
+  if (!preserveBomb && bombRanks.length > 0) {
+    const r = bombRanks.sort((a, b) => a - b)[0]
+    return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
+  }
+
+  // 5. 鬼牌(preserveGhosts 情况下被迫出)
+  if (ghosts.length > 0 && !preserveGhosts) {
+    return { type: 'play', cards: [ghosts[0]] }
+  }
+
+  // fallback:出最小 concrete(无 concrete 时出鬼牌)
+  if (concrete.length > 0) {
+    return { type: 'play', cards: [concrete[concrete.length - 1]] }
+  }
+  return { type: 'play', cards: ghosts.length > 0 ? [ghosts[0]] : [cards[0]] }
+}
+
+/**
+ * Hard 难度跟牌策略 v1
+ *
+ * 跟 medium 区别:
+ *   - 炸弹保护:只剩 1 个炸弹(且是 4 张最小炸)且非关键时刻 → PASS
+ *   - 大牌保护:跟的牌会导致手牌中"大对子/大三张"被拆 → PASS
+ *   - 鬼牌保护:跟牌需要用鬼牌时,如果手牌 ≤ 6 张且能用其他牌 → PASS
+ *   - 队友最后出牌:接风时,hard 难度出"小但能赢"的牌(选最小可赢而非最大)
+ *
+ * @param {Array} hand 我的手牌
+ * @param {Object} currentPlay 当前桌面牌
+ * @param {Number} levelRank 当前级牌 rank
+ * @param {Number} ghostCount 鬼牌张数
+ * @returns {Array|null} 跟牌数组 / null(不能/不愿跟)
+ */
+function findMinBeatHard(hand, currentPlay, ghostCount, levelRank) {
+  // 标准 findMinBeat
+  const beat = findMinBeat(hand, currentPlay, ghostCount, levelRank)
+  if (!beat || beat.length === 0) return null
+
+  const { concrete, ghosts } = E.splitGhosts(hand, levelRank)
+  const cnt = E.countByRank(concrete)
+
+  // 1. 炸弹保护:手牌 ≤ 6 张 + 当前跟的牌包含炸弹 → 检查是否值得
+  if (hand.length <= 6) {
+    const isBomb = (() => {
+      // 简化:如果 beat 全是同 rank 且 count === 4, 视为炸弹
+      if (beat.length === 4) {
+        const ranks = new Set(beat.map(c => c.rank))
+        return ranks.size === 1
+      }
+      return false
+    })()
+    // 非炸弹/王炸的对手牌型 → hard 不出 4 张炸(留作关键时刻)
+    if (isBomb && currentPlay.type !== TYPE.BOMB_4 && currentPlay.type !== TYPE.BOMB_5
+        && currentPlay.type !== TYPE.JOKER_BOMB) {
+      return null
+    }
+  }
+
+  // 2. 鬼牌保护:跟牌用了鬼牌 + 手牌 ≤ 6 张 + 还能用其他牌 → 找非鬼方案
+  if (hand.length <= 6 && ghosts.length > 0) {
+    const beatHasGhost = beat.some(c => c.suit === -1)  // joker suit === -1
+    if (beatHasGhost) {
+      // 尝试 findMinBeat 不带鬼牌(传 ghostCount=0)
+      const beatNoGhost = findMinBeat(hand, currentPlay, 0, levelRank)
+      if (beatNoGhost && beatNoGhost.length > 0) return beatNoGhost
+      // 没有非鬼方案 → 仍用鬼牌
+    }
+  }
+
+  // 3. 拆大牌保护:跟的牌会导致 cnt >= 2 的"大 rank"(>10)被拆成 1 张
+  //    简化:如果 beat 用了一个 cnt[r]===2 中 r>10 的所有牌 → 不要拆
+  if (beat.length === 1) {
+    const r = beat[0].rank
+    if (cnt[r] === 2 && r > 10) {
+      // 拆了大对子中一张 → 拒绝
+      return null
+    }
+  }
+  if (beat.length === 2) {
+    // 对子:检查 rank
+    const r = beat[0].rank
+    if (cnt[r] === 2 && r > 10) return null
+  }
+
+  return beat
+}
+
+/**
  * 主入口
  *
  * @param {Array} hand 我的手牌
@@ -477,22 +633,31 @@ function chooseLead(cards, levelRank) {
  * @param {Number} levelRank 当前级牌 rank
  * @param {Object} ctx { isTeammateLast, mySeatIndex, teammateSeatIndex }
  *                      isTeammateLast: 上一个出牌的人是不是我队友
+ * @param {String} difficulty 'medium'(默认,原行为) | 'hard'(防守 + 炸弹保留)
  * @returns {Object} { type: 'play' | 'pass', cards?: [...] }
  */
-function decide(hand, currentPlay, levelRank, ctx = {}) {
+function decide(hand, currentPlay, levelRank, ctx = {}, difficulty = 'medium') {
   // 首家出牌
   if (!currentPlay || currentPlay.type === TYPE.INVALID) {
-    return chooseLead(hand, levelRank)
+    return difficulty === 'hard' ? chooseLeadHard(hand, levelRank) : chooseLead(hand, levelRank)
   }
 
   // 队友最后出牌(我可以接风自由出)
   if (ctx.isTeammateLast) {
-    // 接风:出小牌
-    return chooseLead(hand, levelRank)
+    // 接风:出小牌(hard 难度也走领出策略)
+    return difficulty === 'hard' ? chooseLeadHard(hand, levelRank) : chooseLead(hand, levelRank)
   }
 
   // 跟牌:找最小能压
-  const beat = findMinBeat(hand, currentPlay, E.splitGhosts(hand, levelRank).ghosts.length, levelRank)
+  const ghostCount = E.splitGhosts(hand, levelRank).ghosts.length
+  if (difficulty === 'hard') {
+    const beat = findMinBeatHard(hand, currentPlay, ghostCount, levelRank)
+    if (beat && beat.length > 0) {
+      return { type: 'play', cards: beat }
+    }
+    return { type: 'pass' }
+  }
+  const beat = findMinBeat(hand, currentPlay, ghostCount, levelRank)
   if (beat && beat.length > 0) {
     return { type: 'play', cards: beat }
   }
@@ -517,34 +682,49 @@ function decide(hand, currentPlay, levelRank, ctx = {}) {
  *
  * @returns {{type: 'play', cards: Card[]}|{type: 'pass'}}
  */
-function autoPlayGrouped(hand, lastPlay, levelRank, ctx = {}) {
+function autoPlayGrouped(hand, lastPlay, levelRank, ctx = {}, difficulty = 'medium') {
   if (!hand || hand.length === 0) return { type: 'pass' }
 
   // 拆分鬼牌(逢人配)
   const { concrete, ghosts } = E.splitGhosts(hand, levelRank)
   const ghostAvail = ghosts.length
 
-  // 1. 王炸(4 王)—— 仅在有 4 王时使用
-  const kingCount = hand.filter(c => c.rank === 17).length + hand.filter(c => c.rank === 16).length
-  if (kingCount === 4) {
-    return { type: 'play', cards: hand.filter(c => c.rank >= 16) }
+  // Hard 难度:手牌 > 8 张时不出王炸/同花顺(留作关键时刻)
+  //   手牌 ≤ 8 张时按 medium 行为出(用大牌快速走完)
+  const skipBigPlays = difficulty === 'hard' && hand.length > 8
+
+  if (!skipBigPlays) {
+    // 1. 王炸(4 王)—— 仅在有 4 王时使用
+    const kingCount = hand.filter(c => c.rank === 17).length + hand.filter(c => c.rank === 16).length
+    if (kingCount === 4) {
+      return { type: 'play', cards: hand.filter(c => c.rank >= 16) }
+    }
+
+    // 2. 同花顺(5+ 张同花色连续)
+    const flush = findBestStraightFlush(concrete)
+    if (flush) return { type: 'play', cards: flush }
+
+    // 3. 炸弹(4+ 张同 rank)
+    const bomb = findBestBomb(concrete, ghostAvail, ghosts)
+    if (bomb) return { type: 'play', cards: bomb }
   }
-
-  // 2. 同花顺(5+ 张同花色连续)
-  const flush = findBestStraightFlush(concrete)
-  if (flush) return { type: 'play', cards: flush }
-
-  // 3. 炸弹(4+ 张同 rank)
-  const bomb = findBestBomb(concrete, ghostAvail, ghosts)
-  if (bomb) return { type: 'play', cards: bomb }
 
   // 4. 钢板
   const plate = findBestSteelPlate(concrete, ghostAvail, ghosts)
   if (plate) return { type: 'play', cards: plate }
 
   // 5. 顺子
-  const straight = findBestStraight(concrete, ghostAvail, ghosts)
-  if (straight) return { type: 'play', cards: straight }
+  //    Hard 难度手牌 > 8 张时也跳过 5+ 张顺子(5+ 张顺子也是大结构牌,留作关键时刻)
+  if (!skipBigPlays) {
+    const straight = findBestStraight(concrete, ghostAvail, ghosts)
+    if (straight) return { type: 'play', cards: straight }
+  } else {
+    // hard:5 张以下小顺子可出(3-4 张的微顺子)
+    // 简化:findBestStraight 已经返回最大,hard 时如果长度 >= 5 也跳过
+    // 真实实现可以用 findBestShortStraight,但项目没这个函数
+    // 简单策略:hard skipBigPlays 时只出 4 张以下小结构,跳过 5+ 张
+    // → 暂时硬跳过整个 findBestStraight
+  }
 
   // 6. 连对
   const pairStraight = findBestPairStraight(concrete, ghostAvail, ghosts)
@@ -822,7 +1002,9 @@ function findBestSingle(cards, ghostAvail, ghosts) {
 export {
   decide,
   findMinBeat,
+  findMinBeatHard,
   chooseLead,
+  chooseLeadHard,
   autoPlayGrouped,
   TYPE_VALUE,
 }
@@ -831,7 +1013,9 @@ export {
 const AI = {
   decide,
   findMinBeat,
+  findMinBeatHard,
   chooseLead,
+  chooseLeadHard,
   autoPlayGrouped,
   TYPE_VALUE,
 }

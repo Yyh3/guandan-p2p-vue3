@@ -237,6 +237,8 @@ const props = defineProps({
   selfSeat: { type: Number, default: 0 },
   ghostRank: { type: Number, default: undefined },
   isP2PMode: { type: Boolean, default: false },
+  // ★ v0.4.9:AI 难度
+  difficulty: { type: String, default: 'medium' },
 })
 
 // v2.4 task 1:纯逻辑抽到 useGameLogic.js composable
@@ -296,6 +298,8 @@ const {
   selfSeat: props.selfSeat,
   ghostRank: props.ghostRank,
   isP2PMode: props.isP2PMode,
+  // ★ v0.4.9:透传 AI 难度(从 URL query 读)
+  difficulty: props.difficulty,
 })
 
 // 路由相关的 UI 跳转(只能组件层做)

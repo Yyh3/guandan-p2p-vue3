@@ -300,6 +300,8 @@ const props = defineProps({
   selfSeat: { type: Number, default: 0 },
   ghostRank: { type: Number, default: undefined },
   isP2PMode: { type: Boolean, default: false },
+  // ★ v0.4.9:AI 难度
+  difficulty: { type: String, default: 'medium' },
 })
 
 // 占位:给 useGameLogic 注入 mainActionsRef(虽然 mobile 不渲染桌面版 MainActions,
@@ -329,6 +331,8 @@ const {
   selfSeat: props.selfSeat,
   ghostRank: props.ghostRank,
   isP2PMode: props.isP2PMode,
+  // ★ v0.4.9:透传 AI 难度
+  difficulty: props.difficulty,
 })
 
 // 名字省略(对手 pill 用,最多 4 字)

@@ -59,6 +59,8 @@ export function useGameLogic(opts = {}) {
   const nextLevelLabel = ref('2')
   const levelUp = ref(0)
   const multiplier = ref(1)
+  // ★ v0.4.9:AI 难度(从 game.state.difficulty 读,默认 'medium')
+  const gameDifficulty = ref(opts.difficulty || 'medium')
 
   // 4 个玩家座位(0=下=自己, 1=左, 2=上=队友, 3=右)
   const players = ref([
@@ -145,6 +147,10 @@ export function useGameLogic(opts = {}) {
     phase.value = st.phase
     levelRank.value = st.levelRank
     levelUp.value = st.levelUp || 0
+    // ★ v0.4.9:同步 difficulty(从 snapshot 接收时也更新)
+    if (st.difficulty === 'medium' || st.difficulty === 'hard') {
+      gameDifficulty.value = st.difficulty
+    }
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
       selected.value = new Array(myHand.value.length).fill(false)
@@ -517,6 +523,8 @@ export function useGameLogic(opts = {}) {
       isHost: isNetworkHost,
       aiPlayers: isP2P ? [] : aiPlayers,
       seed: seed,
+      // ★ v0.4.9:透传 difficulty 给 createGame(联机时所有 AI 用相同难度)
+      difficulty: gameDifficulty.value,
     })
     if (isP2P && game.value.setAIBroadcast) {
       game.value.setAIBroadcast((seat, cards, type) => {
@@ -695,7 +703,8 @@ function commitPass(seat, source = 'manual') {
 
 function onAutoFindBest() {
     if (!myTurn.value) return
-    const r = AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false })
+    const diff = gameDifficulty.value  // ★ v0.4.9:从 game state 取 difficulty 透传给 AI
+    const r = AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
     if (r?.type === 'play' && Array.isArray(r.cards) && r.cards.length > 0) {
       const cards = r.cards
       const remove = new Set(cards.map(c => cardKey(c)))
@@ -741,8 +750,8 @@ function onAutoFindBest() {
       // 跟牌场景:用 AI.decide 找最小可压(autoPlayGrouped 贪最强,不看 lastPlay,会导致提示用炸弹)
       // 首家场景:lastPlay=null,继续用 autoPlayGrouped 领出
       const r = lastPlay.value
-        ? AI.decide(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false })
-        : AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false })
+        ? AI.decide(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
+        : AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
       if (r?.type === 'play' && Array.isArray(r.cards) && r.cards.length > 0) {
         hintCards.value = r.cards.map(c => cardKey(c))
         const next = {}
@@ -1063,7 +1072,7 @@ function onAutoFindBest() {
               teammateSeatIndex: (seat + 2) % 4,
             }
             import_AI().then(AI => {
-              const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx)
+              const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
               // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
               if (r.type === 'play') {
                 commitPlay(seat, r.cards, 'ai')

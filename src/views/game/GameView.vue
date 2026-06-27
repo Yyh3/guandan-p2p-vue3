@@ -4,6 +4,7 @@
     :self-seat="selfSeat"
     :ghost-rank="ghostRank"
     :is-p2-p-mode="isP2PMode"
+    :difficulty="difficulty"
   />
 </template>
 
@@ -86,4 +87,9 @@ const isP2PMode = computed(() => {
 })
 const remoteHost = computed(() => String(route.query.host || ''))
 const role = computed(() => String(route.query.role || ''))
+// ★ v0.4.9:AI 难度参数(?difficulty=medium|hard,默认 medium)
+const difficulty = computed(() => {
+  const v = String(route.query.difficulty || 'medium')
+  return (v === 'medium' || v === 'hard') ? v : 'medium'
+})
 </script>
