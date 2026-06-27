@@ -497,6 +497,9 @@ function _handleJoinerMessage(msg) {
     //   如果自己是被选中的新 host(newHostSeat) → 升级
     if (migrate && seat === 0) {
       const newHostSeat = msg.payload?.newHostSeat
+      // v3.x P2-23 修复(N-3):从 PEER_LEAVE 消息里直接拿 snapshot(优先),
+      //   fallback 到 NEW_HOST 后手广播(announceNewHost 路径)
+      const snap = msg.payload?.snapshot ?? null
       if (newHostSeat != null && newHostSeat === selfSeat) {
         // 我就是新 host:把自己升到 seat 0
         const myInfo = peers.get(selfSeat) || selfInfo
@@ -504,10 +507,10 @@ function _handleJoinerMessage(msg) {
         peers.set(0, myInfo)
         selfSeat = 0
         isHostFlag = true
-        emit('host:migrated', { newHostSeat, snapshot: null, isMyself: true })
+        emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: true })
       } else if (newHostSeat != null) {
-        // 旁观者:等新 host 广播 NEW_HOST,或者这里先占位
-        emit('host:migrated', { newHostSeat, snapshot: null, isMyself: false })
+        // 旁观者:从 PEER_LEAVE 拿 snapshot,无需等 NEW_HOST 后手广播
+        emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
       }
     }
   } else if (msg.type === 'AI_TAKEOVER') {
@@ -749,6 +752,14 @@ function close() {
   lastHeartbeat.clear()
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
   _kickedSeats.clear()
+  // ★ v3.x P2-25 修复(N-4):清空事件总线 listeners,避免旧组件订阅的 handler 残留到下次开房
+  //   RoomView / GameView 卸载时如果忘了 off(),close 后这些 handler 还在 handlers 对象里,
+  //   下次 startAsHost 时如果新组件又 on() 同一事件,会触发两次回调(旧 + 新)
+  for (const k of Object.keys(handlers)) delete handlers[k]
+  // ★ v3.x P2-25 修复(N-5):重置 transport factory,让下次开房回到默认选择
+  //   joinRemoteRoom 会注入 WebSocketTransport factory,close 后应该清掉,否则下次浏览器开
+  //   host 会用上次的 WS factory,导致 host 起 ws server 而不是 BC channel
+  _transportFactory = null
 }
 
 // ============== v2.4-p4 BUG-006:网络层 swapSeats 权威 ==============
@@ -967,20 +978,26 @@ function selectNextHostCandidate() {
  *
  * ★ 调用前提:调用方需保证已经在 GameView 层调 game.value.migrateHost(0, newHostSeat)
  *
+ * v3.x P2-23 修复(N-3):接受 snapshot 参数,通过 PEER_LEAVE { migrate: true, snapshot }
+ *   传给所有 joiner,让新 host / 旁观者立即拿到 game state(无需等 NEW_HOST 后手广播)
+ *
  * @param {number} newHostSeat 选中的新 host 原 seat(1/2/3)
+ * @param {object} [snapshot] 当前 game state 快照(可选)
+ *   - 包含: { state, hands, table, currentSeat, levelRank, teamLevels, ... }
+ *   - 调用方(GameView)从 game.value 取需要的字段
  * @returns {boolean} true=成功发起
  */
-function requestHostMigration(newHostSeat) {
+function requestHostMigration(newHostSeat, snapshot) {
   if (!isHostFlag) return false
   if (![1, 2, 3].includes(newHostSeat)) {
     // 调用方没传 → 自动选
     newHostSeat = selectNextHostCandidate()
     if (newHostSeat === 0) return false  // 没人了,牌局结束
   }
-  // 广播 PEER_LEAVE + 迁移标记
+  // 广播 PEER_LEAVE + 迁移标记 + 快照
   sendMessage({
     type: 'PEER_LEAVE',
-    payload: { seat: 0, migrate: true, newHostSeat },
+    payload: { seat: 0, migrate: true, newHostSeat, snapshot: snapshot || null },
   })
   return true
 }

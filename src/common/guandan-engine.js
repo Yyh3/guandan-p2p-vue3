@@ -205,6 +205,9 @@ function recognize(cards) {
   }
 
   // 对子(注意大小王不可组成对子)
+  //   v3.x P2-26 明确(E-3):掼蛋规则 — 王不能组对子(2 张小王 / 2 张大王都不行),
+  //   王的合法组合只有王炸(4 张王一起)和单张。当前实现 jokerCnt === 0 是正确的,
+  //   显式 reject jokerCnt === 2 的情形,避免误判为对子。
   if (len === 2 && jokerCnt === 0 && counts.length === 1) {
     return { type: TYPE.PAIR, mainRank: Number(Object.keys(cnt)[0]), length: 2 }
   }
@@ -558,8 +561,31 @@ function getLevelRank(currentLevelRank, levelUp) {
  * v3.x G-12 修复:增加 pairFromTo 明确"谁给谁",双贡时按"下游给上游"配对:
  *   - 单下贡(头+末/头+三同队):from=[末],to=[头]
  *   - 双下贡(双上):下游(三+末游)分别给上游(头+二游)
+ *
+ * v3.x P2-27 修复(E-6):旧版两个返回路径都硬编码 needTribute=true,字段无判断意义。
+ *   新增可选 levelUp 参数:严格"双下不贡"规则下,头+二+三+末分占两队(对应 levelUp=0)
+ *   时不贡。2v4 划分下 levelUp=0 实际不可达(calcLevelUp 的 4 个分支都对应需贡),
+ *   此分支是防御性 fallback,让 needTribute 字段有真正的判断意义。
+ *   旧调用方(不传 levelUp)行为完全不变。
+ *
+ * @param {Array<number>} ranks
+ * @param {Array<Array<number>>} teams
+ * @param {number} [levelUp] —— 升级数(0/1/2/3)。可选,不传则按 2v2 永远贡的旧行为。
+ * @param {number} [levelRank] —— 当前级牌 rank(可选,用于打 A 不过的特殊规则)
  */
-function tributeInfo(ranks, teams, levelRank) {
+function tributeInfo(ranks, teams, levelUp, levelRank) {
+  // v3.x P2-27 修复(E-6):严格规则下,levelUp === 0(头+二+三+末分占两队,即真"双下")不贡
+  //   实际 2v2 划分下 levelUp=0 不可达,此分支是防御性 + 让字段有判断意义
+  if (levelUp === 0) {
+    return {
+      needTribute: false,
+      from: [],
+      to: [],
+      doubleTribute: false,
+      pairFromTo: [],
+    }
+  }
+
   const head = ranks[0]
   const second = ranks[1]
   const third = ranks[2]

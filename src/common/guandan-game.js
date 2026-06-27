@@ -48,8 +48,11 @@ function createGame(opts) {
     levelUp: 0,              // 本局升级数
     // v3.x P2-22 修复(G-5):双方独立等级字段(简化实现下两队同升同降,但字段已分)
     //   索引 0 = [0,2] 队,索引 1 = [1,3] 队
-    //   简化规则下:levelRank = teamLevels[赢家队],双方保持一致
-    //   未来规则若实现"打 A 不过则只末家降级"之类差异化,可用两字段不同步
+    //   **当前简化**:不论赢家,两队 levelRank 始终同步(见 applyRoundEnd 内注释)。
+    //   字段分开的目的是给未来差异化升级留 API 空间,避免破坏向后兼容。
+    //   未来规则若实现"打 A 不过则只末家降级"之类差异化,可用两字段不同步。
+    //   外部读取(UI / 序列化):getLevelRankForTeam(teamIdx) → state.teamLevels[teamIdx]
+    //   推荐封装,避免直接读 state.teamLevels[0] / [1] 漏掉一致性维护。
     teamLevels: [levelRank, levelRank],
   }
 
@@ -293,11 +296,23 @@ function createGame(opts) {
     const ranks = state.finishedOrder.slice()
     const teams = [[0, 2], [1, 3]]
     const levelUp = E.calcLevelUp(ranks, teams)
-    const tribute = E.tributeInfo(ranks, teams)
+    // v3.x P2-27 修复(E-6):tributeInfo 接受 levelUp 参数,严格"双下不贡"规则下
+    //   levelUp=0(实际 2v2 不可达)会返回 needTribute:false。让字段有真正判断意义。
+    const tribute = E.tributeInfo(ranks, teams, levelUp)
     state.levelUp = levelUp
     state.tribute = tribute
     // v3.x P2-22 修复(G-5):升级时更新双方 teamLevels(简化:双方同步)
-    //   未来差异化时:teamLevels[0] = winnerTeam===0 ? upgrade : maybe downgrade
+    //   当前简化策略:不论赢家是哪个队,两队的 levelRank 都被同步升 levelUp 级。
+    //   严格掼蛋规则应是"赢家升、输家不升"(双上时输家甚至可能降级)。
+    //   实施复杂度的代价:需要在 calcLevelUp 阶段追踪输家队的等级变化,影响
+    //   state.levelRank / teamLevels / getLevelRank / 升级提示 / 升 A 不过 / 还原
+    //   等多处逻辑。**当前作用域**:本游戏 P2P 局域网版不实现差异化升级,只用
+    //   简化版(双方同步升),UI 上不显示"对方队"levelRank(只显示本队 levelRank)。
+    //   未来真要做差异化,需新增 teamLevelUp[] 分别计算,再在 applyRoundEnd 里
+    //   按 winnerTeam 升级 winner 队、保持 loser 队不变(可能需要根据 levelUp
+    //   数值做"过 A 不过"等特殊规则)。
+    //   - 未来差异化时:teamLevels[0] = winnerTeam===0 ? upgrade : maybe downgrade
+    //   - 现状约束:teamLevels 字段已加(对外 API 兼容),但内部逻辑仍同步
     const newLevelRank = E.getLevelRank(state.levelRank, levelUp)
     state.teamLevels = [newLevelRank, newLevelRank]
     state.levelRank = newLevelRank

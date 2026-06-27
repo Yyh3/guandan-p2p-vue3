@@ -333,7 +333,9 @@ export class WebSocketTransport {
   send(msg) {
     const data = JSON.stringify(msg)
     if (!this._ready) {
-      this._outbox.push(data)
+      // v3.x P2-24 修复(N-6):outbox 存 {data, msg} 而非纯 data 字符串,
+      //   flush 时能拿到 msg.to 做定向路由(原来只存 data,flush 只能广播,丢定向消息)
+      this._outbox.push({ data, msg })
       return true
     }
     if (this._mode === 'self') {
@@ -373,16 +375,29 @@ export class WebSocketTransport {
     if (!this._ready) return
     const pending = this._outbox
     this._outbox = []
-    for (const data of pending) {
+    for (const item of pending) {
+      // v3.x P2-24 修复(N-6):outbox 项是 {data, msg} 格式,flush 时根据 msg.to 定向/广播
+      const data = item?.data
+      const msg = item?.msg
       if (this._mode === 'self') {
-        // 异步 flush 时没有完整 msg 对象了，统一广播
-        for (const ws of this._clients.keys()) {
-          if (ws.readyState === 1) {
-            try { ws.send(data) } catch (e) { /* swallow */ }
+        if (msg && msg.to != null) {
+          // 定向:找 seat === msg.to 的 ws(复用 _sendHost 的路由逻辑)
+          for (const ws of this._clients.keys()) {
+            if (ws._seat === msg.to && ws.readyState === 1 /* OPEN */) {
+              try { ws.send(data) } catch (e) { /* swallow */ }
+              break
+            }
+          }
+        } else {
+          // 广播:所有 OPEN 的 ws
+          for (const ws of this._clients.keys()) {
+            if (ws.readyState === 1) {
+              try { ws.send(data) } catch (e) { /* swallow */ }
+            }
           }
         }
       } else if (this._mode === 'client') {
-        if (this._ws && this._ws.readyState === 1) {
+        if (this._ws && this._ws.readyState === 1 /* OPEN */) {
           try { this._ws.send(data) } catch (e) { /* swallow */ }
         }
       }

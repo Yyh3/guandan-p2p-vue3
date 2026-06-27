@@ -50,9 +50,9 @@ function findMinBeat(hand, target, ghostCount, levelRank) {
   if (!target || target.type === TYPE.INVALID) return null
 
   // 优先:王炸(只用一次,直接返回所有王)
-  if (hand.some(c => c.rank === 17) && hand.some(c => c.rank === 17) &&
-      hand.filter(c => c.rank === 17).length === 2 &&
-      hand.filter(c => c.rank === 16).length === 2) {
+  //   v3.x P2-28 修复(A-4'):原 `hand.some(c => c.rank === 17) && hand.some(c => c.rank === 17)`
+  //   重复判定两次且缺 rank 16 路径(小王也得算)。简化为单行 filter === 4。
+  if (hand.filter(c => c.rank >= 16).length === 4) {
     return hand.filter(c => c.rank >= 16)
   }
 
