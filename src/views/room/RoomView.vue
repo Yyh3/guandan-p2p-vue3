@@ -398,6 +398,32 @@ async function initNetwork() {
     }
   })
   // ★ v3.8 P1 修复:joiner 收到 host 的 SEAT_SWAP 也本地交换(否则 joiner 还看到旧的 seat 名字)
+  // ★ v2.4-p4 BUG-006 修复:swap 改成走 network.js 权威(peer:seat_swap 事件)
+  //   - 不再在 RoomView 自己 broadcast SEAT_SWAP (之前会让 joiner 端 peers Map 与
+  //     network.js 内部 peers Map 不同步 → GameView 初始化读到 stale state)
+  //   - onSwapWithTeammate 调 net.swapSeats(0, 2),network.js 统一改 peers Map / selfSeat
+  //   - RoomView 监听 'peer:seat_swap' 事件同步本地 reactive peers Map(纯 UI 拷贝)
+  //   - SEAT_SWAP(老协议)保留 handler 作 backward-compat(其它客户端可能还广播老协议)
+  onNet('peer:seat_swap', (payload) => {
+    if (!payload) return
+    const a = payload.a
+    const b = payload.b
+    if (typeof a !== 'number' || typeof b !== 'number') return
+    // 拷贝 network.js 已经 swap 完的 peers Map entries 到本地 reactive peers Map
+    // (network.js 已经 swap 过,这里只需要同步读 + 写到本地 reactive Map 让 UI 重渲染)
+    // 注意:infoA / infoB 是 swap 之前的信息,这里直接重读 net.getPeers() 拿 swap 后状态
+    try {
+      const fresh = net.getPeers ? net.getPeers() : null
+      if (fresh && fresh.get) {
+        const infoA = fresh.get(a)
+        const infoB = fresh.get(b)
+        if (infoA) peers.set(b, infoA)
+        else peers.delete(b)
+        if (infoB) peers.set(a, infoB)
+        else peers.delete(a)
+      }
+    } catch (e) { /* swallow */ }
+  })
   onNet('message:SEAT_SWAP', (payload) => {
     if (!payload || !Array.isArray(payload.between) || payload.between.length !== 2) return
     const [a, b] = payload.between
@@ -559,14 +585,20 @@ function onSwapWithTeammate() {
   myName.value = mate.nickname
   myAvatar.value = mate.avatar
   myReady.value = mate.ready
-  peers.set(2, me)
   storage.setNickname(myName.value)
   storage.setAvatar(myAvatar.value)
-  // ★ v3.8 P1 修复:swap 后广播 SEAT_SWAP(joiner 调本机 listener 互换 peers),
-  // 同时广播 NICK_UPDATE 让 joiner 更新 seat 0 的新昵称(SEAT_SWAP 互换 entries
-  // 也能更新,但 NICK_UPDATE 是更直接的"自己改了自己名"信号,防 NICK_UPDATE
-  // 监听器依赖 from 字段的逻辑漏掉)
-  net.broadcast({ type: 'SEAT_SWAP', payload: { between: [0, 2] } })
+  // ★ v2.4-p4 BUG-006 修复:swap 走网络层权威 net.swapSeats(0, 2)
+  //   network.js 内部统一改 peers Map / selfSeat + 广播 SEAT_SWAP_ACK +
+  //   emit 'peer:seat_swap' 给本机监听者(RoomView 已经在 onNet('peer:seat_swap')
+  //   里同步了本地 reactive peers Map)
+  const r = net.swapSeats(0, 2)
+  if (!r.ok) {
+    console.warn('swapSeats 失败:', r.error)
+    return
+  }
+  // ★ 同时广播 NICK_UPDATE 让 joiner 更新 seat 0 的新昵称
+  //   (SEAT_SWAP_ACK 互换 entries 也能更新,但 NICK_UPDATE 是更直接的
+  //   "自己改了自己名"信号,防 NICK_UPDATE 监听器依赖 from 字段的逻辑漏掉)
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
 }
 function onCut() { alert('切牌完成') }

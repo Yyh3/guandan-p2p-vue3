@@ -415,7 +415,20 @@ function _handleHostMessage(msg) {
 }
 
 function _handleJoinerMessage(msg) {
-  if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
+  if (msg.type === 'SEAT_SWAP_ACK') {
+    // ★ v2.4-p4 BUG-006:joiner 端收到 host 的 SEAT_SWAP_ACK,本地同步 swap
+    //   _applySeatSwapLocal 内部会更新 peers Map + selfSeat + emit 'peer:seat_swap'
+    if (!msg.payload) return
+    const a = msg.payload.a
+    const b = msg.payload.b
+    if (typeof a !== 'number' || typeof b !== 'number' || a === b) return
+    if (a < 0 || a > 3 || b < 0 || b > 3) return
+    // ★ host 自己发起 swapSeats 时也会收到自己的 broadcast(WS host send 不回环,
+    //   BC host 不回环,但本端 swapSeats 已经本地应用过,二次 _applySeatSwapLocal
+    //   是 idempotent 的——a/b swap 两次等于原样)。安全起见我们让 host 端也调一次
+    //   来保持 emit 事件对称(joiner 端通过 emit 'peer:seat_swap' 同步 UI)。
+    _applySeatSwapLocal(a, b)
+  } else if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
       peers.set(seat, info)
@@ -709,6 +722,95 @@ function close() {
   lastHeartbeat.clear()
 }
 
+// ============== v2.4-p4 BUG-006:网络层 swapSeats 权威 ==============
+/**
+ * 互换两个 seat 的玩家信息 —— **网络层权威**(BUG-006 修复)
+ *
+ * 之前 RoomView.vue 的 onSwapWithTeammate 直接改本地 reactive peers Map + 广播
+ *   SEAT_SWAP,但 network.js 内部的 peers Map、selfSeat、GameView 初始化时
+ *   的玩家座位可能没同步 → 出现"UI 看到换座但 network / game 层没换"的 stale state。
+ *
+ * 修法:把 swap 的"权威"放在 network.js,所有 seat 状态变更(peers Map / selfSeat /
+ *   transport routing)统一由本函数处理:
+ *   1. 互换 peers Map 的 seatA / seatB entries(若某 seat 不存在,跳过该 seat 的拷贝)
+ *   2. 如果 selfSeat 在 {a, b} 中,更新 selfSeat 到另一个 seat
+ *   3. 广播 SEAT_SWAP_ACK { a, b, ts } 让所有 joiner 走同一份逻辑(joiner 端
+ *      _handleJoinerMessage 收到后调 _applySeatSwapLocal 同步状态)
+ *   4. emit 'peer:seat_swap' 事件给本机 UI 监听者(RoomView 的 peers Map / GameView
+ *      初始化读 net.getPeers() 拿最新)
+ *
+ * 调用方:
+ *   - host / joiner 任何想换 seat 的人都可调,通常是 host 换队友(RoomView.vue)
+ *   - GameView 初始化时**不再**自己合并 UI 临时 state,直接读 net.getPeers() 拿权威
+ *
+ * 不变量:
+ *   - 调用前 peers / selfSeat 反映"换前"状态,调用后立即反映"换后"状态(同步)
+ *   - 任何 joiner 收到 SEAT_SWAP_ACK 后,自己 peers / selfSeat 立即同步
+ *     (不等 broadcast loopback / 6-8s 心跳)
+ *   - emit 'peer:seat_swap' 永远在本地 state 改完之后再触发
+ *
+ * @param {number} a seat (0-3)
+ * @param {number} b seat (0-3)
+ * @returns {{ok:boolean, error?:string}}
+ */
+function swapSeats(a, b) {
+  if (!Number.isInteger(a) || !Number.isInteger(b)) {
+    return { ok: false, error: 'seat 必须是整数' }
+  }
+  if (a < 0 || a > 3 || b < 0 || b > 3) {
+    return { ok: false, error: 'seat 必须在 [0,3] 范围' }
+  }
+  if (a === b) {
+    return { ok: false, error: 'seat a 和 b 不能相同' }
+  }
+  if (!transport) {
+    // 没有 transport → 已 close 或尚未 startAsHost / joinRoom
+    return { ok: false, error: '尚未连接到房间,不能 swap' }
+  }
+  // ★ 1) 互换 peers Map 的 entries(如果某 seat 不存在,跳过该侧的拷贝)
+  const infoA = peers.get(a)
+  const infoB = peers.get(b)
+  if (infoA) peers.set(b, infoA)
+  else peers.delete(b)
+  if (infoB) peers.set(a, infoB)
+  else peers.delete(a)
+  // ★ 2) 如果 selfSeat 在 {a, b} 中,切换到另一个 seat
+  if (selfSeat === a) selfSeat = b
+  else if (selfSeat === b) selfSeat = a
+  // ★ 3) 广播 SEAT_SWAP_ACK(走 RELAY_TYPES 让 WS host 能转发)
+  //   注:SEAT_SWAP_ACK 不在 RELAY_TYPES 里 — 因为它需要由 host 主动发起,
+  //   而 host 自己的 swapSeats 调 sendMessage broadcast 即可,joiner 端不需要
+  //   转发给另一个 joiner(joiner 之间互不通信,join 状态由 host 集中协调)。
+  //   但保留 broadcast 让 host / joiner 都能收到并同步自己的 state。
+  sendMessage({
+    type: 'SEAT_SWAP_ACK',
+    payload: { a, b, ts: Date.now() },
+  })
+  // ★ 4) 本机 UI 通知 — RoomView 监听 'peer:seat_swap' 同步 reactive peers Map
+  emit('peer:seat_swap', { a, b, infoA: infoA || null, infoB: infoB || null })
+  return { ok: true }
+}
+
+/**
+ * joiner 端收到 SEAT_SWAP_ACK 后,在 _handleJoinerMessage 里调此函数同步本地状态。
+ *
+ * ★ 重要:不调 broadcast / sendMessage,只改本机 state。joiner 之间互不通信。
+ *
+ * @param {number} a
+ * @param {number} b
+ */
+function _applySeatSwapLocal(a, b) {
+  const infoA = peers.get(a)
+  const infoB = peers.get(b)
+  if (infoA) peers.set(b, infoA)
+  else peers.delete(b)
+  if (infoB) peers.set(a, infoB)
+  else peers.delete(a)
+  if (selfSeat === a) selfSeat = b
+  else if (selfSeat === b) selfSeat = a
+  emit('peer:seat_swap', { a, b, infoA: infoA || null, infoB: infoB || null })
+}
+
 // ============== v2.1 P3:Host 迁移 ==============
 /**
  * 选下一个 host 候选 —— 队友优先(seat 2),然后左手对手(1)、右手对手(3)
@@ -828,6 +930,8 @@ export {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
+  // ★ v2.4-p4 BUG-006:swapSeats 网络层权威
+  swapSeats,
   scanLanRooms,
   ensureUuid,
   // ★ v2.1 P3:host 迁移 API
@@ -849,6 +953,8 @@ const net = {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
+  // ★ v2.4-p4 BUG-006:swapSeats 网络层权威
+  swapSeats,
   scanLanRooms,
   // ★ v2.1 P3:host 迁移
   selectNextHostCandidate, requestHostMigration, announceNewHost,
