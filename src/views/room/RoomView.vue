@@ -614,23 +614,27 @@ function onCut() { alert('切牌完成') }
 //   - 其他 joiner 端:从 host broadcast PEER_LEAVE { kick: true } 收到后:
 //        * selfSeat === seat + kick:true → 'self:kicked' → UI 跳 /?force_disconnected=1
 //        * selfSeat !== seat → 旁观者,正常 peers.delete + peer:leave
+// ★ v2.4-p4 BUG-007 修复:改用 net.kickPlayer(seat) 统一踢人协议
+//   - host 端 peers Map 立即清(不等心跳)
+//   - 给被踢 joiner 定向发 KICKED(优先于 ws.onclose,joiner 端立即跳页)
+//   - 旁观 joiner 端立即 peers.delete(不等心跳)
+//   - transport.forceDisconnectSeat 行为不变,只在 WS / AndroidWs 路径下调
 function onKickPlayer(seat) {
   if (!isHost.value) return
   if (seat !== 1 && seat !== 3) return
   const target = peers.get(seat)
   if (!target) return
   const nickname = target.nickname || `座位 ${seat}`
-  if (!confirm(`确定要踢出 ${nickname} 吗?\n\n该玩家将立即断开连接,可在 6-8s 后重新加入。`)) return
-  // 1) 调 transport 真断 + broadcast PEER_LEAVE { kick: true }
-  const t = net._getTransport && net._getTransport()
-  if (t && typeof t.forceDisconnectSeat === 'function') {
-    t.forceDisconnectSeat(seat)
-  } else {
-    // 兜底:如果 transport 不支持,本地清 + 广播 PEER_LEAVE
-    net.broadcast({ type: 'PEER_LEAVE', payload: { seat, kick: true, reason: 'kicked' } })
+  if (!confirm(`确定要踢出 ${nickname} 吗?\n\n该玩家将立即断开连接。`)) return
+  // 1) 调网络层统一踢人接口(立即清 host 端 peers Map + 定向 KICKED + 广播 PEER_LEAVE + ws 关)
+  const r = net.kickPlayer(seat, 'kicked')
+  if (!r || !r.ok) {
+    console.warn('kickPlayer 失败:', r && r.error)
+    return
   }
-  // 2) 同步 UI 反映 — 立即改 reactive peers Map (UI 状态)
-  //   注意:这不影响 network.js 内部的 peers Map,后者由心跳 6-8s 后 _tickHeartbeatChecker 释放
+  // 2) 同步 UI 反映 — 立即改 reactive peers Map (RoomView UI 状态,与 network.js 解耦)
+  //   net.kickPlayer 已经 emit 'peer:leave' 给本机 listener,但 RoomView 自己的 reactive
+  //   peers Map 也需要同步(否则 UI 卡片还在)
   peers.delete(seat)
 }
 </script>

@@ -231,6 +231,15 @@ function startHeartbeatChecker() {
     const now = Date.now()
     for (const [seat, ts] of lastHeartbeat.entries()) {
       if (now - ts > HEARTBEAT_TIMEOUT_MS) {
+        // ★ v2.4-p4 BUG-007:被踢的 seat 即使心跳超时也不重复处理
+        //   kickPlayer 已经清掉 lastHeartbeat / peers / emit 过 peer:leave,
+        //   任何延迟心跳到达都不会重新触发 (HEARTBEAT 消息 handler 也会跳过 _kickedSeats)
+        //   这里再保险一次:即使被踢 seat 在 lastHeartbeat 里残留(测试或边缘 race),
+        //   也不应该再触发 peer:leave
+        if (_kickedSeats.has(seat)) {
+          lastHeartbeat.delete(seat)
+          continue
+        }
         lastHeartbeat.delete(seat)
         const info = peers.get(seat)
         peers.delete(seat)
@@ -399,6 +408,9 @@ function _handleHostMessage(msg) {
     }
   } else if (msg.type === 'HEARTBEAT') {
     if (peers.has(msg.from)) {
+      // ★ v2.4-p4 BUG-007:被踢 joiner 在 ws 完全关闭前可能还有最后一帧心跳,
+      //   跳过被踢 seat,防止 6-8s 心跳窗口把"被踢的"重新认作"在房"。
+      if (_kickedSeats.has(msg.from)) return
       lastHeartbeat.set(msg.from, Date.now())
     }
   } else if (msg.type === '_DISCONNECT') {
@@ -406,6 +418,9 @@ function _handleHostMessage(msg) {
     // joiner 端 ws.onclose 会 emit _DISCONNECT 上来
     const seat = msg.from
     if (peers.has(seat)) {
+      // ★ v2.4-p4 BUG-007:被踢 joiner 的 ws.onclose 触发的 _DISCONNECT 不要再触发清理
+      //   (kickPlayer 已经清过 peers / lastHeartbeat / emit 过 peer:leave)
+      if (_kickedSeats.has(seat)) return
       // 标记 lastHeartbeat 为 -1,让 checker 立即知道该 joiner 断了
       lastHeartbeat.set(seat, -1)
       // 可选:立即触发 peer:leave(但 joiner 端 close 时也会触发,避免重复)
@@ -428,6 +443,14 @@ function _handleJoinerMessage(msg) {
     //   是 idempotent 的——a/b swap 两次等于原样)。安全起见我们让 host 端也调一次
     //   来保持 emit 事件对称(joiner 端通过 emit 'peer:seat_swap' 同步 UI)。
     _applySeatSwapLocal(a, b)
+  } else if (msg.type === 'KICKED') {
+    // ★ v2.4-p4 BUG-007:joiner 端收到 host 定向发的 KICKED,立即跳页
+    //   KICKED 比 PEER_LEAVE 优先级更高,因为它直达被踢者,不需要根据 seat 字段匹配
+    //   注意:KICKED 是定向消息(to=seat),其它 joiner 不会收到
+    const payload = msg.payload || {}
+    emit('self:kicked', { reason: payload.reason || 'kicked', ts: payload.ts || Date.now() })
+    // ★ 通知 host 端 transport 关闭(joiner 端 transport 自己 close 会触发 _DISCONNECT)
+    //   不在这里主动 close transport,留给 ws.onclose 自然路径,避免与 _DISCONNECT 重复
   } else if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
@@ -457,14 +480,18 @@ function _handleJoinerMessage(msg) {
     const migrate = msg.payload?.migrate === true
     if (seat != null && peers.has(seat)) {
       peers.delete(seat)
-      emit('peer:leave', { seat })
+      // ★ v2.4-p4 BUG-007:joiner 端 emit peer:leave 时携带 kicked 标记
+      //   让旁观 joiner 的 UI 立即响应(不等心跳)
+      emit('peer:leave', { seat, kicked })
     }
     // ★ v2.1 P1 host 主动踢人:被踢的 joiner 自己跳到 /?force_disconnected=1
     //   BC 路径:host broadcast PEER_LEAVE { kick: true, seat } → 只有被踢的 joiner 命中此分支
     //   WS / AndroidWs 路径:joiner 端 ws.onclose → emit _DISCONNECT → 自己也会走 close 路径,
     //                          但踢人消息走网络层更可靠 (即使 ws onclose 没及时触发也能 navigate)
     if (kicked && seat === selfSeat) {
-      emit('self:kicked', { reason: msg.payload?.reason || 'kicked' })
+      // ★ v2.4-p4 BUG-007:兼容 KICKED 协议,携带 ts 字段(joiner 端可能在 KICKED
+      //   之前收到 PEER_LEAVE 时也跳页,所以 self:kicked 必须有完整 payload)
+      emit('self:kicked', { reason: msg.payload?.reason || 'kicked', ts: msg.payload?.ts || Date.now() })
     }
     // ★ v2.1 P3:host 迁移标记 — joiner 收到 PEER_LEAVE { seat: 0, migrate: true }
     //   如果自己是被选中的新 host(newHostSeat) → 升级
@@ -720,6 +747,8 @@ function close() {
   selfSeat = 0
   peers.clear()
   lastHeartbeat.clear()
+  // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
+  _kickedSeats.clear()
 }
 
 // ============== v2.4-p4 BUG-006:网络层 swapSeats 权威 ==============
@@ -809,6 +838,101 @@ function _applySeatSwapLocal(a, b) {
   if (selfSeat === a) selfSeat = b
   else if (selfSeat === b) selfSeat = a
   emit('peer:seat_swap', { a, b, infoA: infoA || null, infoB: infoB || null })
+}
+
+// ============== v2.4-p4 BUG-007:统一踢人协议 (kickPlayer) ==============
+/**
+ * 已被踢的 seat 集合(host 端)—— 防止被踢 joiner 的延迟心跳回来再次触发 peer:leave,
+ *   或 6-8s 心跳窗口里 host 端误以为 joiner 还在场。
+ *
+ * 该 set 在 host 调 kickPlayer() 时写入,在 close() 时清理(下次开房不残留)。
+ *
+ * ★ 不影响 transport / transport.forceDisconnectSeat 的行为,只是 network.js 内部状态标记。
+ *
+ * @type {Set<number>}
+ */
+const _kickedSeats = new Set()
+
+/**
+ * Host 统一踢人接口 —— 网络层权威 (BUG-007 修复)
+ *
+ * 之前 RoomView.vue onKickPlayer 直接调 transport.forceDisconnectSeat(seat),
+ *   但 WS / Android WS 路径下被踢 joiner 端需要先收 KICKED 再 ws.close()。
+ *   而且其它旁观 joiner 需要立即从 peers Map 删被踢者(不等 6-8s 心跳超时)。
+ *
+ * 真做机制(4 步):
+ *   1) 给目标 seat 定向发 KICKED { reason, ts } —— 让被踢 joiner 收到后立刻 emit 'self:kicked'
+ *      (优先于 ws.onclose 异步触发,WS / AndroidWs joiner 端立即跳页)
+ *   2) 广播 PEER_LEAVE { seat, kick: true } 给其它 joiner —— 让旁观 joiner **立即**
+ *      peers.delete(seat) + emit 'peer:leave',不等 6-8s 心跳超时
+ *   3) host 端本机立即 peers.delete(seat) + lastHeartbeat.delete(seat) +
+ *      emit 'peer:leave' + 把 seat 写入 _kickedSeats(防止后续 _DISCONNECT 重复处理)
+ *   4) 调 transport.forceDisconnectSeat(seat) —— 真断 ws 连接(WS / AndroidWs 关 ws,
+ *      BC broadcast PEER_LEAVE)
+ *
+ * ★ 跟 v2.1 P1 kick player 的区别:
+ *   - v2.1 P1:host 不动 network.js 内部 peers Map,留给 6-8s 心跳窗口
+ *   - v2.4-p4 BUG-007:host **立即**清 peers Map(其它 joiner 端也立即清),避免 6-8s 空窗
+ *   - KICKED 消息是新增的协议层,被踢 joiner 端 _handleJoinerMessage 优先触发 self:kicked
+ *
+ * 不变量:
+ *   - transport.forceDisconnectSeat 行为**不**变(WS 关 ws / AndroidWs 关 ws / BC broadcast)
+ *   - KICKED 协议只走 sendTo(seat, ...) 定向消息,不广播
+ *   - PEER_LEAVE { kick: true } 仍广播,保证旁观 joiner 端路径对称
+ *
+ * @param {number} seat 要踢的 seat (1-3,host 自己 seat=0 不能踢)
+ * @param {string} [reason='kicked'] 踢人原因
+ * @returns {{ok:boolean, error?:string}}
+ */
+function kickPlayer(seat, reason) {
+  if (!isHostFlag) return { ok: false, error: '只有 host 可以踢人' }
+  if (!Number.isInteger(seat) || seat < 1 || seat > 3) {
+    return { ok: false, error: 'seat 必须在 [1,3] 范围' }
+  }
+  if (_kickedSeats.has(seat)) {
+    // 已踢过(幂等) — 不重复发消息,但仍返回 ok:true 让调用方知道踢过
+    return { ok: true, error: 'already kicked' }
+  }
+  if (!peers.has(seat)) {
+    return { ok: false, error: 'seat ' + seat + ' 不存在' }
+  }
+  _kickedSeats.add(seat)
+  const ts = Date.now()
+  const finalReason = reason || 'kicked'
+  // ★ 1) 给目标 seat 定向发 KICKED(WS / AndroidWs 走 sendTo,BC sendTo 跟 broadcast 等价)
+  //   joiner 端 _handleJoinerMessage 收到 KICKED → 立即 emit 'self:kicked' → UI 跳页
+  sendMessage({
+    type: 'KICKED',
+    payload: { reason: finalReason, ts },
+    to: seat,
+  })
+  // ★ 2) 广播 PEER_LEAVE { seat, kick: true } —— 旁观 joiner 立即从 peers Map 删
+  //   同时 host 自己 emit('peer:leave', ...) 给本机 listener(RoomView / GameView)
+  // ★ 3) host 端立即清 peers Map + lastHeartbeat(不再等 6-8s 心跳)
+  const removedInfo = peers.get(seat) || null
+  peers.delete(seat)
+  lastHeartbeat.delete(seat)
+  emit('peer:leave', { seat, info: removedInfo, kicked: true })
+  // 广播 PEER_LEAVE 给所有 joiner(定向或广播都行,这里用 broadcast 让 BC / WS 路径都通)
+  sendMessage({
+    type: 'PEER_LEAVE',
+    payload: { seat, kick: true, reason: finalReason, ts },
+  })
+  // ★ 4) 真断 ws 连接(WS 关 ws / AndroidWs 关 ws / BC broadcast PEER_LEAVE)
+  //   BC 模式下 forceDisconnectSeat 已经 broadcast 过 PEER_LEAVE { kick: true },
+  //   我们刚才发的 PEER_LEAVE 会变成"双份",但 BC joiner 端 _handleJoinerMessage
+  //   收到后只是 peers.delete + emit,重复处理幂等(peers.has 检查 + emit 都会覆盖)
+  //   为了避免 BC 双份,只在 WS / AndroidWs 路径下调 forceDisconnectSeat。
+  //   简单判定:transport._mode === 'self' 且 transport._channel == null 才是 ws-like host
+  const isWsLikeHost = transport && transport._mode === 'self' && transport._channel == null
+  if (isWsLikeHost && typeof transport.forceDisconnectSeat === 'function') {
+    // ★ WS / AndroidWs 路径:调 transport 真的关 ws + 关 client
+    //   注意:AndroidWsTransport.forceDisconnectSeat 内部已经 broadcast 了
+    //   PEER_LEAVE { kick: true },会跟我们刚才 broadcast 的重复。joiner 端
+    //   _handleJoinerMessage 对重复消息幂等(peers.delete 重复无害),所以允许。
+    transport.forceDisconnectSeat(seat)
+  }
+  return { ok: true }
 }
 
 // ============== v2.1 P3:Host 迁移 ==============
@@ -908,6 +1032,10 @@ function _tickHeartbeatChecker() {
 }
 
 function _forceExpireHeartbeat(seat) {
+  // ★ v2.4-p4 BUG-007:测试辅助,不污染被踢 seat 的 lastHeartbeat
+  //   (被踢 seat 已被 kickPlayer 清掉 lastHeartbeat;测试不应主动加回,否则
+  //    heartbeat checker 会再次触发 peer:leave 重复事件)
+  if (_kickedSeats.has(seat)) return
   lastHeartbeat.set(seat, Date.now() - HEARTBEAT_TIMEOUT_MS - 1000)
 }
 
@@ -930,8 +1058,8 @@ export {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
-  // ★ v2.4-p4 BUG-006:swapSeats 网络层权威
-  swapSeats,
+  // ★ v2.4-p4 BUG-006/007:swapSeats 网络层权威 + kickPlayer 统一踢人协议
+  swapSeats, kickPlayer,
   scanLanRooms,
   ensureUuid,
   // ★ v2.1 P3:host 迁移 API
@@ -953,8 +1081,8 @@ const net = {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
-  // ★ v2.4-p4 BUG-006:swapSeats 网络层权威
-  swapSeats,
+  // ★ v2.4-p4 BUG-006/007
+  swapSeats, kickPlayer,
   scanLanRooms,
   // ★ v2.1 P3:host 迁移
   selectNextHostCandidate, requestHostMigration, announceNewHost,
