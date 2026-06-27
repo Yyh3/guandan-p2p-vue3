@@ -219,6 +219,24 @@ const qrLibOk = ref(true)
 //   production 也无害——net 是 ESM 单例,本来就是 reactive 状态)
 if (typeof window !== 'undefined') window.__gd_net = net
 
+// ★ BUG-004 修复:disposers 数组追踪所有 net.on(...) 监听器,
+//   showMenu / onUnmounted 调 cleanupRoomListeners() 释放,避免 RoomView 卸载后
+//   net 内部 handlers Map 残留旧 handler → 二次进房触发 stale callback
+//   跟 useGameLogic.js L901-908 的 net.off('message:X')(无 handler,全删)不同:
+//   这里用精确 off(event, handler) 只删自己注册的,不破坏其它组件订阅
+const disposers = []
+function onNet(event, handler) {
+  net.on(event, handler)
+  disposers.push(() => {
+    try { net.off(event, handler) } catch (e) { /* swallow */ }
+  })
+}
+function cleanupRoomListeners() {
+  while (disposers.length) {
+    try { disposers.pop()() } catch (e) { /* swallow */ }
+  }
+}
+
 // v3.x 房间背景星空:固定 14 个星点位置(避免每次 mount 重新生成导致动画抖动)
 function genStars() {
   // 固定 seed,保证 SSR 一致 + 测试可重复
@@ -328,7 +346,7 @@ function formatHostAddr() {
 }
 
 async function initNetwork() {
-  net.on('connect', ({ seat, info }) => {
+  onNet('connect', ({ seat, info }) => {
     netStatus.value = '🟢'
     // ★ v3.8 P1 修复:用 connect 事件拿正确的 assignedSeat(不是 from)
     // joiner 第一次发 JOIN 时 selfSeat=-1,RoomView 之前用 peers.set(from, ...) 会写到 -1
@@ -338,33 +356,35 @@ async function initNetwork() {
       if (!isHost.value) mySeat.value = seat
     }
   })
-  net.on('error', (e) => {
+  onNet('error', (e) => {
     netStatus.value = '🔴'
     console.error('network error:', e)
   })
   // ★ v2.1 P1 host 主动踢人:host 端 transport forceDisconnectSeat → _DISCONNECT → peer:leave
   //   host 自己调用后立即在 UI 上把该 seat 显示"等待加入" (因为对端会被踢 + release)
-  net.on('peer:leave', ({ seat }) => {
+  onNet('peer:leave', ({ seat }) => {
     if (seat != null) peers.delete(seat)
   })
   // ★ v2.1 P1 host 主动踢人:joiner 端收到 self:kicked → 跳 /?force_disconnected=1
-  net.on('self:kicked', ({ reason }) => {
-    net.close()
+  onNet('self:kicked', ({ reason }) => {
+    // 先 cleanup 再 close + 跳页(避免下次进房残留旧 listener)
+    cleanupRoomListeners()
+    try { net.close() } catch (e) { /* swallow */ }
     router.push('/?force_disconnected=1' + (reason ? '&reason=' + encodeURIComponent(reason) : ''))
   })
-  net.on('message:NICK_UPDATE', (payload, from) => {
+  onNet('message:NICK_UPDATE', (payload, from) => {
     if (peers.has(from)) {
       const old = peers.get(from)
       peers.set(from, { ...old, ...payload })
     }
   })
-  net.on('message:READY', (payload, from) => {
+  onNet('message:READY', (payload, from) => {
     if (peers.has(from)) {
       peers.set(from, { ...peers.get(from), ready: payload.ready })
       tryStartGame()
     }
   })
-  net.on('message:SYNC', (payload) => {
+  onNet('message:SYNC', (payload) => {
     if (payload && payload.peers) {
       peers.clear()
       for (const [s, info] of payload.peers) peers.set(s, info)
@@ -372,13 +392,13 @@ async function initNetwork() {
     }
   })
   // ★ v3.8 P1 修复:joiner 收到 host 的 GAME_START 也跳到 /game(否则 host 单方面跳转,joiner 卡在 /room)
-  net.on('message:GAME_START', () => {
+  onNet('message:GAME_START', () => {
     if (!isHost.value) {
       router.push('/game?roomNo=' + roomNo.value)
     }
   })
   // ★ v3.8 P1 修复:joiner 收到 host 的 SEAT_SWAP 也本地交换(否则 joiner 还看到旧的 seat 名字)
-  net.on('message:SEAT_SWAP', (payload) => {
+  onNet('message:SEAT_SWAP', (payload) => {
     if (!payload || !Array.isArray(payload.between) || payload.between.length !== 2) return
     const [a, b] = payload.between
     if (a == null || b == null) return
@@ -443,13 +463,22 @@ onMounted(() => {
 // 之前 unmount 关 network,joiner 收到 GAME_START 跳 /game 时 channel 就关了,
 // 后续 host 广播的 DEAL/PLAY/PASS 全部丢失,4-tab 联机出牌同步失效
 // network 在以下时机关:用户点"退出"返回 /、手动点"断开连接"、应用关闭
+// ★ BUG-004 修复:这里只清理 net.on(...) 监听器(disposers),不调 net.close()
+//   - 跳 /game 时 channel 必须保留,否则 host 后续广播全部丢失
+//   - 监听器释放避免下次进 /room 时旧 callback 残留触发 stale behavior
 onUnmounted(() => {
+  cleanupRoomListeners()
   // ★ v2.2 task A:清理 copy toast timer
   if (_copyToastTimer) clearTimeout(_copyToastTimer)
 })
 
+// ★ BUG-004 修复:showMenu 必须先 cleanup listeners + net.close() 再跳页,
+//   否则会留下 net 内部 handlers Map 残留 → 下次进房 / 别人发消息触发旧 callback
 function showMenu() {
-  if (confirm('退出房间?')) router.push('/')
+  if (!confirm('退出房间?')) return
+  cleanupRoomListeners()
+  try { net.close() } catch (e) { /* swallow */ }
+  router.push('/')
 }
 function onEditMyInfo() { showNickEditor.value = true }
 function onNickConfirm({ nickname, avatar }) {
