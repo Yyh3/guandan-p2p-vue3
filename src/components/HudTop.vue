@@ -88,13 +88,15 @@
     <!-- ===== 顶部左侧:菜单 + 本局打 + 倍数 ===== -->
     <div class="hud-topleft">
       <button class="menu-btn" @click="$emit('menu')" title="菜单">≡</button>
-      <div class="hud-card level-card">
-        <div class="hud-label">本局打</div>
+      <!-- v3.x:级别徽章 — 金色金属渐变 + 黑色"打 X" -->
+      <div class="hud-card level-card badge-gold" :title="`本局打 ${levelLabel}`">
+        <div class="hud-label">打</div>
         <div class="hud-value">{{ levelLabel }}</div>
       </div>
+      <!-- v3.x:倍数 + 房间号 合并卡片(房间号 A3K7 字号 20px 等宽字体) -->
       <div class="hud-card mult-card">
-        <div class="hud-label">倍数</div>
-        <div class="hud-value">×{{ multiplier }}</div>
+        <div class="hud-label">×{{ multiplier }}</div>
+        <div v-if="roomCode" class="hud-value room-code" :title="`房间号 ${roomCode}`">{{ roomCode }}</div>
       </div>
     </div>
 
@@ -167,6 +169,9 @@
 import { computed } from 'vue'
 import PlayerSeat from './PlayerSeat.vue'
 import CountdownClock from './CountdownClock.vue'
+// v3.x:获取房间号(本组件不依赖 useGameLogic,因为 useGameLogic 是 GameView 才挂的)
+// 房间号存在 net 单例上,直接 read-only 调用即可
+import net from '@/common/network.js'
 
 const props = defineProps({
   // 当前级牌 rank 转 label
@@ -201,6 +206,20 @@ defineEmits(['menu', 'seatClick', 'icon', 'editNickname', 'editRequest'])
 const clockText = computed(() => {
   if (props.showClock) return `${props.turnSeconds}s`
   return '25s'
+})
+
+// v3.x:房间号(A3K7 格式)从 net 单例直接读
+// net.getRoomId() 返回 "A3K7" 格式字符串,失败时返回空串
+const roomCode = computed(() => {
+  try {
+    if (net && typeof net.getRoomId === 'function') {
+      const id = net.getRoomId()
+      return id || ''
+    }
+  } catch (e) {
+    // 离线模式或 net 未初始化,降级返回空
+  }
+  return ''
 })
 </script>
 
@@ -289,10 +308,28 @@ const clockText = computed(() => {
 .hud-card.mult-card {
   background: linear-gradient(180deg, var(--accent-orange, #FF9800) 0%, var(--accent-orange-dark, #EF6C00) 100%);
 }
+
+/* v3.x:级别徽章 — 金色金属渐变(spec §3.4)+ 黑色"打 X" */
+.hud-card.badge-gold {
+  background: var(--gold-metallic, linear-gradient(135deg, #ffd700 0%, #d4af37 50%, #a8862a 100%));
+  border: 1.5px solid #fff8dc;
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 3px 10px rgba(255, 215, 0, 0.45),
+    0 0 14px rgba(255, 215, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.hud-card.badge-gold .hud-label,
+.hud-card.badge-gold .hud-value {
+  color: #1a1a1a;       /* 黑字 */
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
 .hud-label {
-  font-size: 9px;
+  font-size: 10px;       /* v3.x: 9 → 10 */
   color: rgba(74, 44, 0, 0.75);
-  font-weight: bold;
+  font-weight: 900;
   letter-spacing: 1px;
   line-height: 1.1;
 }
@@ -300,6 +337,15 @@ const clockText = computed(() => {
   font-size: 20px;
   font-weight: 900;
   line-height: 1.15;
+}
+
+/* v3.x:房间号 — A3K7 格式 20px 等宽字体(规格 §3.4) */
+.hud-value.room-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', 'Monaco', monospace;
+  font-size: 20px;
+  letter-spacing: 1.5px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 /* ============================================================

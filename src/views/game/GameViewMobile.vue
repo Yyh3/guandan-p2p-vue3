@@ -34,8 +34,9 @@
    *   - scroll 用 -webkit-overflow-scrolling: touch
    -->
   <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape }">
-    <!-- 背景:渐变蓝紫底色(跟 desktop 一致) -->
-    <div class="bg-deep"></div>
+    <!-- v3.x:背景 — 椭圆 felt 翡翠绿 + 木纹边(跟桌面端一致的视觉语言,UI-REDESIGN-V3-SPEC.md §3.1+§3.6) -->
+    <div class="bg-felt"></div>
+    <div class="bg-wood-edge" aria-hidden="true"></div>
 
     <!-- ===== 1. 顶部 HUD 8% (压缩版) ===== -->
     <div class="hud-top">
@@ -130,7 +131,9 @@
     </div>
 
     <!-- ===== 4. 中央牌桌 35% (小尺寸) ===== -->
+    <!-- v3.x:中央牌桌舞台 + 径向白光聚光(spec §3.5)— 桌面上方微亮效果 -->
     <div class="table-area">
+      <div class="table-glow" aria-hidden="true"></div>
       <TableCenter
         :table-cards="tableCards"
         :first-player-name="firstPlayerName"
@@ -391,6 +394,84 @@ onUnmounted(() => {
     radial-gradient(ellipse at center top, #2a3a7a 0%, transparent 60%),
     linear-gradient(180deg, #1a1f4a 0%, #0a1233 50%, #050a1f 100%);
   z-index: 0;
+}
+
+/* ============================================================
+ * v3.x:背景 — 椭圆 felt 翡翠绿 + 桌面外圈深绿(spec §3.1 + §3.6)
+ * 复用 desktop 的视觉语言,移动端只调整椭圆比例,适应竖屏窄长比
+ * ============================================================ */
+.bg-felt {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 95% 70% at 50% 50%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%);
+  z-index: 0;
+  box-shadow: var(--felt-inner-shadow, inset 0 0 60px rgba(0, 0, 0, 0.4));
+}
+.bg-felt::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    transparent 50%,
+    rgba(10, 18, 51, 0.5) 88%,
+    var(--bg-deep, #0a1233) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* v3.x:木纹边 — 移动端用更窄的 6-8px 边框,贴合小屏 */
+.bg-wood-edge {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) top center / 100% 8px no-repeat,
+    linear-gradient(180deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) bottom center / 100% 8px no-repeat,
+    linear-gradient(90deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) left center / 8px 100% no-repeat,
+    linear-gradient(90deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) right center / 8px 100% no-repeat;
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* v3.x:中央牌桌径向白光聚光(移动端)— 浮在桌面上方 */
+.table-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 320px;
+  height: 70%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 250, 220, 0.1) 25%,
+    transparent 70%);
+  z-index: 1;
+  mix-blend-mode: screen;
+  animation: stage-glow-breathe 4s ease-in-out infinite;
+}
+@keyframes stage-glow-breathe {
+  0%, 100% { opacity: 0.95; }
+  50%      { opacity: 1; }
 }
 
 /* 全局按钮:touch-action 防止双击放大 */

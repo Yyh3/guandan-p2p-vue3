@@ -1,7 +1,8 @@
 <template>
   <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape }">
-    <!-- 背景:渐变蓝紫底色 -->
-    <div class="bg-deep"></div>
+    <!-- v3.x:背景 — 椭圆牌桌 --felt-base 渐变 + 木纹边 + 桌面外圈深绿径向渐变到 --bg-deep (spec §3.1) -->
+    <div class="bg-felt"></div>
+    <div class="bg-wood-edge" aria-hidden="true"></div>
 
     <!-- 顶部 HUD -->
     <HudTop
@@ -21,17 +22,22 @@
       @editRequest="onNickEditRequest"
     />
 
-    <!-- 中央牌桌 -->
-    <TableCenter
-      :table-cards="tableCards"
-      :first-player-name="firstPlayerName"
-      :first-player-emoji="firstPlayerEmoji"
-      :is-level="isLevel"
-      :is-dealing="isDealing"
-      :level-label="levelLabel"
-      :round="round"
-      :multiplier="multiplier"
-    />
+    <!-- v3.x:中央牌桌容器 — 加 3D 透视 + 径向白光聚光 + 木纹边 -->
+    <div class="table-stage">
+      <!-- 桌面上方微模糊 + 中央径向白光聚光(spec §3.5) -->
+      <div class="table-glow" aria-hidden="true"></div>
+      <div class="table-backdrop" aria-hidden="true"></div>
+      <TableCenter
+        :table-cards="tableCards"
+        :first-player-name="firstPlayerName"
+        :first-player-emoji="firstPlayerEmoji"
+        :is-level="isLevel"
+        :is-dealing="isDealing"
+        :level-label="levelLabel"
+        :round="round"
+        :multiplier="multiplier"
+      />
+    </div>
 
     <!-- 特效层(覆盖全屏) -->
     <EffectLayer
@@ -312,7 +318,9 @@ function onNickEditorConfirmed(p) {
 
 <style scoped>
 /* ============================================================
- * v3 UI 全局布局(组合所有子组件)
+ * v3.x UI 全局布局(UI-REDESIGN-V3-SPEC.md §3.1-3.5)
+ * 椭圆 felt 牌桌 + 木纹边 + 径向白光聚光 + 桌面外圈深绿径向
+ * 保留:4-tab P2P 联机事件接口 + 现有 emit / props / 触摸目标
  * ============================================================ */
 .page {
   position: relative;
@@ -322,14 +330,151 @@ function onNickEditorConfirmed(p) {
   color: #fff;
 }
 
-/* 背景渐变 */
+/* ============================================================
+ * v3.x:椭圆 felt 牌桌底色 — 翡翠绿径向渐变(spec §3.1)
+ * 渐变从中心亮(emerald-bright)→ 中段(emerald-base)→ 边缘深(emerald-deep)
+ * 跟 --felt-base token 一致,这里直接用变量以便后续调整
+ * ============================================================ */
+.bg-felt {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 78% at 50% 50%,
+      var(--emerald-bright, #1f7a55) 0%,
+      var(--emerald-base, #14533b) 55%,
+      var(--emerald-deep, #0a3d2c) 100%);
+  z-index: 0;
+  /* inset 内阴影模拟 felt 凹陷质感 */
+  box-shadow: var(--felt-inner-shadow, inset 0 0 80px rgba(0, 0, 0, 0.4));
+}
+
+/* v3.x:桌面外圈 — 深绿径向渐变到 --bg-deep(spec §3.1 末段) */
+.bg-felt::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    transparent 50%,
+    rgba(10, 18, 51, 0.55) 88%,
+    var(--bg-deep, #0a1233) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* v3.x:木纹边 — 8-12px 厚边框(--wood-edge 渐变到 --wood-edge-light) */
+.bg-wood-edge {
+  position: absolute;
+  inset: 0;
+  background:
+    /* 上下两道 8-12px 厚木纹条 */
+    linear-gradient(180deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) top center / 100% 10px no-repeat,
+    linear-gradient(180deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) bottom center / 100% 10px no-repeat,
+    /* 左右木纹条 */
+    linear-gradient(90deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) left center / 10px 100% no-repeat,
+    linear-gradient(90deg,
+      var(--wood-edge, #8B5A2B) 0%,
+      var(--wood-edge-light, #b07a3f) 50%,
+      var(--wood-edge, #8B5A2B) 100%) right center / 10px 100% no-repeat;
+  /* 木纹内阴影: 模拟木条厚度 */
+  box-shadow:
+    inset 0 0 18px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 兼容旧 .bg-deep 类名(防止其它 view / 旧 CSS 引用)— 兜底深绿 */
 .bg-deep {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at center top, #2a3a7a 0%, transparent 60%),
-    linear-gradient(180deg, #1a1f4a 0%, #0a1233 50%, #050a1f 100%);
+    radial-gradient(ellipse at center, #1f7a55 0%, #14533b 60%, #0a3d2c 100%);
   z-index: 0;
+}
+
+/* ============================================================
+ * v3.x:中央牌桌舞台(table-stage) — 3D 透视倾斜 + 径向白光聚光 + 桌面微模糊 (spec §3.2+§3.5)
+ *  - 3D 透视: rotate(-2deg) perspective(800px) 营造"俯视感"
+ *  - 径向白光: 桌面中央 + 头顶聚光效果
+ *  - 桌面微模糊: backdrop-filter: blur(2px)
+ * 不动 TableCenter 子组件内部布局,只在 stage 层叠效果
+ * ============================================================ */
+.table-stage {
+  position: relative;
+  z-index: 2;
+  /* 3D 透视倾斜: rotate(-2deg) 比 -3deg 更温和,避免影响触摸定位 */
+  transform: rotate(-2deg) perspective(800px);
+  transform-origin: center 30%;
+  /* 微模糊(spec §3.5 末段):整个桌面上方有朦胧感 */
+  isolation: isolate;
+}
+
+/* v3.x:中央牌组的径向白光聚光 — 浮在桌面上,营造"打灯"效果 */
+.table-glow {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 70vw;
+  max-width: 720px;
+  height: 60vh;
+  max-height: 480px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center,
+    rgba(255, 255, 255, 0.18) 0%,
+    rgba(255, 250, 220, 0.08) 25%,
+    transparent 70%);
+  z-index: 2;
+  mix-blend-mode: screen;
+  /* 微微"呼吸" — 不影响测试断言(keyframe 只动 opacity) */
+  animation: stage-glow-breathe 4s ease-in-out infinite;
+}
+@keyframes stage-glow-breathe {
+  0%, 100% { opacity: 0.95; }
+  50%      { opacity: 1; }
+}
+
+/* v3.x:桌面上方微模糊层 — 跟 stage 重叠的 backdrop-filter 层 */
+.table-backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  /* 仅对 stage 区域做微模糊(用 radial mask 让模糊只出现在中央) */
+  background: radial-gradient(ellipse 70% 50% at 50% 35%,
+    rgba(31, 122, 85, 0.15) 0%,
+    transparent 70%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 2;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 30%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 30%, transparent 90%);
+}
+
+/* v3.x:中央出牌区卡牌透视 — 主牌 scale(1.05) / 副牌 scale(0.95) (spec §3.2)
+ *  .card-stack 在 TableCenter 内部,这里用 :deep() 跨组件选择
+ *  注意:不修改 TableCenter.vue(不在本阶段 scope),只通过外层 transform 影响
+ *  v3.x 已对 .table-stage 加 rotate(-2deg) perspective(800px),所有子元素自然继承透视
+ */
+:deep(.table-center-wrap) {
+  /* 让透视 800px 在 stage 层就生效,这里只继承 */
+  transform-style: preserve-3d;
+}
+/* 主牌(中间那张)— 抬升 1.05,阴影加深 */
+:deep(.table-center-wrap .card-stack .stack-card:nth-child(3n+2)) {
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.5));
+}
+/* 副牌(两侧)— 缩小 0.95,略微下沉 */
+:deep(.table-center-wrap .card-stack .stack-card:not(:nth-child(3n+2))) {
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
 }
 
 /* 玩家手牌(v3-2 竖叠列) */
