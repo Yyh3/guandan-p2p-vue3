@@ -405,6 +405,9 @@ function _handleHostMessage(msg) {
       transport.bindLastSenderSeat(assignedSeat)
     }
     emit('connect', { seat: assignedSeat, info: msg.payload })
+    // v0.4.8 N-2:AI 补位通知 — host 端 emit peer:join,useGameLogic 监听后
+    //   从 game.aiPlayers 移除该 seat,更新 UI
+    emit('peer:join', { seat: assignedSeat, info: msg.payload })
     sendMessage({
       type: 'SYNC',
       payload: { peers: Array.from(peers.entries()) },

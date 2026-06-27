@@ -520,6 +520,11 @@ export function useGameLogic(opts = {}) {
         if (type === 'PLAY') net.broadcast({ type: 'PLAY', payload: { seat, cards } })
       })
     }
+    // v0.4.8 N-2:AI 补位 — P2P host 开房时,把空 seat 自动填 AI(1-3 人开局也能跑)
+    //   注意:必须在 setAIBroadcast 之后调,这样 game.scheduleAI 出牌时 aiBroadcast 已注入
+    if (isP2P && isNetworkHost && typeof game.value.addAIPlayer === 'function') {
+      _fillEmptySeatsWithAI()
+    }
     if (typeof window !== 'undefined') {
       window.__gd_game = game.value
       window.__gd_selfSeat = selfSeat.value
@@ -976,6 +981,61 @@ function onAutoFindBest() {
     if (!_aiModule) _aiModule = await import('@/common/guandan-ai.js')
     return _aiModule
   }
+  // v0.4.8 N-2:joiner 加入时 host 端的反向操作 — 从 aiPlayers 移除 seat
+  //   对称于 onP2PAITakeover(掉线/AI 接管时加 aiPlayers,真玩家进入时移除)
+  function onP2PPeerJoin(payload) {
+    if (!payload || typeof payload.seat !== 'number') return
+    if (!isNetworkHost.value) return  // 只有 host 端维护 aiPlayers
+    if (!game.value) return
+    const seat = payload.seat
+    // 从 game.aiPlayers 移除
+    if (typeof game.value.removeAIPlayer === 'function') {
+      game.value.removeAIPlayer(seat)
+    }
+    // 更新 UI(用真玩家 nickname/avatar,不再 isAI)
+    const realName = payload.info?.nickname || null
+    const realAvatar = payload.info?.avatar || null
+    const next = [...players.value]
+    if (next[seat]) {
+      next[seat] = {
+        ...next[seat],
+        isAI: false,
+        name: realName || next[seat].name,
+        avatar: realAvatar || next[seat].avatar,
+      }
+      players.value = next
+    }
+  }
+
+  // v0.4.8 N-2:AI 补位 — host 端扫 peers,把空 seat 自动填 AI
+  //   触发场景:host startAsHost 后立即调,initGame 后再调一次(此时 peers 是当前真实状态)
+  //   也可在 joiner 进入/离开时调(动态调整 aiPlayers)
+  //   注:joiner 端不进此函数(isNetworkHost=false)
+  function _fillEmptySeatsWithAI() {
+    if (!game.value) return
+    if (typeof game.value.fillEmptySeatsWithAI !== 'function') return
+    try {
+      const peers = net.getPeers ? net.getPeers() : null
+      const hostSeat = net.getSelfSeat ? net.getSelfSeat() : 0
+      const hasPeer = (seat) => !!(peers && peers.has && peers.has(seat))
+      const filled = game.value.fillEmptySeatsWithAI(hasPeer, hostSeat)
+      // 更新 UI + broadcast AI_TAKEOVER 给 joiner 端
+      const aiNames = ['AI-东','AI-南','AI-西','AI-北']
+      for (const seat of filled) {
+        const next = [...players.value]
+        if (next[seat]) {
+          next[seat] = { ...next[seat], isAI: true, name: aiNames[seat] || ('AI-' + seat) }
+          players.value = next
+        }
+        try { net.broadcast({ type: 'AI_TAKEOVER', payload: { seat } }) } catch (e) { /* swallow */ }
+      }
+      return filled
+    } catch (e) {
+      console.warn('_fillEmptySeatsWithAI err', e)
+      return []
+    }
+  }
+
   function onP2PAITakeover(payload) {
     if (!payload || !game.value) return
     const seat = payload.seat
@@ -1061,6 +1121,9 @@ function onAutoFindBest() {
       onNet('host:migrated', onHostMigrated)
       // ★ v3.x P2-29(N-3 闭环):joiner 端监听 host 离开,调 requestPromoteToHost 兜底
       onNet('peer:leave', onPeerLeave)
+      // v0.4.8 N-2:AI 补位 — host 端监听 peer:join,移除该 seat 的 AI 标记
+      //   注意 joiner 端不需要这个逻辑(joiner 不管 host 的 aiPlayers)
+      onNet('peer:join', onP2PPeerJoin)
       // ★ GD-RC-001 修复:网络 host 才接 connect 发 snapshot + 初始发牌
       //   原 selfSeat===0 在 host 换队友后失效,导致 snapshot 由错误端发 / DEAL 由错误端发
       if (isNetworkHost.value) {
@@ -1129,6 +1192,8 @@ function onAutoFindBest() {
     selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
+    // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
+    _fillEmptySeatsWithAI,
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
     // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
     commitPlay, commitPass,

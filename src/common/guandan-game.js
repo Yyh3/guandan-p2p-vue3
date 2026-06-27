@@ -432,6 +432,26 @@ function createGame(opts) {
       if (i >= 0) aiPlayers.splice(i, 1)
     },
     getAIPlayers() { return aiPlayers.slice() },
+    // v0.4.8 N-2:AI 补位辅助 — 扫 peers Map,把不在 peers 的空 seat 自动加 aiPlayers
+    //   返回:新加入 aiPlayers 的 seat 列表(空数组 = 没人需要补)
+    //   参数:
+    //     - hasPeer(seat):纯函数,外部传 "this seat 是否有真人"(用 peers.has 即可)
+    //     - hostSeat:房主自己的 seat,跳过
+    //   不修改 state.phase / hands / currentPlayer,纯 aiPlayers 列表操作
+    //   hasPeer 不是 function 时:视为所有人都不是真人,全补 AI
+    //     (生产中 hasPeer 一定是 (seat) => peers.has(seat) 函数,但单测 / mock 可能 undefined)
+    fillEmptySeatsWithAI(hasPeer, hostSeat = 0) {
+      const added = []
+      for (let seat = 0; seat < 4; seat++) {
+        if (seat === hostSeat) continue  // host 自己不是 AI
+        if (typeof hasPeer === 'function' && hasPeer(seat)) continue  // 真人已占
+        if (!aiPlayers.includes(seat)) {
+          aiPlayers.push(seat)
+          added.push(seat)
+        }
+      }
+      return added
+    },
     // ★ v3.8 P1:AI 出的牌要广播(GameView 注入回调)
     setAIBroadcast(fn) { aiBroadcast = fn },
     /**
