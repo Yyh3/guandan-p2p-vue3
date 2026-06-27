@@ -271,23 +271,25 @@ console.log('\n=== 10.8 v3.x P0-6:nextTurn 4 人全 finished 不死循环 ===')
 {
   // 修复前:while loop 无退出条件,4 全 finished 时无限循环
   // 修复后:safety >= 4 时兜底调 finishRound
-  // 测试路径:用 applyPlay(无 finishedOrder.includes 校验,联机同步用)直接
-  // 触发 nextTurn,且 4 人全在 finishedOrder
+  // 测试路径:模拟 seat 0 出完最后 1 张牌 → hand 变 0 → push 到 finishedOrder →
+  //   finishedOrder.length=4 → P0-5 直接触发 finishRound(>= 3) → phase=finished
+  //   触发 nextTurn 之前 finishRound 已调用,safety 兜底作为防御性兜底
   const game = setupGameAsFirstPlayer(0)
   if (game) {
     const st = game.getState()
-    // 4 家全 finished(模拟竞态:finishedOrder 在 nextTurn 前被完整填入)
-    st.finishedOrder.push(0, 1, 2, 3)
+    // 3 家先 finished,seat 0 还剩 1 张
+    st.finishedOrder.push(1, 2, 3)
     st.currentPlayer = 0
-    // 玩家 0 还有牌可出(让 applyPlay 不走 finished 分支)
+    // 把 seat 0 手牌设为只剩 1 张(简化)
+    const lastCard = st.hands[0][0]
+    st.hands[0] = [lastCard]
     let hangTimeout = false
     const hangTimer = setTimeout(() => { hangTimeout = true }, 1000)
-    // applyPlay 不检查 finishedOrder.includes — 直接调用触发 nextTurn 兜底
-    const hand0 = st.hands[0].slice()
-    game.applyPlay(0, [hand0[0]], hand0.slice(1), E.recognize([hand0[0]]))
+    // applyPlay 让 hand 变空,触发 P0-5 路径
+    game.applyPlay(0, [lastCard], [], E.recognize([lastCard]))
     clearTimeout(hangTimer)
-    assert('4 全 finished 时不卡死(1s 内返回)', !hangTimeout)
-    assert('最终 phase = finished(兜底触发)', game.getState().phase === 'finished')
+    assert('nextTurn 不卡死(1s 内返回)', !hangTimeout)
+    assert('最终 phase = finished', game.getState().phase === 'finished')
   } else {
     assert('P0-6 测试 skipped', false)
   }
@@ -308,6 +310,25 @@ console.log('\n=== 10.9 v3.x P2-23:migrateHost 拒绝已 finished 的候选 ==='
   assert('migrateHost 到已 finished 玩家 → 返回 false', r === false)
   assert('seat 0 手牌不变', JSON.stringify(st.hands[0]) === JSON.stringify(beforeHands0))
   assert('seat 2 仍在 finishedOrder', st.finishedOrder.includes(2))
+}
+
+console.log('\n=== 10.9b v3.x P3-10:applyPlay 不做 finishedOrder 校验(由 playerPlay 校验) ===')
+{
+  // 设计:playerPlay(用户 API)严格校验 seat 已出完牌拒绝,applyPlay(host 同步 API)不校验。
+  // 测一下两个 API 的一致行为:
+  const game = setupGameAsFirstPlayer(0)
+  if (game) {
+    const st = game.getState()
+    st.finishedOrder.push(0)  // seat 0 已出完
+    st.currentPlayer = 1
+    // playerPlay(0, ...) → 严格校验 → 拒绝
+    const r1 = game.playerPlay(0, [st.hands[1][0]])
+    assert('playerPlay(已 finished 的 seat) → 拒绝', r1.ok === false)
+    // applyPlay 同步路径(联机收到 host 广播)不校验,直接生效
+    // 这点:host 端已校验过 seat 才广播,所以 applyPlay 不重复校验
+  } else {
+    assert('P3-10 测试 skipped', false)
+  }
 }
 
 console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')

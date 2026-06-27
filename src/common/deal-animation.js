@@ -31,6 +31,9 @@ class DealAnimation {
   constructor() {
     this._running = false
     this._cancel = false
+    // v3.x P3-13 修复(N-12):存所有 timer/raf ID,cancel 时主动 clear,不再只设标志位
+    this._timers = []
+    this._rafs = []
   }
 
   isRunning() { return this._running }
@@ -55,6 +58,8 @@ class DealAnimation {
     }
     this._running = true
     this._cancel = false
+    this._timers = []
+    this._rafs = []
     container.style.pointerEvents = 'none'
 
     const total = o.cardsPerSeat
@@ -103,7 +108,7 @@ class DealAnimation {
       }
       if (sent >= total) {
         // 等最后一批飞完再回调
-        setTimeout(() => {
+        const t = setTimeout(() => {
           if (!this._cancel) {
             this._cleanup(container, cards, /* keep */ false)
             this._running = false
@@ -112,6 +117,7 @@ class DealAnimation {
             this._running = false
           }
         }, o.flightDuration + 80)
+        this._timers.push(t)
         return
       }
       seats.forEach(seat => {
@@ -133,14 +139,22 @@ class DealAnimation {
       })
       sent++
       if (o.onProgress) o.onProgress(sent / total)
-      setTimeout(sendBatch, o.stagger)
+      const t = setTimeout(sendBatch, o.stagger)
+      this._timers.push(t)
     }
     // 下一帧启动
-    requestAnimationFrame(sendBatch)
+    const raf = requestAnimationFrame(sendBatch)
+    this._rafs.push(raf)
   }
 
+  // v3.x P3-13 修复(N-12):cancel 时清所有 timer/raf,不再只设标志位等下一次 tick 退出
   cancel() {
     this._cancel = true
+    for (const t of this._timers) clearTimeout(t)
+    for (const r of this._rafs) cancelAnimationFrame(r)
+    this._timers = []
+    this._rafs = []
+    this._running = false
   }
 
   _cleanup(container, cards) {

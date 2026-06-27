@@ -78,6 +78,32 @@ function getCtx() {
 }
 
 /**
+ * 销毁 AudioContext + 所有 gain 节点
+ * v3.x P3-15 修复(N-13):iOS Safari 限制最多 6 个活跃 AudioContext。
+ *   SPA 多次进入/退出房间会泄漏。destroyAudio 显式关 ctx、清所有引用,
+ *   下次 getCtx() 会重新创建干净的 ctx。
+ */
+function destroyAudio() {
+  stopBgm()
+  // 清所有定时器(SFX 内部还有 setTimeout)
+  if (bgmTimer) {
+    clearTimeout(bgmTimer)
+    bgmTimer = null
+  }
+  bgmStarted = false
+  try {
+    if (ctx && ctx.state !== 'closed') {
+      ctx.close().catch(() => {})
+    }
+  } catch (_) { /* ignore */ }
+  ctx = null
+  masterGain = null
+  bgmGain = null
+  sfxGain = null
+  // reverb 节点引用清空(getCtx 重新创建时这些是局部变量,模块作用域里是 null)
+}
+
+/**
  * 解锁 AudioContext(浏览器策略要求用户首次交互后才能播放音频)
  */
 function unlock() {
@@ -310,7 +336,10 @@ function _chordPad(notes) {
 }
 
 function bgmTick() {
-  if (!bgmEnabled || !ctx) return
+  // v3.x P3-14 修复(N-11):加 bgmStarted 检查
+  //   旧版 stopBgm 期间正在执行的 bgmTick 会创建新定时器,即使 stopBgm 已清
+  //   一次,这次 tick 仍会 setTimeout 创建新 timer,造成泄漏
+  if (!bgmStarted || !bgmEnabled || !ctx) return
   const tempo = BGM_TEMPO(bgmStyle)
   const beat = bgmBeatCount % 4  // 当前拍
   const bar = Math.floor(bgmBeatCount / 4) % BGM_MELODY.length
@@ -744,6 +773,7 @@ export {
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
   setMasterVolume,
   getCtx,
+  destroyAudio,
 }
 
 const audio = {

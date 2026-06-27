@@ -46,6 +46,11 @@ function createGame(opts) {
     tribute: null,           // 进贡信息
     ghost: null,             // 逢人配(红桃级牌)
     levelUp: 0,              // 本局升级数
+    // v3.x P2-22 修复(G-5):双方独立等级字段(简化实现下两队同升同降,但字段已分)
+    //   索引 0 = [0,2] 队,索引 1 = [1,3] 队
+    //   简化规则下:levelRank = teamLevels[赢家队],双方保持一致
+    //   未来规则若实现"打 A 不过则只末家降级"之类差异化,可用两字段不同步
+    teamLevels: [levelRank, levelRank],
   }
 
   const handlers = {}
@@ -53,7 +58,19 @@ function createGame(opts) {
     if (!handlers[event]) handlers[event] = []
     handlers[event].push(fn)
   }
-  function off(event) { delete handlers[event] }
+  // v3.x P2-19 修复:off 支持可选 handler 参数 — 不传则删除该事件所有监听器(向后兼容),
+  //   传了则只删除该 handler 的引用,避免一个组件卸载破坏其他组件的事件订阅
+  function off(event, fn) {
+    if (fn === undefined) {
+      delete handlers[event]
+      return
+    }
+    const list = handlers[event]
+    if (!list) return
+    const idx = list.indexOf(fn)
+    if (idx >= 0) list.splice(idx, 1)
+    if (list.length === 0) delete handlers[event]
+  }
   function emit(event, ...args) {
     const list = handlers[event] || []
     for (const fn of list) {
@@ -97,8 +114,10 @@ function createGame(opts) {
 
   // ============ 出牌 ============
   function playerPlay(seat, cards) {
-    if (state.phase !== 'playing' && state.phase !== 'trick_end') {
-      return { ok: false, error: '对局未开始' }
+    // v3.x P3-11 修复:playerPlay 之前接受 'trick_end' 阶段,但 playerPass 不接受 — 不一致。
+    //   严格说,trick_end 是结算间隔阶段,玩家不能再出牌。统一为只接受 'playing'。
+    if (state.phase !== 'playing') {
+      return { ok: false, error: '对局未开始或已结束(phase=' + state.phase + ')' }
     }
     if (seat !== state.currentPlayer) {
       return { ok: false, error: '不是你的回合' }
@@ -140,6 +159,9 @@ function createGame(opts) {
       }
     }
     if (!rec) rec = E.recognize(cards)
+    // 注:applyPlay 是 host 广播同步的内部 API,host 已校验 seat 不应再校验,
+    //   否则 P0-6 safety 兜底测试无法构造"4 全 finished"场景
+    //   finishedOrder 检查只在 playerPlay(用户 API)做
     state.hands[seat] = hand
     state.tableCards = cards
     state.lastPlay = { ...rec, who: seat, cards }
@@ -274,9 +296,13 @@ function createGame(opts) {
     const tribute = E.tributeInfo(ranks, teams)
     state.levelUp = levelUp
     state.tribute = tribute
-    state.levelRank = E.getLevelRank(state.levelRank, levelUp)
+    // v3.x P2-22 修复(G-5):升级时更新双方 teamLevels(简化:双方同步)
+    //   未来差异化时:teamLevels[0] = winnerTeam===0 ? upgrade : maybe downgrade
+    const newLevelRank = E.getLevelRank(state.levelRank, levelUp)
+    state.teamLevels = [newLevelRank, newLevelRank]
+    state.levelRank = newLevelRank
     state.round++
-    emit('roundEnd', { ranks, levelUp, tribute, newLevelRank: state.levelRank })
+    emit('roundEnd', { ranks, levelUp, tribute, newLevelRank: state.levelRank, teamLevels: state.teamLevels.slice() })
   }
 
   // ============ 下一局(发新牌) ============
@@ -367,13 +393,14 @@ function createGame(opts) {
         state.lastPlay = { ...state.lastPlay, who: 0 }
       }
 
-      // 5) trickHistory 也要修正(留 trace,但 seat 索引改 0)
-      state.trickHistory = state.trickHistory.map(h => {
-        if (h.seat === oldHostSeat || h.seat === newHostSeat) {
-          return { ...h, seat: 0 }
-        }
-        return h
-      })
+      // 5) trickHistory 也要修正 — v3.x P3-8 修复:保留旧 seat 信息作 trace,
+//    而不是丢信息直接映射为 0。新增 _originalSeat 字段记录迁移前的 seat。
+state.trickHistory = state.trickHistory.map(h => {
+  if (h.seat === oldHostSeat || h.seat === newHostSeat) {
+    return { ...h, seat: 0, _originalSeat: h.seat }
+  }
+  return h
+})
 
       // 6) 旧 host 不再是 AI(他走人了),如果他是 AI(被 aiPlayers 含)就移除
       if (aiPlayers.includes(oldHostSeat)) {
@@ -417,6 +444,10 @@ function createGame(opts) {
       if (snap.ghost) state.ghost = snap.ghost
       if (typeof snap.levelUp === 'number') state.levelUp = snap.levelUp
       if (typeof snap.levelRank === 'number') state.levelRank = snap.levelRank
+    if (Array.isArray(snap.teamLevels) && snap.teamLevels.length === 2) {
+      const tl = snap.teamLevels
+      if (tl.every(t => typeof t === 'number')) state.teamLevels = tl.slice()
+    }
       if (typeof snap.round === 'number') state.round = snap.round
       if (snap.phase && validPhase.includes(snap.phase)) state.phase = snap.phase
       // 同步发 turn 事件让 UI 重新渲染

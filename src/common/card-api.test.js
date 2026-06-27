@@ -57,12 +57,13 @@ eq('空数组', E.sortHandGrouped([]), [])
 const one = [{ suit: 0, rank: 7 }]
 eq('单张', E.sortHandGrouped(one), [{ suit: 0, rank: 7 }])
 
-console.log('\n=== 5. isLevelCard: 红 10 是级牌, 黑 10 不是 ===')
-// 默认 levelRank=15(2), 我们手动测不同 levelRank
+console.log('\n=== 5. isLevelCard: 只红桃级牌是级牌(逢人配),方块不再是 ===')
+// v3.x P2-15 修复:isLevelCard 与 splitGhosts 对齐 — 只红桃级牌是级牌(逢人配)
+//   方块级牌是普通牌,不能作鬼牌用
 assert('♠A(rank=14) 在 level=2 时不是级牌', E.isLevelCard({ suit: 0, rank: 14 }, 15) === false)
 assert('♥10(rank=10) 在 level=2 时不是级牌', E.isLevelCard({ suit: 1, rank: 10 }, 15) === false)
-assert('♥10(rank=10) 在 level=10 时是级牌', E.isLevelCard({ suit: 1, rank: 10 }, 10) === true)
-assert('♦10(rank=10) 在 level=10 时是级牌', E.isLevelCard({ suit: 3, rank: 10 }, 10) === true)
+assert('♥10(rank=10) 在 level=10 时是级牌(红桃 = 逢人配)', E.isLevelCard({ suit: 1, rank: 10 }, 10) === true)
+assert('♦10(rank=10) 在 level=10 时不是级牌(方块不再作鬼牌)', E.isLevelCard({ suit: 3, rank: 10 }, 10) === false)
 assert('♠10(rank=10) 在 level=10 时不是级牌(只有红 10)', E.isLevelCard({ suit: 0, rank: 10 }, 10) === false)
 assert('♣10(rank=10) 在 level=10 时不是级牌', E.isLevelCard({ suit: 2, rank: 10 }, 10) === false)
 assert('小王不是级牌', E.isLevelCard({ suit: -1, rank: 16 }, 16) === false)

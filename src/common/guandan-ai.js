@@ -395,32 +395,78 @@ function findMinStraightFlush(cards, targetMain) {
 /**
  * 领出时:选一个"出掉后让自己手牌最舒服"的牌
  *
- * 简化策略:
- *  - 优先出最小单张
- *  - 否则出最小对子
- *  - 否则出最小三张/三带二
- *  - 否则出最小炸弹(王炸 > 8炸 > ... > 4炸,优先出小的)
- *  - 否则出最小顺子
+ * v3.x P1-5 修复:原版只出最小单张,从不考虑对子/三带二/顺子/炸弹。
+ * 现在按注释完整实现:
+ *   1. 最小单张(走小牌)
+ *   2. 最小对子(优先走"只剩 1 张"的 rank,留着凑不齐的牌)
+ *   3. 最小三张/三带二
+ *   4. 最小炸弹(4 张,避免浪费大炸弹 — 留作防守)
+ *   5. 最小顺子/连对/钢板(走成组结构)
+ *
+ * "最小"=出后剩的手牌张数尽量少且仍能保持完整性。
  */
 function chooseLead(cards, levelRank) {
   if (cards.length === 0) return { type: 'pass' }
-  const sorted = E.sortHand(cards)
   const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
   const cnt = E.countByRank(concrete)
 
-  // 1. 最小单张(非鬼,先走小牌)
+  // 1. 最小单张(有 concrete 时先走)
   if (concrete.length > 0) {
     const sortedConcrete = E.sortHand(concrete)
-    const smallest = sortedConcrete[sortedConcrete.length - 1]  // 已排序,末尾最小
+    const smallest = sortedConcrete[sortedConcrete.length - 1]
     return { type: 'play', cards: [smallest] }
   }
 
-  // 2. 全部是鬼?出一张
+  // 全是鬼牌
   if (concrete.length === 0 && ghosts.length > 0) {
     return { type: 'play', cards: [ghosts[0]] }
   }
 
-  return { type: 'play', cards: [concrete[concrete.length - 1]] }
+  // 2. 最小对子(cnt===2 的 rank,优先出 rank 小的)
+  const pairRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 2 && r <= 14).sort((a, b) => a - b)
+  if (pairRanks.length > 0) {
+    const r = pairRanks[0]
+    return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 2) }
+  }
+
+  // 3. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
+  const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 3 && r <= 14).sort((a, b) => a - b)
+  if (tripleRanks.length > 0) {
+    const r = tripleRanks[0]
+    const tripleCards = concrete.filter(c => c.rank === r).slice(0, 3)
+    // 三带二:还剩别的 rank 可以凑配对
+    const otherRanks = Object.keys(cnt).map(Number).filter(r2 => r2 !== r && cnt[r2] >= 2)
+    if (otherRanks.length > 0) {
+      const r2 = otherRanks.sort((a, b) => a - b)[0]
+      return { type: 'play', cards: [...tripleCards, ...concrete.filter(c => c.rank === r2).slice(0, 2)] }
+    }
+    return { type: 'play', cards: tripleCards }
+  }
+
+  // 4. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
+  //    同张数取 rank 最小(避免扔大王炸出 8 炸)
+  if (concrete.length >= 4) {
+    const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 4 && r <= 15).sort((a, b) => a - b)
+    if (bombRanks.length > 0) {
+      const r = bombRanks[0]
+      return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
+    }
+  }
+
+  // 5. 最小顺子(5 张) — 找连续的 5 张
+  if (concrete.length >= 5) {
+    const straight = findMinStraight(concrete, ghosts, 5, 0, levelRank)
+    if (straight && straight.length === 5) {
+      return { type: 'play', cards: straight }
+    }
+  }
+
+  // fallback:最小单张(原行为兜底)
+  if (concrete.length > 0) {
+    const sortedConcrete = E.sortHand(concrete)
+    return { type: 'play', cards: [sortedConcrete[sortedConcrete.length - 1]] }
+  }
+  return { type: 'play', cards: ghosts.length > 0 ? [ghosts[0]] : [cards[0]] }
 }
 
 /**
@@ -560,17 +606,22 @@ function findBestStraightFlush(cards) {
 }
 
 /**
- * 找最大的炸弹(4+ 张同 rank)。有鬼牌优先尝试凑。
- * 优先级:6+ 张炸 > 5 张炸 > 4 张炸,同长度取 rank 最小(留大牌)
+ * 找"最合理"的炸弹(4+ 张同 rank)。有鬼牌优先尝试凑。
+ *
+ * v3.x P1-9 修复:原版 "len 8→4 + 同长度取最大 rank" → 主动出牌时扔最强炸弹(王炸级别),
+ *   浪费防守资源。现在主动出牌时取最小炸弹(留大炸弹防守):
+ *   - 张数少(4 张炸)优先于张数多(8 张炸)— 因为我们要"主动出"而不是"压"
+ *   - 同长度取 rank 最小
+ *
+ * 压牌(防守)用 findMinBomb,主动出用 findBestBomb — 两者目的不同。
  */
 function findBestBomb(cards, ghostAvail, ghosts) {
   const cnt = E.countByRank(cards)
-  // 1) 纯实牌炸弹:优先大炸(张数多),同长度取最大 rank
-  // 因为我们要主动出,大炸是优势
-  for (let len = 8; len >= 4; len--) {
+  // 1) 纯实牌炸弹:主动出 → 选最小(4 张炸 > 5 张炸 > ...),同长度 rank 最小
+  for (let len = 4; len <= 8; len++) {
     const ranks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= len && r <= 15).sort((a, b) => a - b)
     if (ranks.length > 0) {
-      const r = ranks[ranks.length - 1]  // 最大 rank
+      const r = ranks[0]  // 最小 rank(主动出牌不浪费大牌)
       return cards.filter(c => c.rank === r).slice(0, len)
     }
   }

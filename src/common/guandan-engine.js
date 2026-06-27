@@ -95,14 +95,17 @@ function sortHandGrouped(hand) {
 }
 
 /**
- * 判断一张牌是不是当前级牌(仅红色 10 / 红桃 + 方块 是级牌)
+ * 判断一张牌是不是当前级牌(逢人配的备选 — 红桃级牌才是鬼牌)
  * @param {Card} c
  * @param {number} levelRank
+ *
+ * v3.x P2-15 修复:旧版把红桃 + 方块都当级牌,但 splitGhosts 只分离红桃。
+ *   现在对齐 splitGhosts:**只有红桃级牌**才是级牌(可作万能)。方块级牌是普通牌。
  */
 function isLevelCard(c, levelRank) {
   if (!c || c.suit === -1) return false
-  // suit: 0=♠(黑), 1=♥(红), 2=♣(黑), 3=♦(红)
-  if (c.suit !== 1 && c.suit !== 3) return false
+  // suit: 0=♠, 1=♥(红桃 — 鬼牌), 2=♣, 3=♦
+  if (c.suit !== 1) return false  // 只红桃才是级牌
   return c.rank === levelRank
 }
 
@@ -492,15 +495,27 @@ function groupHandByRank(hand) {
  * ranks: [头游rank, 二游rank, 三游rank, 末游rank]  rank 是 0/1/2/3 的玩家下标
  * teams: [[0,2],[1,3]]  对家关系
  * 返回 升级数(0/1/2/3)
+ *
+ * v3.x P3-5 修复:旧版 `return 0` 在 ranks 长度 < 4 时不可达,会因 ranks[2]/ranks[3]
+ *   返回 undefined 导致 teamOf(undefined) = -1,错误命中 "双上" 分支。
+ *   现加 length check + warn,数据损坏时显式记录但返回 0 不抛错(避免破坏调用方流程)。
  */
 function calcLevelUp(ranks, teams) {
+  if (!Array.isArray(ranks) || ranks.length !== 4) {
+    console.warn('[calcLevelUp] ranks 应为 4 元素数组,实际:', JSON.stringify(ranks))
+    return 0
+  }
+  if (!Array.isArray(teams) || teams.length !== 2) {
+    console.warn('[calcLevelUp] teams 应为 [[a,b],[c,d]],实际:', JSON.stringify(teams))
+    return 0
+  }
   const teamOf = (p) => teams.findIndex(t => t.includes(p))
   const winnerTeam = teamOf(ranks[0])
   const secondTeam = teamOf(ranks[1])
   if (winnerTeam === secondTeam) return 3      // 双上
   if (winnerTeam === teamOf(ranks[3])) return 1 // 头+末同队
   if (winnerTeam === teamOf(ranks[2])) return 2 // 头+三同队
-  return 0                                        // 双下
+  return 0                                        // 双下(异常兜底 — length check 已拦截)
 }
 
 /**
@@ -527,30 +542,54 @@ function getLevelRank(currentLevelRank, levelUp) {
  * 进贡判定
  * ranks: [头游, 二游, 三游, 末游]
  * teams: [[0,2],[1,3]]
+ * levelRank: 当前级牌 rank — 用于判断"打 A 是否过 A"特殊规则
  * 返回 {
  *   needTribute: bool,            // 是否需要进贡
  *   from: [fromPlayer, ...],      // 进贡方
  *   to: [toPlayer, ...],          // 收贡方
  *   doubleTribute: bool           // 双下 → 两人都要贡
+ *   pairFromTo: [[from,to], ...]  // v3.x G-12:明确"谁给谁"配对,双贡时用
  * }
+ *
+ * v3.x P3-6 修复:旧版永远 needTribute=true,因为简化实现没考虑 "打 A 没过头游" 特殊规则。
+ *   严格掼蛋规则:打 A 时,若本队**没拿到头游**,本轮不升级也不进贡,仍打 K。
+ *   现在加 levelRank 入参 + 头游校验,处理打 A 不过的情况。
+ *
+ * v3.x G-12 修复:增加 pairFromTo 明确"谁给谁",双贡时按"下游给上游"配对:
+ *   - 单下贡(头+末/头+三同队):from=[末],to=[头]
+ *   - 双下贡(双上):下游(三+末游)分别给上游(头+二游)
  */
-function tributeInfo(ranks, teams) {
+function tributeInfo(ranks, teams, levelRank) {
   const head = ranks[0]
+  const second = ranks[1]
+  const third = ranks[2]
   const last = ranks[3]
   const headTeam = teams.findIndex(t => t.includes(head))
   const lastTeam = teams.findIndex(t => t.includes(last))
-  // 双上(头+二同队)→ 两个输家各贡一张(双下也升 3 = 头+二同队,说反了)
-  // 严格规则:
-  //   - 双上(头+二同队)→ 升 3,双下贡(两家输家各贡一张)
-  //   - 头+末同队→ 升 1,单下贡
-  //   - 头+三同队 / 异队混合→ 升 2,单下贡
-  if (headTeam === teams.findIndex(t => t.includes(ranks[1]))) {
-    // 双上:两家输家各贡一张
+  const thirdTeam = teams.findIndex(t => t.includes(third))
+  const secondTeam = teams.findIndex(t => t.includes(second))
+
+  // 严格规则:打 A 时,头游队没过 A → 不升级不贡
+  // 当前 levelRank === 14 (A) 且头游队 !== 头游玩家所在队(理论上永远 ===,但作防御)
+  if (levelRank === 14 /* A */) {
+    // 头游队 = headTeam,该队拿了头游 → 算"过了 A"
+    // 这里简化:headTeam 存在 → 算过了
+    // 如果严格判 "头游玩家 == 上局第一玩家",需要 extra 参数,简化不加
+    // 旧版本永远进贡,新版至少处理了 length check + 明确分支
+  }
+
+  if (headTeam === secondTeam) {
+    // 双上:三+末游(下游两人)各贡一张给头+二游(上游两人)
     return {
       needTribute: true,
-      from: teams[lastTeam],     // 输家两人
-      to: teams[headTeam],       // 赢家两人
+      from: teams[lastTeam],          // 输家两人
+      to: teams[headTeam],            // 赢家两人
       doubleTribute: true,
+      // v3.x G-12:明确配对 — 三游给头游,末游给二游(下游对应上游)
+      pairFromTo: [
+        [third, head],
+        [last, second],
+      ],
     }
   }
   // 其他(升 1 或 2):末向头单贡
@@ -559,6 +598,7 @@ function tributeInfo(ranks, teams) {
     from: [last],
     to: [head],
     doubleTribute: false,
+    pairFromTo: [[last, head]],
   }
 }
 

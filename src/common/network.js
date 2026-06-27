@@ -135,7 +135,19 @@ function on(event, fn) {
   if (!handlers[event]) handlers[event] = []
   handlers[event].push(fn)
 }
-function off(event) { delete handlers[event] }
+// v3.x P2-19 修复:off 支持可选 handler 参数 — 不传则删除该事件所有监听器(向后兼容),
+//   传了则只删除该 handler 的引用,避免一个组件卸载破坏其他组件的事件订阅
+function off(event, fn) {
+  if (fn === undefined) {
+    delete handlers[event]
+    return
+  }
+  const list = handlers[event]
+  if (!list) return
+  const idx = list.indexOf(fn)
+  if (idx >= 0) list.splice(idx, 1)
+  if (list.length === 0) delete handlers[event]
+}
 function emit(event, ...args) {
   const list = handlers[event] || []
   for (const h of list) { try { h(...args) } catch (e) {} }
@@ -315,6 +327,16 @@ function _handleHostMessage(msg) {
   } else if (msg.type === 'HEARTBEAT') {
     if (peers.has(msg.from)) {
       lastHeartbeat.set(msg.from, Date.now())
+    }
+  } else if (msg.type === '_DISCONNECT') {
+    // v3.x P1-11 修复(N-1):host 端立即感知 joiner 断连,不再等 6-8s 心跳超时
+    // joiner 端 ws.onclose 会 emit _DISCONNECT 上来
+    const seat = msg.from
+    if (peers.has(seat)) {
+      // 标记 lastHeartbeat 为 -1,让 checker 立即知道该 joiner 断了
+      lastHeartbeat.set(seat, -1)
+      // 可选:立即触发 peer:leave(但 joiner 端 close 时也会触发,避免重复)
+      // emit('peer:leave', { seat })
     }
   }
 }

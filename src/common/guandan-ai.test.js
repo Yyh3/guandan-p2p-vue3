@@ -182,20 +182,21 @@ console.log('\n=== 9. autoPlayGrouped: 优先出炸弹 ===')
   eq('炸弹 mainRank=5', rec.mainRank, 5)
 }
 
-console.log('\n=== 10. autoPlayGrouped: 优先 5 炸 优于 4 炸 ===')
+console.log('\n=== 10. autoPlayGrouped: 主动出最小炸弹(留大炸弹防守) ===')
 {
-  // 同时有 5 张 8 和 4 张 3 → 出 5 炸(更值得出)
-  // 用 levelRank=15(打 2)避免和测试数据冲突
+  // v3.x P1-9 修复:同时有 5 张 8 和 4 张 3 → 主动出 4 张 3(留 5 炸防守)
+  //   旧版出 5 张 8(扔最大炸弹)浪费防守资源,新版主动出最小炸弹
+  //   用 levelRank=15(打 2)避免和测试数据冲突
   const lr = 15
   const h = [
-    c(8, 0), c(8, 1), c(8, 2), c(8, 3), c(8, 0),  // 5 张 8(双副牌)
-    c(3, 0), c(3, 1), c(3, 2), c(3, 3),  // 4 炸 3
+    c(8, 0), c(8, 1), c(8, 2), c(8, 3), c(8, 0),  // 5 张 8(双副牌)— 留作防守
+    c(3, 0), c(3, 1), c(3, 2), c(3, 3),  // 4 炸 3 — 主动出
   ]
   const r = AI.autoPlayGrouped(h, null, lr)
-  eq('出 5 张', r.cards.length, 5)
+  eq('出 4 张(最小炸弹)', r.cards.length, 4)
   const rec = E.recognize(r.cards)
-  eq('识别为 BOMB_5', rec.type, E.TYPE.BOMB_5)
-  eq('炸弹 mainRank=8', rec.mainRank, 8)
+  eq('识别为 BOMB_4', rec.type, E.TYPE.BOMB_4)
+  eq('炸弹 mainRank=3', rec.mainRank, 3)
 }
 
 console.log('\n=== 11. autoPlayGrouped: 凑顺子 ===')

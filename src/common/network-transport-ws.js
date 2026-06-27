@@ -85,6 +85,12 @@ export class WebSocketTransport {
     this._outbox = []        // ready 之前的消息队列
     this._ready = false
     this._hostIp = null      // client 端连接的目标 IP
+    // v3.x P1-12 修复(N-2):重连状态
+    this._closedByUser = false   // 用户主动 close 时为 true,不再重连
+    this._reconnecting = false   // 重连过程中为 true,避免重复触发
+    this._reconnectAttempts = 0
+    this._reconnectTimer = null
+    this._url = null              // client 端 ws URL,重连用
     this._lastSenderWs = null // host 端最近一次发消息的 ws（用于 bindLastSenderSeat）
   }
 
@@ -240,7 +246,8 @@ export class WebSocketTransport {
     this._mode = 'client'
     this._hostIp = hostIp
     const port = hostPort != null ? hostPort : this._port
-    const url = `ws://${hostIp}:${port}${this._path}`
+    this._url = `ws://${hostIp}:${port}${this._path}`
+    const url = this._url
     // ★ v2.2 task B:跨设备联机 — 浏览器环境用原生 WebSocket 全局,Node 测试环境用 'ws'
     //   浏览器 Vite bundle 里没有 'ws' npm 包(只在 devDependencies 里),所以 import('ws') 会失败。
     //   优先用 globalThis.WebSocket (浏览器原生);只在它不存在时才尝试 'ws' (Node 测试环境)。
@@ -278,6 +285,10 @@ export class WebSocketTransport {
         if (wasReady) {
           this._emit({ type: '_DISCONNECT', payload: { seat: -1 }, ts: Date.now() })
         }
+        // v3.x P1-12 修复(N-2):浏览器 ws client 断线后尝试重连(指数退避,最多 3 次)
+        if (!this._closedByUser && !this._reconnecting) {
+          this._scheduleReconnect()
+        }
       })
       this._ws.addEventListener('error', () => { /* swallow; close handler will fire */ })
       // 等待 ws open
@@ -304,6 +315,10 @@ export class WebSocketTransport {
         this._ready = false
         if (wasReady) {
           this._emit({ type: '_DISCONNECT', payload: { seat: -1 }, ts: Date.now() })
+        }
+        // v3.x P1-12 修复(N-2):Node ws 客户端断线后尝试重连
+        if (!this._closedByUser && !this._reconnecting) {
+          this._scheduleReconnect()
         }
       })
       this._ws.on('error', () => { /* swallow; close handler will fire */ })
@@ -432,13 +447,23 @@ export class WebSocketTransport {
   }
 
   close() {
+    // v3.x P1-12 修复(N-2):标记用户主动 close,停止重连
+    this._closedByUser = true
     this._ready = false
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
     if (this._wss) {
       try { this._wss.close() } catch (e) { /* swallow */ }
       this._wss = null
     }
     // ★ v2.4-p3 T4:同步关 v2.4-p3 新增的 http server,释放 8848 端口
+    // v3.x P2-28 修复(N-28):关 server 时先 close 所有活跃 ws 连接,再 close httpServer
     if (this._httpServer) {
+      for (const ws of this._clients.keys()) {
+        try { ws.close() } catch (e) { /* swallow */ }
+      }
       try { this._httpServer.close() } catch (e) { /* swallow */ }
       this._httpServer = null
     }
@@ -451,6 +476,35 @@ export class WebSocketTransport {
     this._listeners = []
     this._mode = null
     this._lastSenderWs = null
+  }
+
+  // v3.x P1-12 修复(N-2):浏览器/Node ws client 断线后自动重连
+  //   指数退避:1s → 2s → 4s,最多 3 次,失败后放弃让上层处理
+  _scheduleReconnect() {
+    if (this._closedByUser || this._reconnecting) return
+    if (this._reconnectAttempts >= 3) {
+      this._emit({ type: 'reconnect:failed', payload: { attempts: this._reconnectAttempts }, ts: Date.now() })
+      return
+    }
+    this._reconnecting = true
+    this._reconnectAttempts++
+    const delay = 1000 * Math.pow(2, this._reconnectAttempts - 1)  // 1s, 2s, 4s
+    this._reconnectTimer = setTimeout(async () => {
+      this._reconnectTimer = null
+      this._reconnecting = false
+      if (this._closedByUser || !this._url) return
+      try {
+        // 重新走 _openClient 路径,会触发 _emit('connect') 等
+        // 注意:_openClient 内部会用 this._hostIp/this._port/this._path
+        //   URL 包含 path,所以直接传 URL 不可行 — 改为调内部重新打开逻辑
+        await this._openClient(this._hostIp, this._port)
+        this._reconnectAttempts = 0  // 成功后重置
+        this._emit({ type: 'reconnect:ok', payload: {}, ts: Date.now() })
+      } catch (e) {
+        // 重连失败,继续 schedule 下次
+        this._scheduleReconnect()
+      }
+    }, delay)
   }
 
   onMessage(cb) {
