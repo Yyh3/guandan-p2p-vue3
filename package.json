@@ -26,6 +26,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "^8.0.2",
+    "html5-qrcode": "^2.3.8",
     "qrcode": "^1.5.4",
     "vue": "^3.4.0",
     "vue-router": "^4.2.0"

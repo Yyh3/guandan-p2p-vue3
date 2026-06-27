@@ -15,6 +15,11 @@
           class="input"
         />
       </div>
+      <!-- ★ v0.4.9:扫一扫按钮(真机才显示) -->
+      <div class="qr-row">
+        <button class="action-btn-small" @click="openScanner">📷 扫一扫</button>
+        <p class="card-hint">对准房主手机上的二维码</p>
+      </div>
       <div class="qr-row" v-if="route.query.scanHost">
         <p class="card-hint">扫到的房主地址:{{ route.query.scanHost }}</p>
         <button class="action-btn-small" @click="useScan">使用该地址</button>
@@ -43,19 +48,39 @@
     <div class="action">
       <button class="action-btn" :class="{ disabled: !canJoin }" @click="onJoin">加入房间</button>
     </div>
+
+    <!-- ★ v0.4.9:扫码 Modal(全屏,真机才用) -->
+    <div v-if="showScanner" class="scanner-modal" @click.self="closeScanner">
+      <div class="scanner-box">
+        <div class="scanner-header">
+          <h3 class="scanner-title">扫描房主二维码</h3>
+          <button class="scanner-close" @click="closeScanner" aria-label="关闭">×</button>
+        </div>
+        <!-- html5-qrcode 会接管这个 id="qr-reader" 元素 -->
+        <div id="qr-reader" class="scanner-video"></div>
+        <p class="scanner-hint" v-if="scannerError">{{ scannerError }}</p>
+        <p class="scanner-hint" v-else>请把摄像头对准房主手机的二维码</p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { isNativeCapacitor } from '@/common/ws-server.js'
+import { parseQrScanResult } from '@/common/qr-fallback.js'
 
 const router = useRouter()
 const route = useRoute()
 const isNative = ref(false)
 const hostAddress = ref('')
 const roomNo = ref(route.query.roomNo ? String(route.query.roomNo) : '')
+
+// ★ v0.4.9:扫一扫状态
+const showScanner = ref(false)
+const scannerError = ref('')
+let scannerInstance = null  // html5-qrcode Html5Qrcode 实例(避免热重载 leak)
 
 onMounted(() => {
   isNative.value = isNativeCapacitor()
@@ -69,6 +94,11 @@ onMounted(() => {
     const p = route.query.port ? String(route.query.port) : '8848'
     hostAddress.value = `${String(route.query.ip)}:${p}`
   }
+})
+
+onUnmounted(() => {
+  // ★ 组件卸载时关闭扫描器(释放相机)
+  closeScanner()
 })
 
 const canJoin = computed(() => {
@@ -90,6 +120,57 @@ function onJoin() {
     router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddress.value.trim())}`)
   } else {
     router.push(`/room?role=joiner&roomNo=${roomNo.value}`)
+  }
+}
+
+// ★ v0.4.9:打开扫码 Modal + 启动 html5-qrcode
+async function openScanner() {
+  if (showScanner.value) return
+  showScanner.value = true
+  scannerError.value = ''
+  // 动态 import html5-qrcode(避免 SSR / 桌面浏览器 bundle 增加)
+  try {
+    const { Html5Qrcode } = await import('html5-qrcode')
+    if (!showScanner.value) return  // 用户可能已经关掉
+    scannerInstance = new Html5Qrcode('qr-reader')
+    await scannerInstance.start(
+      { facingMode: 'environment' },  // 后置摄像头
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+      },
+      (decodedText) => {
+        // 扫码成功回调
+        const parsed = parseQrScanResult(decodedText)
+        if (parsed) {
+          hostAddress.value = `${parsed.host}:${parsed.port}`
+          closeScanner()
+        } else {
+          scannerError.value = `无法解析该二维码内容: ${decodedText.slice(0, 50)}`
+        }
+      },
+      () => {
+        // 持续扫描的"无码"回调 — 静默忽略
+      }
+    )
+  } catch (e) {
+    console.warn('[JoinView] 扫码启动失败:', e)
+    scannerError.value = `扫码启动失败: ${e?.message || e}。请检查相机权限后重试。`
+  }
+}
+
+// ★ v0.4.9:关闭扫码 Modal + 停止扫描器
+async function closeScanner() {
+  showScanner.value = false
+  if (scannerInstance) {
+    try {
+      const inst = scannerInstance
+      scannerInstance = null
+      await inst.stop()
+      await inst.clear()
+    } catch (e) {
+      // ignore - 实例可能已停止
+    }
   }
 }
 </script>
@@ -145,4 +226,46 @@ function onJoin() {
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .action-btn.disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
+
+/* ★ v0.4.9:扫码 Modal 样式 */
+.scanner-modal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.85);
+  display: grid; place-items: center;
+  padding: 16px;
+}
+.scanner-box {
+  width: 100%; max-width: 480px;
+  background: var(--bg-deep, #0a3d2c);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 16px;
+  color: #fff;
+}
+.scanner-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.scanner-title { font-size: 16px; font-weight: 700; }
+.scanner-close {
+  width: 36px; height: 36px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 0; color: #fff; font-size: 24px;
+  border-radius: 50%; cursor: pointer;
+  line-height: 1;
+}
+.scanner-video {
+  width: 100%; min-height: 300px;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+/* html5-qrcode 内部 video 元素占满容器 */
+.scanner-video :deep(video) { width: 100%; height: auto; display: block; }
+.scanner-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+}
 </style>

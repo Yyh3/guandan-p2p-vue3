@@ -60,3 +60,39 @@ export function describeFallbackMode(qrcodeUrl) {
 export function clipboardPayload(hostIp, hostPort) {
   return formatHostAddress(hostIp, hostPort)
 }
+
+// ★ v0.4.9:解析 QR 扫描结果(joinRemoteRoom 走 IP:port 格式)
+//
+//   支持 3 种格式:
+//     1) 纯 IP:port  "192.168.43.1:8848"
+//     2) join URL    "http://192.168.43.1:8848" 或 "https://..."
+//     3) 含路径      "http://192.168.43.1:8848/#/join"  → 取 origin
+//   返回 { host, port } 或 null(无法解析)
+//
+//   设计:不依赖 parseHostAddress(network.js)避免循环依赖
+export function parseQrScanResult(text) {
+  if (typeof text !== 'string' || text.trim() === '') return null
+  const trimmed = text.trim()
+  // 1) 纯 IP:port
+  const ipPortMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?$/)
+  if (ipPortMatch) {
+    return {
+      host: ipPortMatch[1],
+      port: ipPortMatch[2] ? Number(ipPortMatch[2]) : 8848,
+    }
+  }
+  // 2) http(s)://... → 提取 host:port
+  try {
+    const url = new URL(trimmed)
+    if (url.hostname && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname)) {
+      return {
+        host: url.hostname,
+        port: url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80),
+      }
+    }
+    // hostname 不是 IP(比如域名)→ 暂不支持
+  } catch (e) {
+    // 不是合法 URL,继续往下
+  }
+  return null
+}

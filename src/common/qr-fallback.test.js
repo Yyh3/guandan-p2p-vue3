@@ -165,5 +165,47 @@ const sceneC = {
 }
 assert('场景 C 卡片不渲染 (IP 没拿到)', sceneC.show === false)
 
+// ============================================================
+// v0.4.9:parseQrScanResult 测试
+// ============================================================
+console.log('\n=== 5. parseQrScanResult: 解析 QR 扫描结果 ===')
+{
+  const { parseQrScanResult } = await import('./qr-fallback.js')
+
+  // 1) 纯 IP:port
+  const r1 = parseQrScanResult('192.168.43.1:8848')
+  assert('★ 纯 IP:port 解析正确', r1 && r1.host === '192.168.43.1' && r1.port === 8848)
+
+  // 2) 纯 IP(无端口,默认 8848)
+  const r2 = parseQrScanResult('192.168.43.1')
+  assert('★ 纯 IP 默认 8848 端口', r2 && r2.host === '192.168.43.1' && r2.port === 8848)
+
+  // 3) http URL
+  const r3 = parseQrScanResult('http://192.168.43.1:8848')
+  assert('★ http URL 解析正确', r3 && r3.host === '192.168.43.1' && r3.port === 8848)
+
+  // 4) https URL
+  const r4 = parseQrScanResult('https://192.168.43.1:8848')
+  assert('★ https URL 解析正确', r4 && r4.host === '192.168.43.1' && r4.port === 8848)
+
+  // 5) 含路径的 URL(取 origin)
+  const r5 = parseQrScanResult('http://192.168.43.1:8848/#/join')
+  assert('★ URL 含路径仍解析正确', r5 && r5.host === '192.168.43.1' && r5.port === 8848)
+
+  // 6) 不同端口
+  const r6 = parseQrScanResult('http://10.0.0.5:9000')
+  assert('★ 不同端口解析正确', r6 && r6.host === '10.0.0.5' && r6.port === 9000)
+
+  // 7) 非法输入
+  assert('空字符串返回 null', parseQrScanResult('') === null)
+  assert('非字符串返回 null', parseQrScanResult(null) === null)
+  assert('undefined 返回 null', parseQrScanResult(undefined) === null)
+  assert('纯文本返回 null', parseQrScanResult('hello world') === null)
+  assert('域名(非 IP)返回 null', parseQrScanResult('http://example.com:8848') === null)
+  // 8) 边界:前后有空格
+  const r7 = parseQrScanResult('  192.168.43.1:8848  ')
+  assert('★ 前后空格自动 trim', r7 && r7.host === '192.168.43.1' && r7.port === 8848)
+}
+
 console.log('\n========== qr-fallback test result: ' + pass + ' pass / ' + fail + ' fail ==========')
 if (fail > 0) process.exit(1)
