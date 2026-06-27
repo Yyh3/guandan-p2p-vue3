@@ -95,7 +95,7 @@ function onSelect(phrase) {
 .chat-panel {
   width: 100%;
   max-width: 480px;
-  background: linear-gradient(180deg, #1a237e 0%, #0a1233 100%);
+  background: linear-gradient(180deg, var(--emerald-deep, #0a3d2c) 0%, var(--emerald-base, #14533b) 100%);
   border: 2px solid var(--gold, #FFD700);
   border-radius: 18px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);

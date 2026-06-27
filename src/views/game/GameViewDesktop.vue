@@ -567,7 +567,7 @@ function onNickEditorConfirmed(p) {
   min-width: 22px;
   height: 18px;
   padding: 0 6px;
-  background: linear-gradient(180deg, #1a237e, #0a1233);
+  background: linear-gradient(180deg, var(--emerald-deep, #0a3d2c), var(--emerald-base, #14533b));
   border: 1.5px solid var(--gold);
   color: var(--gold);
   font-size: 10px;

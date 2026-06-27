@@ -738,7 +738,7 @@ button {
   line-height: 1;
   width: 28px;
   height: 28px;
-  background: linear-gradient(180deg, #2a3a6a, #0a1233);
+  background: linear-gradient(180deg, var(--emerald-deep, #0a3d2c), var(--emerald-base, #14533b));
   border: 1.5px solid var(--gold, #FFD700);
   border-radius: 50%;
   display: flex;
@@ -947,7 +947,7 @@ button {
   min-width: 18px;
   height: 14px;
   padding: 0 4px;
-  background: linear-gradient(180deg, #1a237e, #0a1233);
+  background: linear-gradient(180deg, var(--emerald-deep, #0a3d2c), var(--emerald-base, #14533b));
   border: 1px solid var(--gold, #FFD700);
   color: var(--gold, #FFD700);
   font-size: 9px;
