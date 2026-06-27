@@ -153,6 +153,25 @@ function emit(event, ...args) {
   for (const h of list) { try { h(...args) } catch (e) {} }
 }
 
+/**
+ * 测试辅助:返回某事件的监听器数量(用于验证 on/off cleanup)。
+ * 不属于公开 API,仅测试用。
+ */
+function _listenerCount(event) {
+  const list = handlers[event]
+  return list ? list.length : 0
+}
+
+/** 测试辅助:返回所有事件名(用于白盒断言 — 某事件监听器是否残留) */
+function _listTrackedEvents() {
+  return Object.keys(handlers).filter(k => handlers[k] && handlers[k].length > 0)
+}
+
+/** 测试辅助:network 是否处于关闭状态(无 transport + 无心跳) */
+function _isClosed() {
+  return !transport && !heartbeatSendTimer && !heartbeatCheckTimer
+}
+
 function getRoomId() { return roomId }
 function setRoomId(id) { roomId = id }
 function getSelfSeat() { return selfSeat }
@@ -501,7 +520,13 @@ function startAsHost(self) {
   }
   transport.onMessage(_onTransportMessage)
   // 异步 open,fire-and-forget。WS 模式下 send 在 ready 前会被 transport 缓存。
-  transport.open('self').catch((err) => {
+  // ★ BUG-005 修复:BC transport 需要 roomId 构造独立 channel name (`guandan-p2p-<roomId>`),
+  //   否则所有 host 都用 'default' channel → 多个 host 串号 / joiner 串房
+  //   WS / AndroidWs transport 不需要 roomId(走 ws host:port 直连,不走 BC channel name)
+  const openPromise = (transport instanceof BroadcastChannelTransport)
+    ? transport.open('self', roomId || 'default')
+    : transport.open('self')
+  openPromise.catch((err) => {
     emit('error', err?.message || 'Transport open failed')
   })
   startHeartbeatChecker()
@@ -547,13 +572,19 @@ function joinRoom(hostRoomId, self, opts) {
   }
   transport.onMessage(_onTransportMessage)
   // 异步 open。WS joiner 等 ws 连接建立后,再发 JOIN
-  // BC 模式:保持原行为 (transport.open('client', null, null)) — BC 内部 fallback 到 'default' 通道
-  //         房间号隔离依赖上层 setRoomId,见 RoomView.vue
-  // WS 模式:传 hostIp/hostPort 给 transport.open
-  const openArgs = isWsMode
-    ? ['client', parsedHostIp, parsedHostPort]
-    : ['client', null, null]
-  transport.open(...openArgs).then(() => {
+  // ★ BUG-005 修复:BC transport 需要 roomId 构造独立 channel name,否则 joiner 用任何
+  //   roomId 都连到 'default' channel,跟 host 房号对不上 → 4-tab 联机不同房间串号
+  //   WS 模式:传 hostIp/hostPort 给 transport.open(走 ws server,不走 BC channel name)
+  //   WS 模式 joiner 走的是 ws 直连,不依赖 roomId 隔离
+  let openPromise
+  if (isWsMode) {
+    openPromise = transport.open('client', parsedHostIp, parsedHostPort)
+  } else if (transport instanceof BroadcastChannelTransport) {
+    openPromise = transport.open('client', roomId || 'default')
+  } else {
+    openPromise = transport.open('client', null, null)
+  }
+  openPromise.then(() => {
     if (!transport) return
     // 立即发 JOIN。joiner 端 selfSeat=-1,host 会按 uuid 复用或分配新 seat
     sendMessage({ type: 'JOIN', payload: selfInfo })
@@ -807,6 +838,8 @@ export {
   __installFakeTimers,
   _setTransportFactory, _resetTransportFactory,
   _getTransport, _getTransportType,
+  // ★ BUG-004/005 测试辅助:验证监听器 cleanup + roomId 隔离
+  _listenerCount, _listTrackedEvents, _isClosed,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_CHECK_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   JOIN_RETRY_DELAY_MS,
 }
