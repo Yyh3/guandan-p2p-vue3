@@ -280,7 +280,7 @@ const {
   isDealing, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
-  isP2PMode, selfSeat,
+  isP2PMode, selfSeat, game,
   // computed
   myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
   seatData, handColumns, selectedCount,
@@ -301,9 +301,27 @@ const {
 // 路由相关的 UI 跳转(只能组件层做)
 function onBack() { router.push('/') }
 function showMenu() {
-  if (confirm('退出对局?')) {
-    router.push('/')
+  if (!confirm('退出对局?')) return
+  // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,把对局让给队友(seat 2)
+  //   之前 host 直接关掉 net → joiner 端走兜底(6-8s 心跳超时感知 host 掉线),
+  //   现在 host 主动调 requestHostMigration 把当前 game state 传给新 host,
+  //   joiner 端实时收到 host:migrated 事件,牌局无缝继续。
+  //   仅当:isP2P 模式 + host(selfSeat=0) + 对局进行中(phase=playing/dealing/trick_end)
+  if (isP2PMode.value && selfSeat.value === 0 && game.value) {
+    const st = game.value.getState()
+    if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
+      const snapshot = {
+        hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
+        firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
+        lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
+        trickHistory: st.trickHistory, passCount: st.passCount,
+        tribute: st.tribute, ghost: st.ghost,
+        levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
+      }
+      try { net.requestHostMigration && net.requestHostMigration(2, snapshot) } catch (e) { /* swallow */ }
+    }
   }
+  router.push('/')
 }
 // NicknameEditor 用 — 仅占位保留挂载点(永远 false,见 template v-if="false")
 function onNickEditorConfirmed(p) {

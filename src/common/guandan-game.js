@@ -361,6 +361,9 @@ function createGame(opts) {
     playerPlay, playerPass,
     // ★ v3.8 P1:无校验同步接口,4-tab 联机用
     applyPlay, applyPass, applyRoundEnd,
+    // ★ 静态审查 v0.4.5 N-3 闭环:加 applySnapshot 别名(去掉下划线,跟报告建议一致),
+    //   原 _applySnapshot 保留(向后兼容旧调用)。语义:接 joiner 端 snapshot 后灌回 state。
+    applySnapshot(snap) { return this._applySnapshot(snap) },
     // ★ v3.8 P1:运行时把某 seat 加入 AI 列表(断线接管)
     addAIPlayer(seat) {
       if (!aiPlayers.includes(seat)) aiPlayers.push(seat)

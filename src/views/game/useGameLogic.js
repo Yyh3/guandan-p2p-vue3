@@ -132,8 +132,12 @@ export function useGameLogic(opts = {}) {
     // ★ v3.x P2-29(N-3 闭环):旁观者也 apply snapshot,跟新 host 同步最新 game state
     //   之前只有 isMyself=true 才 apply,旁观者 joiner 的本地 game state 不会更新,
     //   → 旁观者手牌 / 当前出牌者 / 桌面牌可能跟新 host 看到的不同步
+    //   v0.4.5 用 applySnapshot 别名(去掉下划线),原 _applySnapshot 仍兼容
     if (game.value && payload.snapshot) {
-      try { game.value._applySnapshot(payload.snapshot) } catch (e) { console.warn('apply host migration snapshot err', e) }
+      try {
+        if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
+        else if (game.value._applySnapshot) game.value._applySnapshot(payload.snapshot)
+      } catch (e) { console.warn('apply host migration snapshot err', e) }
     }
   }
 
