@@ -173,15 +173,18 @@ export function useGameLogic(opts = {}) {
       selfSeat.value = netSelfSeat
       const netIsHost = (() => { try { return !!net.isHost && net.isHost() } catch { return false } })()
       isNetworkHost.value = netIsHost
-      // 2) game 层 migrateHost(0, newHostSeat) — 把 hands[newHostSeat] 移到 hands[0],
-      //   旧 host hands[0] 标记弃牌(进 finishedOrder 末位),调 currentPlayer/lastPlay 等
-      if (game.value && game.value.migrateHost) {
-        game.value.migrateHost(0, newHostSeat)
-      }
-      // 3) applySnapshot(优先,接 host 端权威完整 state)
+      // ★ BUG-RC3-002 修复(2026-06-28):顺序改为「先 applySnapshot 再 migrateHost」。
+      //   payload.snapshot 是 joiner 端在迁移前从 game.getState() 取的(seat 映射 = 旧)。
+      //   旧顺序 migrateHost → applySnapshot 会把刚搬好的 hands[0](新 host) 用
+      //   snapshot.hands[0](旧 host 手牌)覆盖回去,导致新 host 看到错误手牌。
+      // 2) 先 applySnapshot — 把 state 恢复到"迁移前"完整状态(seat 映射 = 旧)
       if (game.value && payload.snapshot) {
         if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
         else if (game.value._applySnapshot) game.value._applySnapshot(payload.snapshot)
+      }
+      // 3) 再 migrateHost — 把 hands[newHostSeat] 搬到 hands[0],currentPlayer/abandonedSeats 重映射
+      if (game.value && game.value.migrateHost) {
+        game.value.migrateHost(0, newHostSeat)
       }
       // 4) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
       refreshUiFromGameState()

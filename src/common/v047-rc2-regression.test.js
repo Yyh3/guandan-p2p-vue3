@@ -263,5 +263,135 @@ console.log('\n=== 5.4.2 applyRoundEndFromPayload 也支持 tribute:null 清空 
   assert('★ payload 显式传 tribute:null → state.tribute === null', st2.tribute === null)
 }
 
+// 5.5 BUG-RC3-002 修复验证:applySnapshot(迁移前) + migrateHost 顺序不覆盖 hand remap
+// 报告原文:"migrateHost 后 applySnapshot,会被 snapshot(迁移前)覆盖回去"
+//   → 修复后顺序:先 applySnapshot 再 migrateHost
+//   → 断言:新 host hands[0] 仍是新 host 的手牌,不是旧 host 的
+console.log('\n=== 5.5 BUG-RC3-002 修复:applySnapshot→migrateHost 顺序不覆盖 hand remap ===')
+{
+  const game = createGame({ players: [{}, {}, {}, {}], seed: 9 })
+  game.deal()
+  const stBefore = game.getState()
+  // 模拟 joiner 端在迁移前从 game.getState() 取 snapshot(seat 映射 = 旧)
+  const snapshotBefore = {
+    hands: stBefore.hands.map(h => h.slice()),
+    tableCards: stBefore.tableCards.slice(),
+    currentPlayer: stBefore.currentPlayer,
+    firstPlayer: stBefore.firstPlayer,
+    leaderPlayer: stBefore.leaderPlayer,
+    lastPlay: stBefore.lastPlay ? { ...stBefore.lastPlay } : null,
+    finishedOrder: stBefore.finishedOrder.slice(),
+    trickHistory: stBefore.trickHistory.slice(),
+    passCount: stBefore.passCount,
+    levelRank: stBefore.levelRank,
+    levelUp: stBefore.levelUp,
+  }
+  // 记录关键手牌
+  const newHostHand = snapshotBefore.hands[2].slice()  // 队友(seat 2)即将升级为新 host
+  const oldHostHand = snapshotBefore.hands[0].slice()  // 旧 host(seat 0)即将离场
+
+  // ===== 错误顺序(模拟 BUG-RC3-002 旧行为)=
+  const gameBad = createGame({ players: [{}, {}, {}, {}], seed: 9 })
+  gameBad.deal()
+  gameBad.migrateHost(0, 2)
+  gameBad.applySnapshot(snapshotBefore)  // ← 错的:用旧 snapshot 覆盖刚搬好的 hands[0]
+  const stBad = gameBad.getState()
+  // 旧 snapshot.hands[0] = 旧 host 手牌(被覆盖回去)
+  // 新 host 看到的是旧 host 的手牌(错!)
+  assert('旧顺序 snapshot 覆盖后 hands[0] 是旧 host 手牌(已知错误行为)',
+    JSON.stringify(stBad.hands[0]) === JSON.stringify(oldHostHand))
+  assert('旧顺序 snapshot 覆盖后 hands[2] 仍是新 host 原手牌(已知错误行为)',
+    JSON.stringify(stBad.hands[2]) === JSON.stringify(newHostHand))
+
+  // ===== 正确顺序(修复后)=
+  const gameGood = createGame({ players: [{}, {}, {}, {}], seed: 9 })
+  gameGood.deal()
+  gameGood.applySnapshot(snapshotBefore)  // ← 先恢复迁移前状态
+  gameGood.migrateHost(0, 2)  // ← 再迁移
+  const stGood = gameGood.getState()
+  // hands[0] 应该是新 host 的手牌(seat 2 原来的)
+  assert('★ 正确顺序后 hands[0] = 新 host 的手牌',
+    JSON.stringify(stGood.hands[0]) === JSON.stringify(newHostHand))
+  assert('★ 正确顺序后 hands[2] = [] (新 host 已搬到 seat 0)',
+    JSON.stringify(stGood.hands[2]) === '[]')
+  assert('★ 正确顺序后 hands[0] 不是旧 host 手牌(没被覆盖)',
+    JSON.stringify(stGood.hands[0]) !== JSON.stringify(oldHostHand))
+  assert('★ 正确顺序后 abandonedSeats 包含旧 host seat 0',
+    stGood.abandonedSeats.includes(0))
+  assert('★ 正确顺序后 finishedOrder 不含 seat 0(用 abandonedSeats 而非 finishedOrder)',
+    !stGood.finishedOrder.includes(0))
+  // currentPlayer 调整:如果之前是旧 host(0)或新 host 原 seat(2)回合 → 切到 0
+  if (stBefore.currentPlayer === 0 || stBefore.currentPlayer === 2) {
+    assert('★ 正确顺序后 currentPlayer 切到 0(新 host)',
+      stGood.currentPlayer === 0)
+  } else {
+    assert('★ 正确顺序后 currentPlayer 保持旁观 seat (非 0/2)',
+      stGood.currentPlayer === stBefore.currentPlayer)
+  }
+}
+
+// 5.6 BUG-RC3-003 修复验证:迁移后新 host 能继续出牌(playerPlay 不被拒绝)
+console.log('\n=== 5.6 BUG-RC3-003 修复:迁移后新 host(seat 0)能继续出牌 ===')
+{
+  const game = createGame({ players: [{}, {}, {}, {}], seed: 11 })
+  game.deal()
+  const stBefore = game.getState()
+  // 强制 currentPlayer=0(新 host 升级后该他出)
+  // 用 game.setCurrentPlayerForTest 或直接构造场景:
+  //   选 seat 2 升 host,然后用 snapshot 把 currentPlayer 设为 0(新 host 即将出牌)
+  const snapshotBefore = {
+    hands: stBefore.hands.map(h => h.slice()),
+    tableCards: [],
+    currentPlayer: 0,  // 假装是旧 host 回合,迁移后该新 host(seat 0)出
+    firstPlayer: 0,
+    leaderPlayer: 0,
+    lastPlay: null,
+    finishedOrder: [],
+    trickHistory: [],
+    passCount: 0,
+    levelRank: stBefore.levelRank,
+    levelUp: 0,
+  }
+  game.applySnapshot(snapshotBefore)
+  game.migrateHost(0, 2)
+  const st = game.getState()
+  // 验证:seat 0 是新 host,他有手牌,currentPlayer 是 0
+  assert('迁移后 currentPlayer === 0(新 host 回合)', st.currentPlayer === 0)
+  assert('迁移后 hands[0].length > 0(新 host 有手牌)', st.hands[0].length > 0)
+  assert('迁移后 finishedOrder 不含 0(没把新 host 标 finished)',
+    !st.finishedOrder.includes(0))
+  // ★ 关键:playerPlay(0, 一张牌) 应当成功(返回 ok: true)
+  const firstCard = st.hands[0][0]
+  const result = game.playerPlay(0, [firstCard])
+  assert('★ 迁移后新 host playerPlay(0, [card]) 返回 ok:true',
+    result && result.ok === true)
+  assert('★ 迁移后新 host 出牌成功:currentPlayer 推进到下一位',
+    game.getState().currentPlayer === 1)  // seat 1 是下一位
+  // 旧 host seat 0 不在 finishedOrder 里(已用 abandonedSeats 区分)
+  assert('★ 旧 host 0 在 abandonedSeats 而非 finishedOrder',
+    game.getState().abandonedSeats.includes(0) && !game.getState().finishedOrder.includes(0))
+}
+
+// 5.7 BUG-RC3-001 验证:network.requestPromoteToHost 存在
+//   报告要求:"typeof net.requestPromoteToHost === 'function'"
+console.log('\n=== 5.7 BUG-RC3-001 验证:network.requestPromoteToHost 存在 ===')
+{
+  const { requestPromoteToHost, selectNextHostCandidate } = await import('./network.js')
+  assert('★ network.requestPromoteToHost 是 function',
+    typeof requestPromoteToHost === 'function')
+  assert('★ network.selectNextHostCandidate 是 function',
+    typeof selectNextHostCandidate === 'function')
+  // selectNextHostCandidate 读模块级 peers Map(无参)
+  //   - 全空时返回 0(无候选)
+  //   - 优先级 2 > 1 > 3(见 network.js:1083)
+  // 简化:只验证无参调用不抛 + 返回 0..3 的合法 seat
+  let r = selectNextHostCandidate()
+  assert('★ selectNextHostCandidate() 无参调用不抛错', true)
+  assert('★ selectNextHostCandidate() 返回值在 0..3 之间',
+    Number.isInteger(r) && r >= 0 && r <= 3)
+  assert('★ selectNextHostCandidate() 默认 peers 空时返回 0(无候选)',
+    r === 0)
+}
+
 console.log(`\n========== v047-rc2-regression 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
 setTimeout(() => process.exit(fail > 0 ? 1 : 0), 100)
