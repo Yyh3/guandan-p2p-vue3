@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/common/guandan-engine.test.js && node src/common/guandan-ai.test.js && node src/common/guandan-game.test.js && node src/common/deal-animation.test.js && node src/common/audio.test.js && node src/common/card-api.test.js && node src/common/network.test.js && node src/common/network-multitab.test.js && node src/common/network-kick-player.test.js && node src/common/network-cross-device.test.js && node src/common/network-ws-http.test.js && node src/common/ws-server.test.js && node src/common/qr-fallback.test.js && node src/views/game/GameView.test.js && node src/common/room-ui.test.js && node src/views/room/RoomView.test.js",
+    "test": "node src/common/guandan-engine.test.js && node src/common/guandan-ai.test.js && node src/common/guandan-game.test.js && node src/common/deal-animation.test.js && node src/common/audio.test.js && node src/common/card-api.test.js && node src/common/network.test.js && node src/common/network-multitab.test.js && node src/common/network-kick-player.test.js && node src/common/network-cross-device.test.js && node src/common/network-ws-http.test.js && node src/common/ws-server.test.js && node src/common/qr-fallback.test.js && node src/common/network-relay.test.js && node src/views/game/GameView.test.js && node src/views/game/finish-deal-seat.test.js && node src/views/game/commit-play-broadcast.test.js && node src/common/room-ui.test.js && node src/views/room/RoomView.test.js",
     "test:kick": "node src/common/network-kick-player.test.js",
     "test:engine": "node src/common/guandan-engine.test.js",
     "test:ai": "node src/common/guandan-ai.test.js",
