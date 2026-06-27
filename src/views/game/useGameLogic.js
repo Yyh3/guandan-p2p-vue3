@@ -131,22 +131,61 @@ export function useGameLogic(opts = {}) {
     }, isMyself ? 5000 : 3000)
     hostMigrationBadge.value = true
   }
+  // ★ BUG-RC2-003 修复:抽 refreshUiFromGameState() 公共函数
+  //   任何 _applySnapshot / applySnapshot 之后都应统一刷新 UI refs
+  //   之前 onP2PStateSnapshot 已修,但 onHostMigrated / ROUND_END fallback
+  //   漏修,导致 host 迁移时 UI 跟 game state 不同步
+  function refreshUiFromGameState() {
+    if (!game.value || !game.value.getState) return
+    const st = game.value.getState()
+    currentPlayer.value = st.currentPlayer
+    lastPlay.value = st.lastPlay
+    tableCards.value = st.tableCards || []
+    finishedOrder.value = st.finishedOrder || []
+    phase.value = st.phase
+    levelRank.value = st.levelRank
+    levelUp.value = st.levelUp || 0
+    if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
+      myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+      selected.value = new Array(myHand.value.length).fill(false)
+      selectedColKeys.value = {}
+    }
+  }
+
   function onHostMigrated(payload) {
     if (!payload) return
     const isMyself = payload.isMyself === true
     const newHostSeat = payload.newHostSeat
     if (newHostSeat == null) return
     showHostMigrationToast({ isMyself, newHostSeat })
-    // ★ v3.x P2-29(N-3 闭环):旁观者也 apply snapshot,跟新 host 同步最新 game state
-    //   之前只有 isMyself=true 才 apply,旁观者 joiner 的本地 game state 不会更新,
-    //   → 旁观者手牌 / 当前出牌者 / 桌面牌可能跟新 host 看到的不同步
-    //   v0.4.5 用 applySnapshot 别名(去掉下划线),原 _applySnapshot 仍兼容
-    if (game.value && payload.snapshot) {
-      try {
+    // ★ BUG-RC2-001 修复:host 迁移必须同时迁移 network / game / UI 三层状态。
+    //   之前 network 层把新 host 改成 seat 0 + isHostFlag=true,
+    //   但 game 层(手牌 / currentPlayer / lastPlay.who / trickHistory)
+    //   仍留在原 seat;UI 层 selfSeat / isNetworkHost / myHand 等没同步。
+    //   修法:
+    //   1) 同步 selfSeat.value / isNetworkHost.value 到 net 权威值
+    //   2) 调 game.migrateHost(0, newHostSeat) 让手牌 remap
+    //   3) applySnapshot 接 host 端权威完整 state(无 snapshot 时至少也要 migrate)
+    //   4) refreshUiFromGameState() 刷 UI refs
+    try {
+      // 1) 同步 useGameLogic 内部状态
+      const netSelfSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
+      selfSeat.value = netSelfSeat
+      const netIsHost = (() => { try { return !!net.isHost && net.isHost() } catch { return false } })()
+      isNetworkHost.value = netIsHost
+      // 2) game 层 migrateHost(0, newHostSeat) — 把 hands[newHostSeat] 移到 hands[0],
+      //   旧 host hands[0] 标记弃牌(进 finishedOrder 末位),调 currentPlayer/lastPlay 等
+      if (game.value && game.value.migrateHost) {
+        game.value.migrateHost(0, newHostSeat)
+      }
+      // 3) applySnapshot(优先,接 host 端权威完整 state)
+      if (game.value && payload.snapshot) {
         if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
         else if (game.value._applySnapshot) game.value._applySnapshot(payload.snapshot)
-      } catch (e) { console.warn('apply host migration snapshot err', e) }
-    }
+      }
+      // 4) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
+      refreshUiFromGameState()
+    } catch (e) { console.warn('host migration state sync err', e) }
   }
 
   // v3.x P2-29(N-3 闭环):joiner 端兜底 — host 离开时主动提升自己为新 host
@@ -833,7 +872,16 @@ function onAutoFindBest() {
   function onP2PPass(payload) {
     if (!payload || !game.value) return
     if (payload.seat === selfSeat.value) return
-    try { game.value.applyPass(payload.seat) } catch (e) { console.warn('applyPass err', e) }
+    // ★ BUG-RC2-004 修复:onP2PPass 加 currentPlayer 校验(与 onP2PPlay 对齐)。
+    //   之前只跳过本机 seat,直接 applyPass,迟到/重复/乱序/来自错误 seat 的 PASS
+    //   会直接推进 passCount,可能提前结束一墩。
+    try {
+      const st = game.value.getState()
+      if (st.phase !== 'playing') return
+      if (st.currentPlayer !== payload.seat) return
+      if (!st.lastPlay) return
+      game.value.applyPass(payload.seat)
+    } catch (e) { console.warn('applyPass err', e) }
   }
   // ★ 静态审查 BUG-A 修复:远端 ROUND_END 调 applyRoundEnd 时抑制再次广播
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)

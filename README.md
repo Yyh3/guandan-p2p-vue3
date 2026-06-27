@@ -27,7 +27,7 @@ npm run dev
 
 # 3. 跑测试(可选,验证环境)
 npm test
-# 期望: 862 用例 / 0 失败
+# 期望: 27 套件 / 1296 用例 / 0 失败 (v0.4.6)
 ```
 
 **4 标签联机测试**:
@@ -45,7 +45,8 @@ npm test
 - ✅ **AI 单机对战**:3 个 AI + 1 个玩家,中等难度
 - ✅ **局域网 P2P 联机**:同浏览器 4 标签可联(BroadcastChannel 开发态)
 - ✅ **真机跨设备联机**:AndroidWs 真机 host + 浏览器/真机 joiner 通过 WebSocket 加入(2 真机 + 2 浏览器 tab 已验证)
-- ✅ **房主控制**:host 主动踢人(`self:kicked` Toast 跳页)+ host 崩溃后对家自动迁移
+- ✅ **房主控制**:host 主动踢人(`self:kicked` Toast 跳页)+ 4-tab BC 模式下 host 崩溃对家自动迁移(v0.4.6 实现 game + UI 完整迁移)
+- ⚠️ **真机 WebSocket/AndroidWs host 迁移限制**:当前 host 迁移只支持 **同浏览器 4 标签 BroadcastChannel 拓扑**;真机/跨设备 WebSocket host 崩溃后,joiner 端 `isHostFlag = true` 但 transport 仍是 client 模式,需要**手动重建房间**(原 host 设备上点"退出",新 host 设备开新房 + 其他人重连)。正在评估 full transport rebuild 协议。
 - ✅ **心跳 6-8s 精确释放**:掉线判定 2s/2s/6s 三段退避,目标 6-8s 窗口,AI 接管兜底
 - ✅ **QR 兜底卡片**:扫码失败降级到 IP+端口文本,可手输
 - ✅ **Capacitor Android APK 打包**:debug APK 4MB / production 6-8MB(详见 `BUILD.md`)
@@ -217,7 +218,7 @@ npm run build             # 生产构建(产物 dist/)
 npm run preview           # 预览 dist/
 
 # 测试
-npm test                  # 全部 22 套件 / 1222 用例(v0.4.x 后)
+npm test                  # 全部 27 套件 / 1296 用例(v0.4.6)
 npm run test:engine       # 规则引擎 109 用例
 npm run test:ai           # AI 54 用例
 npm run test:game         # 状态机 102 用例
@@ -294,7 +295,7 @@ npm run bench             # 跑性能基准
 | v3.x | ✅ 完成 | 5 阶段 UI 重做(翡翠绿 + 金 + 深蓝星空),tokens + 4 屏重做 |
 | v0.3.0 | ✅ 完成 | v2.x 三里程碑收官,701/0 单测 |
 | v0.4.0 | ✅ 完成 | v3.x UI 重做收官,16 套件 / 862/0 单测,JDK 21 |
-| v0.4.x | ✅ 当前 | P2P 同步修复 8 BUG,22 套件 / 1222/0 单测(+360) |
+| v0.4.x | ✅ 当前 | P2P 同步修复 8 BUG + host 迁移 game/UI 闭环,27 套件 / 1296/0 单测(+74,v0.4.4~v0.4.6 累计) |
 | v4.0 | 💭 构思 | AI 三档难度 + 录像回放 + iOS 脚手架 |
 
 详见 `docs/ROADMAP.md` / `docs/CHANGELOG.md`。

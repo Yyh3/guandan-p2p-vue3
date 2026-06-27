@@ -389,7 +389,9 @@ function createGame(opts) {
       }
       if (typeof p.levelUp === 'number') state.levelUp = p.levelUp
       if (typeof p.newLevelRank === 'number') state.levelRank = p.newLevelRank
-      if (p.tribute) state.tribute = p.tribute
+      // ★ BUG-RC2-005 修复:nullable 字段用 'in' 判断,支持清空到 null
+      //   旧版 if (p.tribute) 在 tribute=null 时不更新,残留上一局的 tribute 对象
+      if ('tribute' in p) state.tribute = p.tribute
       if (Array.isArray(p.teamLevels) && p.teamLevels.length === 2) {
         state.teamLevels = p.teamLevels.slice()
       }
@@ -529,8 +531,11 @@ state.trickHistory = state.trickHistory.map(h => {
         if (ok) state.finishedOrder = snap.finishedOrder.slice()
       }
       if (typeof snap.passCount === 'number') state.passCount = snap.passCount
-      if (snap.tribute) state.tribute = snap.tribute
-      if (snap.ghost) state.ghost = snap.ghost
+      // ★ BUG-RC2-005 修复:nullable 字段用 'in' 判断,支持清空到 null
+      //   旧版 if (snap.tribute) / if (snap.ghost) 在字段为 null 时不更新,
+      //   残留旧值;新规则:snapshot 含字段就应用(含 null 表示清空)
+      if ('tribute' in snap) state.tribute = snap.tribute
+      if ('ghost' in snap) state.ghost = snap.ghost
       if (typeof snap.levelUp === 'number') state.levelUp = snap.levelUp
       if (typeof snap.levelRank === 'number') state.levelRank = snap.levelRank
     if (Array.isArray(snap.teamLevels) && snap.teamLevels.length === 2) {
