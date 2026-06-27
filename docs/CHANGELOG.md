@@ -4,6 +4,96 @@
 
 ---
 
+## v0.4.x (2026-06-27) — P2P 同步修复(8 个连环 bug,22 套件 1222 单测全过)
+
+> v3.8 / v2.x 收官后实地复测,4-tab 联机 + 跨设备联机仍有 8 个连环 bug。本段集中记录 BUG-001~008 的 commit、修复概要、回归测试。**架构级变化**:把 v3.x UI 重做之外的 P2P 联机层做了一次"二次审计 + 回归测试加固",从 862 → 1222 单测(+360,+221 来自本次),把"看起来过的联机"变成"测试覆盖的联机"。
+
+### BUG 清单(按 commit 时间倒序)
+
+#### BUG-008 — README / CHANGELOG 状态与实际风险不一致
+
+- 现象:README 声称 "局域网 P2P 联机 / 真机跨设备联机 / 862 用例 0 失败",与 v0.4.0 后 8 个 BUG 的修复事实不符。
+- 修复:`README.md` §3.1 已完成列表 + §3.3 新增 P2P 同步修复记录 + §3.4 测试矩阵(7 场景)+ `docs/CHANGELOG.md` 新增 `## v0.4.x` 段。
+- 回归:无新增独立测试套件,本次 5 套测试全部已存在并通过(见下方"5 套回归测试")。
+
+#### BUG-007 — 踢人协议不统一,被踢 joiner 的 peer:leave 要等心跳超时
+
+- commit: `3070ed2`(2026-06-27 17:41)
+- 文件: `network.js` + `RoomView.vue` + `seat-swap-kick-protocol.test.js`(新)
+- 修复:统一踢人协议 → 走 `KICKED` 消息 + 立即 peer Map 删除(不等 6-8s 心跳窗口)+ close 时清理 `_kickedSeats`(下次开房不残留)
+- 回归: `src/common/seat-swap-kick-protocol.test.js` — 12 块 / **90 case**(`BUG-007` 标签块 6 个:host kick → host peer:leave 立即少 1,旁观 joiner 立即 peers.delete,KICKED 事件优先 PEER_LEAVE,延迟 HEARTBEAT/_DISCONNECT 不再触发二次 leave,kickPlayer 边界 5 个,close 后 _kickedSeats 清空)
+
+#### BUG-006 — swapSeats 绕过网络层,RoomView 直接改本地 state 不广播
+
+- commit: `2267191`(2026-06-27 17:37)
+- 文件: `network.js` + `RoomView.vue`
+- 修复:`swapSeats(a, b)` 提到网络层,host 端先改本地 + `broadcast(SEAT_SWAP_ACK)` 给其它 joiner;joiner 端收到 ACK 后应用。RoomView 走 `net.swapSeats()`,不再直接 `peers.set`。
+- 回归:同上 `seat-swap-kick-protocol.test.js` — `BUG-006` 标签块 5 个(host swap 立即生效,joiner swap 立即生效,3 个旁观 joiner 都收 ACK 并同步,边界 a==b / 非法 seat / 自未连接,host swap 不动自己 seat)
+
+#### BUG-005 — BC transport 不传 roomId,所有 joiner 进入全局 channel(房间号不隔离)
+
+- commit: `c90457d`(2026-06-27 17:07)
+- 文件: `network.js` + `network-transport-bc.js` + `network-roomid.test.js`(新)
+- 修复:`BroadcastChannelTransport.open(selfSeat, roomId)` 把 roomId 写进 channel name(`guandan-p2p-<roomId>`),2 个 host(111111 / 222222)的 joiner 互相不可见。
+- 回归: `src/common/network-roomid.test.js` — 5 块 / **36 case**(BC channel name 按 roomId 构造,2 host 反向隔离,joinRoom BC 路径用 roomId,空 roomId fallback `default`,`joinRoom('default', ...)` 兼容老 API)
+
+#### BUG-004 — RoomView 退出房间不清理监听器,反复进退房间累积监听器泄漏
+
+- commit: `fa9f45e`(2026-06-27 17:08)
+- 文件: `RoomView.vue` + `network-cleanup.test.js`(新)
+- 修复:RoomView 用 `disposers[]` 集中管理所有 `net.on(...)` + `onUnmounted` 时统一 `off` + `net.close()`。
+- 回归: `src/common/network-cleanup.test.js` — 4 块 / **80 case**(5 cycles 进退房间后 `listenerCount === 0` + `_isClosed() === true`,off(event, handler) 精确解绑,off(event) 删该事件全部订阅,emit 不触发已 cleanup 的死 handler)
+
+#### BUG-003 — commitPlay/commitPass 不广播,只有手动 onPlay 同步,自动出牌路径不同步
+
+- commit: `23b6ee3`(2026-06-27 16:53)
+- 文件: `useGameLogic.js` + `commit-play-broadcast.test.js`(新)
+- 修复:抽出 `commitPlay(seat, cards, source)` / `commitPass(seat, source)` 统一包装 `playerPlay + isP2P 时 broadcast`,所有路径(`onPlay` / `onAutoPlay` / `onAutoFindBest` / timeout / AI 接管)都走这一条。
+- 回归: `src/views/game/commit-play-broadcast.test.js` — 5 块 / **32 case**(4 BC client 集成 seat=1 commitPlay → 其它 joiner 收到,commitPass 同样广播,isP2PMode=false 不广播,commitPlay playerPlay 失败 ok=false 且不广播)
+
+#### BUG-002 — finishDeal 写死读 hands[0](host 牌),joiner 拿 host 牌手牌视图错位
+
+- commit: `ed3b33c`(2026-06-27 16:53)
+- 文件: `useGameLogic.js` + `finish-deal-seat.test.js`(新)
+- 修复:`finishDeal(game, selfSeat)` 按 selfSeat 读 `hands[selfSeat]`,joiner 拿到自己种子发的牌,而不是 host 的牌。
+- 回归: `src/views/game/finish-deal-seat.test.js` — 5 块 / **48 case**(selfSeat=0/1/2/3 各自读自己的手牌不串号,buggy 版本自检 selfSeat=1/2/3 都误读 host 牌,4 client 同 seed hands 拼成完整 108 张,边界 selfSeat=NaN/null/-1/5 fallback,view 一致性 `sortGrouped(myHand) === sortGrouped(hands[selfSeat])`)
+
+#### BUG-001 — host 不 relay joiner 消息给其它 joiner(WS 星型拓扑缺失)
+
+- commit: `f4113e4`(2026-06-27 16:39)
+- 文件: `network.js` + `network-relay.test.js`(新)
+- 修复:`_handleWsMessage` 收到 joiner 发来的消息时,`broadcastExcept` 给其它 joiner(保留原 `from` 字段),不只 echo 给 sender。
+- 回归: `src/common/network-relay.test.js` — 4 块 / **25 case**(WS host relay seat 1 发 PLAY → seat 2/3 都收到且 `from === 1`,joiner→host→其它 joiner 路径完整,from 字段不被覆盖)
+
+### 5 套回归测试(总 221 case)
+
+| # | 测试文件 | 块数 | case 数 | 覆盖 BUG |
+|---|----------|------|---------|----------|
+| 1 | `src/common/network-relay.test.js` | 4 | 25 | BUG-001 |
+| 2 | `src/views/game/finish-deal-seat.test.js` | 5 | 48 | BUG-002 |
+| 3 | `src/views/game/commit-play-broadcast.test.js` | 5 | 32 | BUG-003 |
+| 4 | `src/common/network-cleanup.test.js` | 4 | 80 | BUG-004 |
+| 5 | `src/common/network-roomid.test.js` | 5 | 36 | BUG-005 |
+| | **小计** | **23** | **221** | BUG-001~005(+ BUG-006/007 在 `seat-swap-kick-protocol.test.js` 12 块 90 case) |
+
+注:BUG-006 / BUG-007 的回归测试写在 `src/common/seat-swap-kick-protocol.test.js`(12 块 90 case),本次 5 套特指 BUG-001~005。
+
+### 测试结果
+
+- **22 测试套件 / 1222 用例 / 0 失败**(v0.4.0 的 862 → 1222,+360 用例)
+- `npm run build` 成功
+
+### 端到端
+
+- **4 真机联机**(v0.3.0 / 2026-06-13):1 真机 host + 1 真机 joiner + 2 浏览器 tab 跨设备联机,开局 / 出牌 / 踢人 / host 迁移全跑通。
+- **4-tab 联机**(v0.2.0 / 2026-06-10):Chrome CDP 4-tab 局域网联机 demo,全进对局、拿同手牌、出牌同步、AI 接管、截图回归。
+
+### 已知 follow-up
+
+- 详见 v0.4.0 §"已知 follow-up"
+
+---
+
 ## v0.4.0 (2026-06-27) — v3.x UI 重做(翡翠绿 + 金 + 深蓝星空,5 阶段全落地)
 
 > 一个版本内含第三方代码审查 + 用户 4 张效果图 → 完整 UI 重做 spec,5 阶段渐进实施。**架构级变化**:UI 从「基础可用」升到「高端棋牌游戏质感」(参考欢乐斗地主 / JJ 比赛),Java 环境从 JDK 18 升到 JDK 21(Capacitor 8 / AGP 8.13 强制要求)。
