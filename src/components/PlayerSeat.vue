@@ -1,19 +1,20 @@
 <template>
   <!--
-   * v3.6 玩家座位 — 3D 卡片化 + 身份三色 + 进度条 + 思考气泡
-   * 4 种角色:
-   *   - self     自己(绿 + 金光晕,👑 角标)
-   *   - teammate 队友(蓝 + 蓝光晕,🤝 角标)
-   *   - opponent 对手(红 + 红光晕,⚔ 角标)
-   *   - empty    空座(灰虚线)
-   * 4 个位置变体(主轴方向):top / bottom(横排) / left / right(竖排)
-   * v3.6 改造:
+   * v3.7 玩家座位 — v3.x UI 重做(UI-REDESIGN-V3-SPEC.md §3.3)
+   * 4 种角色:self / teammate / opponent / empty(同 v3.6)
+   * 4 个位置变体:top / bottom / left / right(同 v3.6)
+   * v3.x 改造(头像相关):
+   *   - 头像圆形 64px(桌面端)/ 48px(移动端,@media 自动缩放)
+   *   - 金色 2px 边框 + 角色色微调(teammate/opponent 覆盖)
+   *   - 当前回合(is-turn):头像金色脉冲光环(引用 tokens.css @keyframes pulse-glow,1.5s 周期)
+   *   - 已出完牌(isDone):头像 grayscale + opacity 0.6
+   *   - 已就绪(done-mark):右上角绿色 ✓ 角标(玻璃拟态圆,圆升级)
+   *
+   * v3.6 保留:
    *   - 卡片化:12px 圆角 + 渐变背景 + 3D 阴影 + backdrop-filter
-   *   - 头像 56×56 圆形 + 角色色双层描边 + 发光
    *   - role 角标 emoji(队友 🤝 / 对手 ⚔ / 自己 👑)
-   *   - is-turn 头像外金色脉冲环
    *   - 底部 4px 进度条 + 角色色渐变填充 + 顶部"剩 N 张"文字
-   *   - 思考气泡(3 颗跳动小点,队友蓝色)
+   *   - 思考气泡(3 颗跳动小点)
    *
    * v3.7 报数规则:
    *   - cardCount > 10: 完全隐藏 进度条 / 牌堆 / 数字
@@ -264,10 +265,10 @@ function formatCoins(n) {
   50%      { transform: scale(1.03); }
 }
 
-/* 已出完:灰化 */
+/* 已出完(v3.x):灰化效果已搬到 .is-done .seat-avatar(头像层)— 见上
+ * 整卡保留轻微降亮(0.85),但不再 grayscale 整张卡(避免影响名字/进度条可读性) */
 .is-done {
-  opacity: 0.55;
-  filter: grayscale(0.6);
+  opacity: 0.92;
 }
 
 /* ============================================================
@@ -338,22 +339,27 @@ function formatCoins(n) {
 }
 
 /* ============================================================
- * 头像框(56x56 圆形 + 角色色双层描边)— v3.6 重做
+ * v3.x 头像框(64px 桌面 / 48px 移动)— UI-REDESIGN-V3-SPEC.md §3.3
+ * - 圆形 + 金色 2px 边框(基础)
+ * - 角色色微调描边(teammate=蓝 / self=绿 / opponent=红)
+ * - 当前回合:金色脉冲光环(pulse-glow 1.5s,引用 tokens)
+ * - 已出完:grayscale + opacity 0.6
  * ============================================================ */
 .seat-avatar {
   position: relative;
-  width: 56px; height: 56px;
+  width: 64px; height: 64px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   background: linear-gradient(180deg, #2a3a6a, #0a1233);
-  border: 2px solid var(--gold, #FFD700);
+  border: 2px solid var(--gold-primary, #d4af37);
   box-shadow:
     0 0 8px rgba(255, 215, 0, 0.4),
     inset 0 -2px 4px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  transition: filter 200ms var(--ease-out, ease), opacity 200ms var(--ease-out, ease);
 }
 .seat-avatar::after {
   content: '';
@@ -363,7 +369,7 @@ function formatCoins(n) {
   border: 1.5px solid rgba(255, 255, 255, 0.3);
   pointer-events: none;
 }
-/* 角色色头像描边 */
+/* 角色色头像描边(v3.6 保留)— 在金色基础上叠加角色色光晕 */
 .role-teammate .seat-avatar {
   border-color: var(--color-teammate, #42a5f5);
   box-shadow: 0 0 8px rgba(66, 165, 245, 0.6), inset 0 -2px 4px rgba(0, 0, 0, 0.3);
@@ -377,14 +383,19 @@ function formatCoins(n) {
   box-shadow: 0 0 8px rgba(239, 83, 80, 0.5), inset 0 -2px 4px rgba(0, 0, 0, 0.3);
 }
 
-/* 头像外金色脉冲环(is-turn) */
+/* v3.x 当前回合:头像金色脉冲光环(引用 tokens.css @keyframes pulse-glow)
+ * --avatar-halo-gold / --avatar-halo-active 由 tokens.css 定义 */
+.is-turn .seat-avatar {
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+/* 兼容:头像外的金色装饰环(保留 v3.6 ring-pulse)— 跟 pulse-glow 共存 */
 .is-turn .seat-avatar::before {
   content: '';
   position: absolute;
   inset: -8px;
-  border: 2px solid var(--gold, #FFD700);
+  border: 2px solid var(--gold-bright, #ffd700);
   border-radius: 50%;
-  animation: ring-pulse 1.2s ease-in-out infinite;
+  animation: ring-pulse 1.5s ease-in-out infinite;
   pointer-events: none;
 }
 @keyframes ring-pulse {
@@ -392,10 +403,23 @@ function formatCoins(n) {
   50%      { opacity: 1; transform: scale(1.06); }
 }
 
+/* v3.x 已出完(isDone):头像 grayscale + opacity 0.6(从整卡移动到头像) */
+.is-done .seat-avatar {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.is-done .seat-avatar::before { display: none; }
+
 .avatar-icon {
-  font-size: 28px;
+  font-size: 32px;
   line-height: 1;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+/* 移动端(< 768px)头像缩小到 48px */
+@media (max-width: 768px) {
+  .seat-avatar { width: 48px; height: 48px; }
+  .avatar-icon { font-size: 24px; }
 }
 
 /* ============================================================
@@ -522,19 +546,26 @@ function formatCoins(n) {
  * ============================================================ */
 .done-mark {
   position: absolute;
-  right: -4px; bottom: -4px;
-  width: 22px; height: 22px;
-  background: var(--accent-green, #43A047);
+  right: -4px; top: -4px;
+  width: 24px; height: 24px;
+  background: linear-gradient(180deg,
+    rgba(67, 160, 71, 0.85) 0%,
+    rgba(46, 125, 50, 0.95) 100%);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   color: #fff;
   border-radius: 50%;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #fff;
+  border: 1.5px solid var(--gold-primary, #d4af37);
   font-weight: bold;
   z-index: 10;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.5),
+    0 0 8px rgba(67, 160, 71, 0.4);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }
 
 .thinking-bubble {
