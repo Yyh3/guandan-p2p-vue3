@@ -130,6 +130,12 @@ function cancelJoinRetry() {
   }
 }
 
+// ============== Host 迁移去重 ==============
+// v3.x P2-29:多个 joiner 同时调 requestPromoteToHost 时,记录第一个升级的 seat。
+//   后续请求如果 newHostSeat !== _promotedHostSeat,直接走"让位"分支(旁观者更新 peers),
+//   避免一房多主。
+let _promotedHostSeat = null
+
 // ============== 事件总线 ==============
 function on(event, fn) {
   if (!handlers[event]) handlers[event] = []
@@ -535,6 +541,43 @@ function _handleJoinerMessage(msg) {
       // 旁观者的 selfSeat 不变
       emit('host:migrated', { newHostSeat, snapshot: msg.payload?.snapshot })
     }
+  } else if (msg.type === 'PROMOTE_HOST_REQUEST') {
+    // ★ v3.x P2-29(N-3 闭环):joiner 端兜底提升
+    //   触发场景:原 host 掉线,joiner 端 GameView 监听到 peer:leave { seat: 0 }
+    //     后调 requestPromoteToHost(snapshot) 广播本消息
+    //   竞态保护:_promotedHostSeat 全局标记记录第一个升级的 seat,后续到者让位
+    const newHostSeat = msg.payload?.newHostSeat
+    const snap = msg.payload?.snapshot ?? null
+    if (newHostSeat == null || newHostSeat < 1 || newHostSeat > 3) return
+    // 全局去重:已有别的新 host 升级 → 这次请求让位
+    if (_promotedHostSeat != null && _promotedHostSeat !== newHostSeat) {
+      // 让位分支:旁观者更新 peers(让先到的 _promotedHostSeat 升到 seat 0)
+      if (peers.has(_promotedHostSeat)) {
+        const newHostInfo = peers.get(_promotedHostSeat)
+        peers.delete(_promotedHostSeat)
+        peers.set(0, newHostInfo)
+      }
+      emit('host:migrated', { newHostSeat: _promotedHostSeat, snapshot: snap, isMyself: false })
+      return
+    }
+    if (selfSeat === newHostSeat) {
+      // 我就是被选中的新 host
+      if (isHostFlag) return  // 防御:本端已经升过
+      _promotedHostSeat = newHostSeat
+      const myInfo = peers.get(selfSeat) || selfInfo
+      peers.delete(selfSeat)
+      peers.set(0, myInfo)
+      selfSeat = 0
+      isHostFlag = true
+      emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: true })
+    } else if (peers.has(newHostSeat)) {
+      // 旁观:更新 peers Map(让 newHostSeat 升到 seat 0)
+      const newHostInfo = peers.get(newHostSeat)
+      peers.delete(newHostSeat)
+      peers.set(0, newHostInfo)
+      _promotedHostSeat = newHostSeat
+      emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
+    }
   }
 }
 
@@ -752,6 +795,8 @@ function close() {
   lastHeartbeat.clear()
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
   _kickedSeats.clear()
+  // ★ v3.x P2-29:清理 host 迁移去重标记,避免下次开房时新 joiner 误让位给旧标记
+  _promotedHostSeat = null
   // ★ v3.x P2-25 修复(N-4):清空事件总线 listeners,避免旧组件订阅的 handler 残留到下次开房
   //   RoomView / GameView 卸载时如果忘了 off(),close 后这些 handler 还在 handlers 对象里,
   //   下次 startAsHost 时如果新组件又 on() 同一事件,会触发两次回调(旧 + 新)
@@ -1016,6 +1061,55 @@ function announceNewHost(snapshot) {
   return true
 }
 
+/**
+ * v3.x P2-29(N-3 闭环):joiner 端主动请求"提升自己为新 host"
+ *
+ * 触发场景:原 host 6-8s 心跳掉线 / 主动 close / 浏览器关掉
+ *   - joiner 端 network 检测到 PEER_LEAVE { seat: 0 } 后,由 GameView 调本函数
+ *   - 广播 PROMOTE_HOST_REQUEST { newHostSeat: selfSeat, snapshot }
+ *   - 所有 joiner 收到后:
+ *     - 如果 payload.newHostSeat === selfSeat:自己升为 host(emit host:migrated { isMyself: true, snapshot })
+ *     - 否则:旁观,更新 peers Map(让 newHostSeat 升到 seat 0)
+ *
+ * 竞态:多个 joiner 同时调本函数时,各自广播自己的 PROMOTE_HOST_REQUEST。
+ *   第一个到达的 joiner 把自己升为 host,后续到达的 joiner 由于 `peers.get(0)` 已存在新 host,
+ *   会"认新主"不升级(避免一房多主)。本实现简单可靠,不需要复杂去重。
+ *
+ * 调用方:GameView useGameLogic.js 监听 `peer:leave { seat: 0 }` 后调本函数。
+ *
+ * @param {object} [snapshot] 当前 game state 快照(可选)
+ * @returns {boolean} true=成功发起
+ */
+function requestPromoteToHost(snapshot) {
+  if (selfSeat === 0) return false  // 防御性:已经显示是 host 不用调
+  if (isHostFlag) {
+    // 已经是 host 但仍要广播(让旁观者同步状态),本端不再 emit host:migrated
+    sendMessage({
+      type: 'PROMOTE_HOST_REQUEST',
+      payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
+    })
+    return true
+  }
+  // 广播 PROMOTE_HOST_REQUEST
+  sendMessage({
+    type: 'PROMOTE_HOST_REQUEST',
+    payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
+  })
+  // ★ BC 模式 BroadcastChannel 不回环,本端必须自己处理升级逻辑
+  //   WS 模式下 joiner 发给 host → host 转发回来 → 走 _handleJoinerMessage 路径(回环)
+  //   BC 模式下没有回环,这里手动模拟"收到自己消息"
+  if (transport && transport.constructor.name === 'BroadcastChannelTransport') {
+    _onTransportMessage({
+      type: 'PROMOTE_HOST_REQUEST',
+      from: selfSeat,
+      to: null,
+      ts: Date.now(),
+      payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
+    })
+  }
+  return true
+}
+
 function isConnected() { return !!transport }
 function getPeers() { return peers }
 function getSelfInfo() { return selfInfo }
@@ -1081,6 +1175,8 @@ export {
   ensureUuid,
   // ★ v2.1 P3:host 迁移 API
   selectNextHostCandidate, requestHostMigration, announceNewHost,
+  // ★ v3.x P2-29(N-3 闭环):joiner 端兜底提升
+  requestPromoteToHost,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1103,5 +1199,7 @@ const net = {
   scanLanRooms,
   // ★ v2.1 P3:host 迁移
   selectNextHostCandidate, requestHostMigration, announceNewHost,
+  // ★ v3.x P2-29:joiner 端兜底提升
+  requestPromoteToHost,
 }
 export default net

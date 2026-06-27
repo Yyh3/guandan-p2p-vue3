@@ -120,9 +120,47 @@ export function useGameLogic(opts = {}) {
     const newHostSeat = payload.newHostSeat
     if (newHostSeat == null) return
     showHostMigrationToast({ isMyself, newHostSeat })
-    if (isMyself && game.value && payload.snapshot) {
-      try { game.value._applySnapshot(payload.snapshot) } catch (e) {}
+    // ★ v3.x P2-29(N-3 闭环):旁观者也 apply snapshot,跟新 host 同步最新 game state
+    //   之前只有 isMyself=true 才 apply,旁观者 joiner 的本地 game state 不会更新,
+    //   → 旁观者手牌 / 当前出牌者 / 桌面牌可能跟新 host 看到的不同步
+    if (game.value && payload.snapshot) {
+      try { game.value._applySnapshot(payload.snapshot) } catch (e) { console.warn('apply host migration snapshot err', e) }
     }
+  }
+
+  // v3.x P2-29(N-3 闭环):joiner 端兜底 — host 离开时主动提升自己为新 host
+  //   触发场景:joiner 端 network 检测到 PEER_LEAVE { seat: 0 }(原 host 6-8s 心跳超时 / 主动 close)
+  //   设计:每个 joiner 都监听,自己调 net.requestPromoteToHost(snapshot)
+  //   竞态:network 内部 PROMOTE_HOST_REQUEST 处理会"先到先得"(peers.get(0) 已有新 host 时后到者让位)
+  function onPeerLeave(payload) {
+    if (!payload || payload.seat !== 0) return
+    // 只 joiner 端触发(selfSeat !== 0 且当前不是 host)
+    if (selfSeat.value === 0) return
+    if (!isP2PMode.value) return
+    // 当前对局已结束 → 不再触发(避免无效迁移)
+    if (!game.value) return
+    const st = game.value.getState()
+    if (st.phase === 'finished') return
+    // 取 snapshot:对局关键字段(joiner 端只关心手牌 / 当前出牌者 / 桌面 / 等级)
+    const snapshot = {
+      hands: st.hands,
+      tableCards: st.tableCards,
+      currentPlayer: st.currentPlayer,
+      firstPlayer: st.firstPlayer,
+      leaderPlayer: st.leaderPlayer,
+      lastPlay: st.lastPlay,
+      finishedOrder: st.finishedOrder,
+      trickHistory: st.trickHistory,
+      passCount: st.passCount,
+      tribute: st.tribute,
+      ghost: st.ghost,
+      levelRank: st.levelRank,
+      teamLevels: st.teamLevels,
+      phase: st.phase,
+    }
+    try {
+      net.requestPromoteToHost && net.requestPromoteToHost(snapshot)
+    } catch (e) { console.warn('requestPromoteToHost err', e) }
   }
 
   // v3.7 P1:紧急蜂鸣
@@ -872,6 +910,8 @@ function onAutoFindBest() {
       net.on('message:STATE_SNAPSHOT', onP2PStateSnapshot)
       net.on('message:AI_TAKEOVER', onP2PAITakeover)
       net.on('host:migrated', onHostMigrated)
+      // ★ v3.x P2-29(N-3 闭环):joiner 端监听 host 离开,调 requestPromoteToHost 兜底
+      net.on('peer:leave', onPeerLeave)
       if (selfSeat.value === 0) {
         net.on('connect', ({ seat, info }) => {
           if (!game.value) return
@@ -906,6 +946,7 @@ function onAutoFindBest() {
     try { net.off && net.off('message:STATE_SNAPSHOT') } catch (e) {}
     try { net.off && net.off('message:AI_TAKEOVER') } catch (e) {}
     try { net.off && net.off('host:migrated') } catch (e) {}
+    try { net.off && net.off('peer:leave') } catch (e) {}
     try { document.removeEventListener('keydown', onKeyDown) } catch (e) {}
     if (nickToastTimer) clearTimeout(nickToastTimer)
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
