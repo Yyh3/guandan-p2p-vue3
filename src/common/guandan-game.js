@@ -220,8 +220,23 @@ function createGame(opts) {
       state.lastPlay = null
       state.tableCards = []
       state.passCount = 0
-      emit('trickEnd', { leader, handsRemaining: state.hands.map((h, i) => i in state.finishedOrder ? 0 : h.length) })
-      // 联机模式:不调 scheduleAI(4 个真人,不需要 AI 接管)
+      // ★ 静态审查 BUG-J 修复:`i in state.finishedOrder` 是判断"数组有 i 索引",
+      //   不是"数组包含 i"。finishedOrder 长度 < 4 时 0/1/2/3 都会 in 命中,语义错误。
+      //   改用 includes(i) 正确判断"玩家 i 是否已出完牌"。
+      emit('trickEnd', {
+        leader,
+        handsRemaining: state.hands.map((h, i) => state.finishedOrder.includes(i) ? 0 : h.length),
+      })
+      // ★ 静态审查 BUG-B 修复:一墩结束后只 emit('trickEnd') 不 emit('turn'),
+      //   useGameLogic 主要通过 'turn' 事件同步 currentPlayer / lastPlay /
+      //   tableCards 等 UI 状态,缺 'turn' 会导致 UI 与 game 状态不同步,
+      //   leader 不会重新领出,若 leader 是 AI 也不会被调度。
+      //   联机模式(4 真人)由 P2P 同步处理,这里只在有 AI 的场景发 turn。
+      emit('turn', state.currentPlayer, state.lastPlay, {
+        isTeammateLast: false,
+        trickReset: true,
+      })
+      if (aiPlayers.length > 0) scheduleAI()
     } else {
       nextTurn(false)
     }
@@ -267,9 +282,14 @@ function createGame(opts) {
       }
       const r = AI.decide(hand, state.lastPlay, state.levelRank, ctx)
       if (r.type === 'play') {
-        // ★ v3.8 P1:联机模式下 AI 出的牌要广播给其他 tab
-        if (aiBroadcast) aiBroadcast(seat, r.cards, 'PLAY')
-        playerPlay(seat, r.cards)
+        // ★ 静态审查 BUG-I 修复:先调 playerPlay 本地校验,成功后再 broadcast,
+        //   避免状态过期 / 牌型 bug 导致 playerPlay 校验失败但 aiBroadcast 已经
+        //   把动作广播给其他端,其他端收到本端并不存在的动作造成状态发散
+        const res = playerPlay(seat, r.cards)
+        if (res?.ok !== false) {
+          // ★ v3.8 P1:联机模式下 AI 出的牌要广播给其他 tab
+          if (aiBroadcast) aiBroadcast(seat, r.cards, 'PLAY')
+        }
       } else {
         playerPass(seat)
       }
@@ -284,9 +304,18 @@ function createGame(opts) {
   /**
    * ★ v3.8 P1:无校验结算,4-tab 联机同步用
    * host 收到自己 finishRound 后广播,joiner 收到 ROUND_END 直接调这个
-   * 已经做过逻辑的幂等性保护:任何状态都可重入(roundEnd 会 push 到 finishedOrder)
+   *
+   * 静态审查 BUG-A 修复:加幂等性保护 — 如果本轮已结算过(state.phase === 'finished'
+   *   且 finishedOrder 已满 4 人),直接 return,不再 round++ / levelRank / emit('roundEnd')
+   *   防御:虽然 useGameLogic 已有 suppressRoundEndBroadcast 标志,但作为底层 API
+   *   仍需自带幂等性,避免上层漏调标志或未来新加的调用方重入
    */
   function applyRoundEnd() {
+    // 幂等性:已结算完成(phase=finished) → 直接返回
+    //   防御:join 端重复收到 ROUND_END / 上层漏调标志 / 未来新调用方重入
+    if (state.phase === 'finished') {
+      return
+    }
     state.phase = 'finished'
     // 末位补齐
     if (state.finishedOrder.length === 3) {

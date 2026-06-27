@@ -35,6 +35,15 @@ const RANK_LABEL = { 3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12
 export function useGameLogic(opts = {}) {
   const mainActionsRef = opts.mainActionsRef || ref(null)
 
+  // ★ 静态审查 BUG-G 修复:onNet + disposers 模式
+  //   所有 net.on 调用通过 onNet 注册,自动 push 到 disposers,卸载时统一 off 掉,
+  //   避免匿名监听器无法清理导致反复进出牌局后重复发快照或旧闭包触发。
+  const disposers = []
+  function onNet(event, handler) {
+    net.on(event, handler)
+    disposers.push(() => { try { net.off(event, handler) } catch (e) {} })
+  }
+
   // ===== 顶层 state =====
   const round = ref(1)
   const levelRank = ref(15)
@@ -535,7 +544,10 @@ export function useGameLogic(opts = {}) {
       stopTimer()
       hintCards.value = []
       mainActionsRef.value?.setShowing(false)
-      if (isP2PMode.value) {
+      // ★ 静态审查 BUG-A 修复:接收到远端 ROUND_END 后再调 applyRoundEnd
+      //   会触发本机 roundEnd 监听器,如果不抑制会再次广播 ROUND_END → 死循环
+      //   suppressRoundEndBroadcast 由 onP2PRoundEnd 在调 applyRoundEnd 前置 true
+      if (isP2PMode.value && !suppressRoundEndBroadcast) {
         net.broadcast({ type: 'ROUND_END', payload: { ranks, levelUp: lu, newLevelRank } })
       }
       if (!isP2PMode.value || selfSeat.value === 0) {
@@ -793,11 +805,17 @@ function onAutoFindBest() {
     if (payload.seat === selfSeat.value) return
     try { game.value.applyPass(payload.seat) } catch (e) { console.warn('applyPass err', e) }
   }
+  // ★ 静态审查 BUG-A 修复:远端 ROUND_END 调 applyRoundEnd 时抑制再次广播
+  let suppressRoundEndBroadcast = false
   function onP2PRoundEnd(payload) {
     if (!payload || !game.value) return
+    suppressRoundEndBroadcast = true
     try {
       game.value.applyRoundEnd()
     } catch (e) { console.warn('applyRoundEnd err', e) }
+    finally {
+      suppressRoundEndBroadcast = false
+    }
     finishedOrder.value = payload.ranks || []
     levelUp.value = payload.levelUp || 0
     if (payload.newLevelRank) {
@@ -896,30 +914,40 @@ function onAutoFindBest() {
     players.value[selfSeat.value].avatar = storage.getAvatar() || '🀄'
     applyNetworkPlayers()
     applySettingsToAudio()
-    net.on('message:NICK_UPDATE', onRemoteNickUpdate)
+    onNet('message:NICK_UPDATE', onRemoteNickUpdate)
 
     try {
       const peersCount = net.getPeers ? net.getPeers().size : 0
       isP2PMode.value = peersCount >= 2
     } catch { isP2PMode.value = false }
     if (isP2PMode.value) {
-      net.on('message:DEAL', onP2PDeal)
-      net.on('message:PLAY', onP2PPlay)
-      net.on('message:PASS', onP2PPass)
-      net.on('message:ROUND_END', onP2PRoundEnd)
-      net.on('message:STATE_SNAPSHOT', onP2PStateSnapshot)
-      net.on('message:AI_TAKEOVER', onP2PAITakeover)
-      net.on('host:migrated', onHostMigrated)
+      onNet('message:DEAL', onP2PDeal)
+      onNet('message:PLAY', onP2PPlay)
+      onNet('message:PASS', onP2PPass)
+      onNet('message:ROUND_END', onP2PRoundEnd)
+      onNet('message:STATE_SNAPSHOT', onP2PStateSnapshot)
+      onNet('message:AI_TAKEOVER', onP2PAITakeover)
+      // ★ 静态审查 BUG-C 修复:host 端心跳超时只本地 emit 'ai:takeover' + 广播
+      //   AI_TAKEOVER,但游戏层之前只监听 'message:AI_TAKEOVER'(即远端消息),
+      //   host 自己不监听本地 'ai:takeover' 事件 → host 端不会进入
+      //   onP2PAITakeover(),掉线玩家轮到出牌时 host 不会让 AI 接管 → 牌局卡住
+      //   修法:同时监听本地 'ai:takeover' 事件
+      onNet('ai:takeover', onP2PAITakeover)
+      onNet('host:migrated', onHostMigrated)
       // ★ v3.x P2-29(N-3 闭环):joiner 端监听 host 离开,调 requestPromoteToHost 兜底
-      net.on('peer:leave', onPeerLeave)
+      onNet('peer:leave', onPeerLeave)
       if (selfSeat.value === 0) {
-        net.on('connect', ({ seat, info }) => {
+        // ★ 静态审查 BUG-G 修复:connect 监听器改命名函数 + 加入 disposers,
+        //   卸载时 onNet disposers 一起清,避免匿名监听器无法清理导致重复发快照
+        const onConnectSnapshot = ({ seat: connSeat }) => {
           if (!game.value) return
           setTimeout(() => {
+            if (!game.value) return
             const st = game.value.getState()
             net.broadcast({ type: 'STATE_SNAPSHOT', payload: { seat: 0, snapshot: st } })
           }, 200)
-        })
+        }
+        onNet('connect', onConnectSnapshot)
       }
       if (selfSeat.value === 0) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
@@ -938,15 +966,10 @@ function onAutoFindBest() {
   onUnmounted(() => {
     stopTimer()
     audio.stopBgm()
-    try { net.off && net.off('message:NICK_UPDATE') } catch (e) {}
-    try { net.off && net.off('message:DEAL') } catch (e) {}
-    try { net.off && net.off('message:PLAY') } catch (e) {}
-    try { net.off && net.off('message:PASS') } catch (e) {}
-    try { net.off && net.off('message:ROUND_END') } catch (e) {}
-    try { net.off && net.off('message:STATE_SNAPSHOT') } catch (e) {}
-    try { net.off && net.off('message:AI_TAKEOVER') } catch (e) {}
-    try { net.off && net.off('host:migrated') } catch (e) {}
-    try { net.off && net.off('peer:leave') } catch (e) {}
+    // ★ 静态审查 BUG-G 修复:统一清所有 onNet 注册的监听器(disposers)
+    while (disposers.length) {
+      try { disposers.pop()() } catch (e) {}
+    }
     try { document.removeEventListener('keydown', onKeyDown) } catch (e) {}
     if (nickToastTimer) clearTimeout(nickToastTimer)
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)

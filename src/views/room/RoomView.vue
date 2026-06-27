@@ -423,6 +423,22 @@ async function initNetwork() {
         else peers.delete(a)
       }
     } catch (e) { /* swallow */ }
+    // ★ 静态审查 BUG-E 修复:换座后本地 mySeat / 身份信息必须跟随网络层同步,
+    //   否则 host 端换座后 UI 高亮仍是旧 seat,昵称/头像/ready 状态错位。
+    //   修法:从 net.getSelfSeat() 拿权威 selfSeat,更新本地 mySeat;
+    //   myName/myAvatar/myReady 来源改为"当前 seat 对应 peer",不要手动复制 teammate 信息。
+    try {
+      const netSelfSeat = net.getSelfSeat ? net.getSelfSeat() : null
+      if (netSelfSeat != null && netSelfSeat >= 0 && netSelfSeat <= 3) {
+        mySeat.value = netSelfSeat
+        const me = peers.get(netSelfSeat)
+        if (me) {
+          if (me.name) myName.value = me.name
+          if (me.avatar) myAvatar.value = me.avatar
+          myReady.value = !!me.ready
+        }
+      }
+    } catch (e) { /* swallow */ }
   })
   onNet('message:SEAT_SWAP', (payload) => {
     if (!payload || !Array.isArray(payload.between) || payload.between.length !== 2) return
@@ -580,14 +596,13 @@ function tryStartGame() {
 function onSwapWithTeammate() {
   if (!peers.has(2)) return
   if (!confirm('和队友换座?')) return
-  const me = { nickname: myName.value, avatar: myAvatar.value, ready: myReady.value }
-  const mate = { ...peers.get(2) }
-  myName.value = mate.nickname
-  myAvatar.value = mate.avatar
-  myReady.value = mate.ready
-  storage.setNickname(myName.value)
-  storage.setAvatar(myAvatar.value)
-  // ★ v2.4-p4 BUG-006 修复:swap 走网络层权威 net.swapSeats(0, 2)
+  // ★ 静态审查 BUG-E 修复:不再手动把 myName/myAvatar/myReady 复制成 teammate
+  //   的值并写入 localStorage — 那是 UI 上换显示,而不是真实交换玩家座位。
+  //   真实交换是让 net 端 swap 0/2 → network.js 改 selfSeat + peers Map →
+  //   emit 'peer:seat_swap' → 上面 handler 从 net 拿新 selfSeat 再更新
+  //   mySeat/myName/myAvatar/myReady(localStorage 不写,因为队友的昵称不应
+  //   覆盖本机用户的昵称)。
+  //   ★ v2.4-p4 BUG-006 修复:swap 走网络层权威 net.swapSeats(0, 2)
   //   network.js 内部统一改 peers Map / selfSeat + 广播 SEAT_SWAP_ACK +
   //   emit 'peer:seat_swap' 给本机监听者(RoomView 已经在 onNet('peer:seat_swap')
   //   里同步了本地 reactive peers Map)

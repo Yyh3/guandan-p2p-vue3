@@ -318,7 +318,7 @@ function _onTransportMessage(msg) {
  *   WS 模式下 host 必须显式 relay,这是 BUG-001 的修复目标。
  */
 const RELAY_TYPES = new Set([
-  'PLAY', 'PASS', 'STATE_SNAPSHOT', 'ROUND_END', 'CHAT', 'NICK_UPDATE',
+  'PLAY', 'PASS', 'STATE_SNAPSHOT', 'ROUND_END', 'CHAT', 'NICK_UPDATE', 'READY',
 ])
 
 function relayFromClient(msg) {
@@ -461,6 +461,12 @@ function _handleJoinerMessage(msg) {
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
       peers.set(seat, info)
+      // ★ 静态审查 BUG-D 修复:新玩家被分配到某 seat 时,如果该 seat 之前
+      //   已被踢过(_kickedSeats 包含),需要清掉该标记。否则该玩家后续
+      //   心跳的 from===seat 会被 host 忽略,被误判掉线,无法正常再次踢出。
+      if (_kickedSeats.has(seat)) {
+        _kickedSeats.delete(seat)
+      }
     }
     // 用 uuid 找自己
     let assignedSeat = -1
