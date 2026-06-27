@@ -96,6 +96,30 @@ export class BroadcastChannelTransport {
     this._listeners = []
   }
 
+  /**
+   * v0.4.8 N-1:BC transport 不需要真 rebuild(同 origin BroadcastChannel 共享)。
+   *   joiner 升为 host 后,只需要 network.js 改 isHostFlag + selfSeat,
+   *   BC channel 本身不变。返回即代表 OK。
+   *
+   * 保留此方法是为了 transport 接口对称 — network.js 不需要 if instanceof 判 transport 类型。
+   *
+   * @returns {Promise<void>}
+   */
+  async rebuildAsServer() {
+    // BC 模式:同 channel 仍在,无需任何操作
+    return undefined
+  }
+
+  /**
+   * v0.4.8 N-1:BC transport 不需要真 rebuild。
+   *
+   * @returns {Promise<void>}
+   */
+  async rebuildAsClient() {
+    // BC 模式:同 channel 仍在,无需任何操作
+    return undefined
+  }
+
   onMessage(cb) {
     if (typeof cb !== 'function') return
     this._listeners.push(cb)

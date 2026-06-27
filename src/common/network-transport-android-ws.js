@@ -267,6 +267,66 @@ export class AndroidWsTransport {
     this._lastSenderConnId = -1
   }
 
+  /**
+   * v0.4.8 N-1:joiner 升为新 host 时,从 client mode 切到 server mode(Capacitor path)。
+   *
+   * 内部:close 旧 client WebSocket + 清 listenersHandle → _openServer 起原生 WsServer。
+   *   listeners(网络层挂载的 _onTransportMessage)保留,close 时已被清空,需
+   *   network.js 在 rebuild 后重新订阅一次。
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.port] —— 覆盖构造时 _port
+   * @returns {Promise<void>}
+   */
+  async rebuildAsServer(opts = {}) {
+    // 1) 关闭 client 状态
+    if (this._ws) {
+      try { this._ws.close() } catch (e) { /* swallow */ }
+      this._ws = null
+    }
+    // 2) 关闭 server 状态(若之前是 server,先停 plugin)
+    for (const h of this._listenersHandle) {
+      try { await h.remove() } catch (e) { /* swallow */ }
+    }
+    this._listenersHandle = []
+    if (this._mode === 'self' && isNativeCapacitor()) {
+      try { await WsServer.stopServer() } catch (e) { /* swallow */ }
+    }
+    this._ready = false
+    this._mode = null
+    this._outbox = []
+    // 3) 可选:覆盖端口
+    if (opts.port != null) this._port = opts.port
+    // 4) 起 server
+    await this._openServer()
+  }
+
+  /**
+   * v0.4.8 N-1:joiner 端收到新 host address 后,从旧 host client 切到新 host client。
+   *
+   * @param {string} hostIp
+   * @param {number} [hostPort]
+   * @returns {Promise<void>}
+   */
+  async rebuildAsClient(hostIp, hostPort) {
+    if (this._ws) {
+      try { this._ws.close() } catch (e) { /* swallow */ }
+      this._ws = null
+    }
+    // server 状态(若之前是 server)需要停 plugin
+    for (const h of this._listenersHandle) {
+      try { await h.remove() } catch (e) { /* swallow */ }
+    }
+    this._listenersHandle = []
+    if (this._mode === 'self' && isNativeCapacitor()) {
+      try { await WsServer.stopServer() } catch (e) { /* swallow */ }
+    }
+    this._ready = false
+    this._mode = null
+    this._outbox = []
+    await this._openClient(hostIp, hostPort)
+  }
+
   onMessage(cb) {
     if (typeof cb !== 'function') return
     this._listeners.push(cb)

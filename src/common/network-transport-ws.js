@@ -493,6 +493,67 @@ export class WebSocketTransport {
     this._lastSenderWs = null
   }
 
+  /**
+   * v0.4.8 N-1:joiner 升为新 host 时,从 client mode 切到 server mode。
+   *
+   * 用法:new WebSocketTransport(); t.open('client', oldHostIp); ... 升为 host 后
+   *   await t.rebuildAsServer({ port }) → t 现在是 server mode,原 client 连接已关。
+   *
+   * 内部:close 当前 client 状态(clientMode)→ 重新 _openServer() → ready
+   *   - 端口默认复用构造时的 _port(通常是 8848)
+   *   - ready 后 outbox 自动 flush(虽然重建场景 outbox 通常已空)
+   *   - listeners 保留(host 切换后,_onTransportMessage 仍由 network.js 挂载)
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.port] —— 覆盖构造时 _port(罕见,一般用构造时的)
+   * @returns {Promise<void>}
+   */
+  async rebuildAsServer(opts = {}) {
+    // 1) 关闭现有 client 状态
+    if (this._ws) {
+      try { this._ws.close() } catch (e) { /* swallow */ }
+      this._ws = null
+    }
+    this._ready = false
+    this._mode = null
+    this._clients.clear()
+    this._outbox = []
+    // 2) 可选:覆盖端口
+    if (opts.port != null) this._port = opts.port
+    // 3) 起 server
+    this._closedByUser = false  // rebuild 不是用户主动 close,要允许后续重连等
+    await this._openServer()
+  }
+
+  /**
+   * v0.4.8 N-1:joiner 端收到新 host address 后,从旧 host client 切到新 host client。
+   *
+   * 用法:收到 `transport:rebuild:announce { newHostAddress: '192.168.1.5:8848' }` 后
+   *   await transport.rebuildAsClient(hostIp, hostPort)
+   *   → ws.close 旧的 → ws.open 新的
+   *
+   * @param {string} hostIp
+   * @param {number} [hostPort]
+   * @returns {Promise<void>}
+   */
+  async rebuildAsClient(hostIp, hostPort) {
+    if (this._ws) {
+      try { this._ws.close() } catch (e) { /* swallow */ }
+      this._ws = null
+    }
+    this._ready = false
+    this._mode = null
+    this._clients.clear()
+    this._outbox = []
+    this._closedByUser = false  // rebuild 不是用户主动 close,允许重连
+    this._reconnectAttempts = 0
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
+    await this._openClient(hostIp, hostPort)
+  }
+
   // v3.x P1-12 修复(N-2):浏览器/Node ws client 断线后自动重连
   //   指数退避:1s → 2s → 4s,最多 3 次,失败后放弃让上层处理
   _scheduleReconnect() {

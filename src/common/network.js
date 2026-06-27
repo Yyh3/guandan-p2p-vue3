@@ -595,6 +595,64 @@ function _handleJoinerMessage(msg) {
       _promotedHostSeat = newHostSeat
       emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
     }
+  } else if (msg.type === 'TRANSPORT_REBUILD_ANNOUNCE') {
+    // v0.4.8 N-1:新 host 端 broadcast 自己的新 IP:port,其它 joiner 收到后
+    //   关闭旧 client transport,重建 client 连新 IP。
+    //
+    // 触发场景:
+    //   - joiner 升为新 host,关掉原 client(连旧 host IP:port),起 server 在自己 IP:8848
+    //   - 广播 { type: 'TRANSPORT_REBUILD_ANNOUNCE', payload: { newHostSeat, newHostAddress } }
+    //     注意此时新 host 的 transport 已是 server mode,不再接收自己广播(BC spec / WS 模式都
+    //     不回环),但其它 joiner 仍能收到
+    //
+    // 处理:
+    //   1. 仅当 transport 类型是 WS / AndroidWs(需要真 rebuild)时才执行
+    //      BC 模式:同 channel 仍在,无需 rebuild,只需把新 hostSeat 同步到 peers Map
+    //   2. 关 current transport,创建新 WebSocketTransport client,open 连新 IP:port
+    //   3. 完成 emit 'transport:rebuild:done' 给 UI 监听
+    //
+    // 注意:这条消息走的是 _handleJoinerMessage(joiner 端处理),不是 _handleHostMessage
+    const newHostAddress = msg.payload?.newHostAddress
+    const announceHostSeat = msg.payload?.newHostSeat
+    if (typeof newHostAddress !== 'string') return
+    // BC 模式:不需要 transport rebuild,但需要把新 hostSeat 同步到 peers Map
+    if (transport && transport.constructor.name === 'BroadcastChannelTransport') {
+      // joiner 端:把 announceHostSeat 的 peer 信息搬到 seat 0
+      if (announceHostSeat && announceHostSeat !== 0 && peers.has(announceHostSeat)) {
+        const newHostInfo = peers.get(announceHostSeat)
+        peers.delete(announceHostSeat)
+        peers.set(0, newHostInfo)
+      }
+      emit('transport:rebuild:announce', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
+      emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
+      return
+    }
+    // WS / AndroidWs 模式:真 transport rebuild
+    if (!transport) return
+    // 解析 newHostAddress → { host, port }
+    let parsed
+    try {
+      parsed = parseHostAddress(newHostAddress)
+    } catch (e) {
+      emit('error', 'transport:rebuild:announce 解析失败: ' + (e?.message || e))
+      return
+    }
+    // 异步 rebuild,不阻塞当前 message 处理循环
+    ;(async () => {
+      try {
+        await transport.rebuildAsClient(parsed.host, parsed.port)
+        // 同步 peers Map(joiner 端把 announceHostSeat → 0)
+        if (announceHostSeat && announceHostSeat !== 0 && peers.has(announceHostSeat)) {
+          const newHostInfo = peers.get(announceHostSeat)
+          peers.delete(announceHostSeat)
+          peers.set(0, newHostInfo)
+        }
+        emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'ws' })
+      } catch (e) {
+        emit('error', 'transport:rebuild:announce rebuild failed: ' + (e?.message || e))
+      }
+    })()
+    emit('transport:rebuild:announce', { newHostSeat: announceHostSeat, newHostAddress, mode: 'ws' })
   }
 }
 
@@ -1079,6 +1137,91 @@ function announceNewHost(snapshot) {
 }
 
 /**
+ * v0.4.8 N-1:joiner 升为新 host 后,把 client transport 切到 server mode。
+ *
+ * 触发场景:
+ *   - 原 host 掉线 / 主动 close
+ *   - joiner 端 GameView useGameLogic 调 requestPromoteToHost(snapshot)
+ *   - 收到 PROMOTE_HOST_REQUEST 后,新 host 端在 'host:migrated' { isMyself: true } 事件回调里
+ *     调 rebuildAsHost()
+ *
+ * 流程:
+ *   1. 关当前 client transport(断开连旧 host 的 ws)
+ *   2. 创建新 WebSocketTransport 实例(open('self') = server mode)
+ *   3. 启动 ws server,绑定新 IP:port(默认 8848)
+ *   4. 广播 TRANSPORT_REBUILD_ANNOUNCE { newHostSeat: 0, newHostAddress: '<self-ip>:<port>' }
+ *   5. 其它 joiner 收到后,关闭旧 client,重建 client 连新 IP:port
+ *
+ * 限制(已知):
+ *   - 当前实现要求 joiner 在调本函数前先通过 requestPromoteToHost(snapshot) 让
+ *     peer map 完成升级(否则 broadcast 时 isHostFlag 还是 false,sendMessage 走空)
+ *   - BC 模式:transport 仍用原 channel,无需真 rebuild,只走 peer map 升级路径。
+ *     本函数检测到 BC transport 直接返回 { ok: true, skipped: 'bc' }
+ *   - WS 模式:rebuild 后新 transport 走 self mode,_onTransportMessage 仍由 network.js 挂载。
+ *
+ * @returns {Promise<{ok:boolean, newHostAddress?:string, skipped?:string, error?:string}>}
+ */
+async function rebuildAsHost() {
+  if (!isHostFlag) {
+    return { ok: false, error: '当前不是 host(请先调 requestPromoteToHost)' }
+  }
+  if (!transport) {
+    return { ok: false, error: 'transport 不存在' }
+  }
+  // BC 模式不需要 rebuild(同 channel)
+  if (transport.constructor.name === 'BroadcastChannelTransport') {
+    return { ok: true, skipped: 'bc' }
+  }
+  // WS / AndroidWs:关 client + 起 server
+  // 注意:_createTransport() 创建一个新的 transport 实例(用同一个 factory)
+  //   新实例走 server mode;旧 client 实例 close。
+  let newTransport
+  try {
+    newTransport = _createTransport()
+  } catch (e) {
+    return { ok: false, error: 'transport 工厂失败: ' + (e?.message || e) }
+  }
+  // 1) 关闭旧 client transport
+  try { await transport.close() } catch (e) { /* swallow */ }
+  // 2) 起 server mode
+  try {
+    // 复用原 port(host 通常用 8848;若是 ephemeral 测试,这里会失败 — 测试环境另行 mock)
+    await newTransport.open('self')
+  } catch (e) {
+    return { ok: false, error: '新 transport open(self) 失败: ' + (e?.message || e) }
+  }
+  // 3) 把新 transport 挂到 network.js 的 transport 变量 + 挂 _onTransportMessage
+  transport = newTransport
+  transport.onMessage(_onTransportMessage)
+  // 4) 取新 IP:port
+  const newPort = (typeof transport.getBoundPort === 'function') ? transport.getBoundPort() : null
+  let newIp = null
+  if (typeof transport.getHostIp === 'function') {
+    newIp = transport.getHostIp()
+  }
+  if (!newIp) {
+    // fallback:用 selfInfo 里之前记录的 host IP(可能不对,但至少有地址)
+    newIp = selfInfo?.hostIp || '127.0.0.1'
+  }
+  const newHostAddress = `${newIp}:${newPort || 8848}`
+  // 5) 广播给其它 joiner
+  try {
+    sendMessage({
+      type: 'TRANSPORT_REBUILD_ANNOUNCE',
+      payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
+    })
+  } catch (e) {
+    // 广播失败不算致命 — 新 host 自己的 transport 已 ready
+  }
+  // 6) emit 本端事件
+  emit('transport:rebuild:announce', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
+  emit('transport:rebuild:done', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
+  // 7) 重启心跳
+  startHeartbeatChecker()
+  return { ok: true, newHostAddress }
+}
+
+/**
  * v3.x P2-29(N-3 闭环):joiner 端主动请求"提升自己为新 host"
  *
  * 触发场景:原 host 6-8s 心跳掉线 / 主动 close / 浏览器关掉
@@ -1194,6 +1337,8 @@ export {
   selectNextHostCandidate, requestHostMigration, announceNewHost,
   // ★ v3.x P2-29(N-3 闭环):joiner 端兜底提升
   requestPromoteToHost,
+  // ★ v0.4.8 N-1:host 迁移后 transport rebuild(client → server)
+  rebuildAsHost,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1218,5 +1363,7 @@ const net = {
   selectNextHostCandidate, requestHostMigration, announceNewHost,
   // ★ v3.x P2-29:joiner 端兜底提升
   requestPromoteToHost,
+  // ★ v0.4.8 N-1:host 迁移后 transport rebuild
+  rebuildAsHost,
 }
 export default net
