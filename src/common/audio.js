@@ -169,8 +169,15 @@ function playMp3Sfx(trackName) {
     // 重置播放位置 + play()
     try { el.currentTime = 0 } catch (e) { /* ignore */ }
     const p = el.play()
-    if (p && typeof p.catch === 'function') {
-      p.catch(() => {
+    if (p && typeof p.then === 'function') {
+      // ★ V0410-05 修复:成功 resolve 时清理 failedSlots + unlockPending
+      //   旧版只用 .catch(noop) 吞错,成功后 slot 不会从 failedSlots 移除
+      //   → 该 slot 即使 unlock 后能正常播放,_shouldUseMp3 仍认为它坏
+      //   → 真实音效模式长期降级到 synth。现在 .then(() => delete) 保证恢复后立即可用
+      p.then(() => {
+        if (entry.failedSlots) entry.failedSlots.delete(slot)
+        if (entry.unlockPending) entry.unlockPending.delete(slot)
+      }).catch(() => {
         // autoplay 拒绝 / 媒体错误 → 不再静默吞,把这个 slot 标记失败,
         // 这样下次同 trackName 触发时上层看到 entry.failedSlots 包含本 slot,
         // 会走 synth fallback。同时也保留 unlockPending 逻辑(用户首次手势后再 retry)。

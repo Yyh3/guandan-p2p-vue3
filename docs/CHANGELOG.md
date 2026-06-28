@@ -4,6 +4,92 @@
 
 ---
 
+## v0.4.11 (2026-06-28) — v0.4.10 静态审查 8 个 P0/P1/P2 bug 修复(34 套件 / 1781 单测全过)
+
+> v0.4.10 发布后第二轮静态审查,集中修 P2P 联机的鉴权 / 落盘 / 重开门禁 / 音效解锁 / AI 难度全链路 / 版本号硬编码问题。
+
+### A. v0.4.10 静态审查 8 个 bug 修复(本轮)
+
+#### V0410-01 P0/P1:P2P `ROUND_END` 广播缺 host-only 守卫
+
+- 现象:`roundEnd` handler 内只判断 `isP2PMode.value && !suppressRoundEndBroadcast`,没判断 `isNetworkHost.value`。joiner 端 `applyPlay()` 触发 finishRound 后也会广播 ROUND_END,多端重复结算;不同端 `Date.now()` 产生不同 `roundId`,接收端 `lastAppliedRoundId` 去重失效。
+- 修复:
+  - 加 `isNetworkHost.value` 守卫:只有网络 host 才广播
+  - roundId 稳定化:用 `r${round}-${ranksKey}` 而非 `r${Date.now()}-...`,确保所有端一致
+- 验证:`v0410-bug-fixes.test.js` §1 — 源码正则断言守卫 + roundId 格式。
+
+#### V0410-02 P1:`applyRoundEndFromPayload()` 未写回 `state.isRestartAfterA`
+
+- 现象:本地 `applyRoundEnd()` 把 `isRestartAfterA` 写到 state,但远端权威 `applyRoundEndFromPayload()` 只 emit roundEnd 事件,没写 `state.isRestartAfterA` / `state.previousLevelRank`。后续 `refreshUiFromGameState` 读 `st.isRestartAfterA` 还是 false → UI / snapshot / host 迁移后过 A 状态回退。
+- 修复:`applyRoundEndFromPayload` 计算完 `isRestart` 后立即:
+  ```js
+  state.isRestartAfterA = isRestart
+  state.previousLevelRank = (typeof p.previousLevelRank === 'number') ? p.previousLevelRank : null
+  ```
+- 验证:`v0410-bug-fixes.test.js` §2 — 行为测试:远端 applyRoundEndFromPayload({isRestartAfterA: true, previousLevelRank: 14}) 后 getState().isRestartAfterA === true。
+
+#### V0410-03 P1:`MATCH_RESTART` 缺鉴权/去重/phase gate
+
+- 现象:`onP2PMatchRestart` 没接收 `from` 参数、不校验 sender authority、不去重 restartId、不检查 phase,重复包或非 host 包能强制洗牌。
+- 修复:
+  ```js
+  function onP2PMatchRestart(payload, from, msg) {
+    if (typeof from === 'number' && from !== 0) return  // sender authority
+    if (st0.phase !== 'finished') return                 // phase gate
+    if (st0.isRestartAfterA !== true) return             // isRestart gate
+    if (payload.restartId && _appliedRestartIds.has(payload.restartId)) return  // dedup
+    _appliedRestartIds.add(payload.restartId)
+    ...
+  }
+  ```
+- 验证:`v0410-bug-fixes.test.js` §3 — 源码正则断言鉴权/phase/isRestart/dedup 四重门禁。
+
+#### V0410-04 P2:P2P host 重开后未刷新本机 UI refs
+
+- 现象:`onRestartMatch` P2P host 分支 `game.restartMatch` 后直接 `return`,没刷 `levelRank/myHand/selected/selectedColKeys/phase/isRestartAfterA` 等 UI refs → host 按钮/选择状态短时残留。
+- 修复:抽出 `afterMatchRestartRefresh()` 统一刷新函数,host / joiner / 单机三处共用。
+- 验证:`v0410-bug-fixes.test.js` §4 — 源码正则断言函数存在 + 包含所有必要字段 + 三处调用。
+
+#### V0410-05 P2:真实 SFX fallback 成功后 `failedSlots` 不清理
+
+- 现象:`playMp3Sfx` 用 `p.catch(noop)` 吞错,成功 resolve 时 slot 不会从 `failedSlots` 删除 → 该 slot 即使 unlock 后能正常播放,`_shouldUseMp3` 仍认为它坏 → 真实音效模式长期降级。
+- 修复:`p.then(() => { failedSlots.delete(slot); unlockPending.delete(slot) }).catch(...)` 成功/失败都处理。
+- 验证:`v0410-bug-fixes.test.js` §5 — 源码正则 + Node 环境行为测试。
+
+#### V0410-06 P2:直接进游戏页未应用 `bgmStyle` / `sfxMode`
+
+- 现象:`applySettingsToAudio` 只同步 enabled/volume,没同步用户在 SettingsView 保存的 bgmStyle / sfxMode → 直接进 GameView 时仍走默认 (energetic / synth),必须先进设置页再返回才生效。
+- 修复:
+  ```js
+  if (typeof audio.setBgmStyle === 'function') audio.setBgmStyle(s.bgmStyle || 'energetic')
+  if (typeof audio.setSfxMode === 'function') audio.setSfxMode(s.sfxMode || 'synth')
+  ```
+- 验证:`v0410-bug-fixes.test.js` §6 — 源码正则 + audio 模块函数存在性。
+
+#### V0410-07 P2:`scheduleAI` 未传入 `state.difficulty`
+
+- 现象:只有 useGameLogic 的提示/帮出路径传 `gameDifficulty.value`,guandan-game 自己的 `scheduleAI` 调 `AI.decide(...)` 不传 difficulty → AI 对手/接管场景 hard 难度不生效。
+- 修复:`AI.decide(hand, state.lastPlay, state.levelRank, ctx, state.difficulty)`。
+- 验证:`v0410-bug-fixes.test.js` §7 — 行为测试:`createGame({difficulty: 'hard'})` 后 `getState().difficulty === 'hard'`。
+
+#### V0410-08 P3:SettingsView 版本号硬编码
+
+- 现象:`SettingsView.vue` 模板写死 `掼蛋 P2P 局域网版 v0.4.8`,每次发版要手动改,容易忘。
+- 修复:
+  ```js
+  import pkg from '@/../package.json'
+  const appVersion = String(pkg.version || '0.0.0')
+  // 模板: 掼蛋 P2P 局域网版 v{{ appVersion }}
+  ```
+- 验证:`v0410-bug-fixes.test.js` §8 — 源码正则断言。
+
+### 测试基线
+
+- **34 测试套件 / 1781 用例 / 0 失败**(v0.4.10 的 33 套件 / 1675 用例 + v0410-bug-fixes 1 套件 / 40 用例)
+- `npm test` 全过,`npm run build` ✓ 1.43s
+
+---
+
 ## v0.4.10 (2026-06-28) — 移动端响应式文档化 + v0.4.9 P0/P1 修复(33 套件 / 1675 单测全过)
 
 > 本版本整合两个独立工作:1) v2.5 已落地的移动端响应式正式文档化 2) v0.4.9 静态审查报告 9 个 bug 的 P0/P1/P2/P3 修复。

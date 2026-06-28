@@ -175,7 +175,7 @@
     <section class="card">
       <h2 class="card-title">ℹ️ 关于</h2>
       <p class="card-hint">
-        掼蛋 P2P 局域网版 v0.4.8<br>
+        掼蛋 P2P 局域网版 v{{ appVersion }}<br>
         离线 4 人掼蛋,无网/无流量/无服务器
       </p>
   <p class="card-hint">
@@ -198,8 +198,12 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import audio from '@/common/audio.js'
+// ★ V0410-08 修复:从 package.json 读版本号,不再硬编码
+//   Vite 编译时把 import 替换成 JSON 字面量,运行时无需额外请求
+import pkg from '@/../package.json'
 
 const router = useRouter()
+const appVersion = String(pkg.version || '0.0.0')
 
 // 状态(初始化由 onMounted 从 storage 灌入)
 const bgmEnabled = ref(true)

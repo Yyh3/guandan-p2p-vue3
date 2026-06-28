@@ -300,7 +300,10 @@ function createGame(opts) {
         mySeatIndex: seat,
         teammateSeatIndex: (seat + 2) % 4,
       }
-      const r = AI.decide(hand, state.lastPlay, state.levelRank, ctx)
+      // ★ V0410-07 修复:传 state.difficulty 给 AI.decide,自动 AI 也用全局 AI 难度
+      //   旧版只 useGameLogic 的提示/帮出路径传 difficulty,guandan-game 自己的
+      //   scheduleAI 走默认 medium → AI 对手/接管场景 hard 难度不生效
+      const r = AI.decide(hand, state.lastPlay, state.levelRank, ctx, state.difficulty)
       if (r.type === 'play') {
         // ★ 静态审查 BUG-I 修复:先调 playerPlay 本地校验,成功后再 broadcast,
         //   避免状态过期 / 牌型 bug 导致 playerPlay 校验失败但 aiBroadcast 已经
@@ -484,11 +487,17 @@ function createGame(opts) {
         ? p.isRestartAfterA
         : (typeof p.previousLevelRank === 'number' && typeof p.levelUp === 'number'
             && p.previousLevelRank === 14 && p.levelUp > 0)
+      // ★ V0410-02 修复:写回 state.isRestartAfterA + state.previousLevelRank
+      //   旧版只 emit roundEnd,state 没写 → refreshUiFromGameState 读 st.isRestartAfterA
+      //   还是旧值(false) → UI / snapshot / host 迁移后过 A 状态会回退。
+      //   现在写回 state 保证后续 getState() / snapshot / refresh 都拿到权威值。
+      state.isRestartAfterA = isRestart
+      state.previousLevelRank = (typeof p.previousLevelRank === 'number') ? p.previousLevelRank : null
       emit('roundEnd', {
         ranks: state.finishedOrder.slice(),
         levelUp: state.levelUp,
         tribute: state.tribute,
-        previousLevelRank: p.previousLevelRank,
+        previousLevelRank: state.previousLevelRank,
         newLevelRank: state.levelRank,
         teamLevels: state.teamLevels.slice(),
         roundId: rid,

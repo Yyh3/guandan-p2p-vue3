@@ -423,6 +423,16 @@ export function useGameLogic(opts = {}) {
     audio.setSfxEnabled(!!s.sfxEnabled)
     audio.setBgmVolume(Number(s.bgmVolume ?? 0.5))
     audio.setSfxVolume(Number(s.sfxVolume ?? 0.7))
+    // ★ V0410-06 修复:补 setBgmStyle + setSfxMode
+    //   旧版 applySettingsToAudio 只同步 enabled + volume,用户在 SettingsView 改的
+    //   bgmStyle / sfxMode 不生效 → 直接进入 GameView 时仍走默认值(energetic / synth)
+    //   现在同步所有音频设置,保证进入游戏页就生效
+    if (typeof audio.setBgmStyle === 'function') {
+      audio.setBgmStyle(String(s.bgmStyle || 'energetic'))
+    }
+    if (typeof audio.setSfxMode === 'function') {
+      audio.setSfxMode(String(s.sfxMode || 'synth'))
+    }
   }
 
   let dealTimeoutId = null
@@ -630,13 +640,21 @@ export function useGameLogic(opts = {}) {
       //   如果 joiner 状态延迟/丢消息,会用本地错误数据覆盖。
       //   新版加 roundId + tribute + teamLevels + round,joiner 端用
       //   applyRoundEndFromPayload 不读本地 state,直接用 host 的权威结果。
-      if (isP2PMode.value && !suppressRoundEndBroadcast) {
+      // ★ V0410-01 修复:P2P 模式下只有网络 host 才能广播 ROUND_END
+      //   旧版只判断 isP2PMode + !suppressRoundEndBroadcast,joiner 端在 applyPlay
+      //   触发 finishRound 后也会发 ROUND_END → 多端重复结算,不同 roundId 竞争
+      //   修复后:加 isNetworkHost.value 守卫,joiner 端静默走本地结算 + 等 host 广播
+      if (isP2PMode.value && isNetworkHost.value && !suppressRoundEndBroadcast) {
         const st = game.value && game.value.getState ? game.value.getState() : null
+        // ★ V0410-01 roundId 稳定化:用 host round + ranks 生成,不用 Date.now()
+        //   旧版 Date.now() 不同端同一局会产生不同 roundId,接收端 lastAppliedRoundId
+        //   去重失效。修复后 roundId 由 host 权威生成,所有端一致。
+        const ranksKey = (ranks || []).join('-') || 'none'
         const payload = {
           ranks,
           levelUp: lu,
           newLevelRank,
-          roundId: `r${Date.now()}-${st?.round ?? 0}-${(ranks || []).join('-')}`,
+          roundId: `r${st?.round ?? 0}-${ranksKey}`,
           tribute: st?.tribute ?? null,
           teamLevels: st?.teamLevels ?? [newLevelRank, newLevelRank],
           round: st?.round ?? 0,
@@ -853,17 +871,40 @@ function onAutoFindBest() {
 
   // ★ v0.4.9:过 A 后重开一局(逻辑接入 docs/restart-after-a-flow.md)
   //   AI/单机模式直接调 game.restartMatch;P2P 模式由 host 发起,广播 MATCH_RESTART
-  //   当前实现:仅单机模式 + AI 模式;P2P MATCH_RESTART 广播 TODO(下一迭代)
   // ★ V049-03 修复:host 重开时生成新 seed 并广播,避免复用旧 seed 导致牌局重复
+  // ★ V0410-04 修复:抽出 afterMatchRestartRefresh() 统一 host / joiner / 单机 UI 重置
+  //   旧版 P2P host 分支直接 return,没刷本机 UI refs → host 按钮/选择状态残留
+  //   抽公共函数后三处调用统一:
+  //     - 单机模式 onRestartMatch()
+  //     - P2P host onRestartMatch()
+  //     - P2P joiner onP2PMatchRestart()
   function _newRestartSeed() {
     // 高强度 seed:Date.now + 32 位 Math.random + 弱 entropy 来源
     return (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0
+  }
+  function afterMatchRestartRefresh() {
+    if (!game.value || !game.value.getState) return
+    const st = game.value.getState()
+    // ★ V0410-04:统一刷 host/joiner/单机 共用的 UI refs
+    //   之前 onRestartMatch 单机分支 + onP2PMatchRestart 都各自刷一遍,host 分支漏刷
+    levelRank.value = st.levelRank
+    if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
+      myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+      selected.value = new Array(myHand.value.length).fill(false)
+      selectedColKeys.value = {}
+    }
+    phase.value = st.phase
+    isRestartAfterA.value = false  // 消费掉,重置标志
+    hintCards.value = []
+    mainActionsRef.value?.setShowing(false)
+    startDealAnimation()
   }
   function onRestartMatch() {
     const newSeed = _newRestartSeed()
     if (isP2PMode.value) {
       // ★ V049-03 修复:P2P 模式下 host 广播新 seed + levelRank,
       //   joiner 收到后用同一 seed restartMatch 保证牌局一致
+      // ★ V0410-04 修复:host 分支也刷本机 UI(原来直接 return 漏刷)
       if (isNetworkHost.value) {
         if (game.value && game.value.restartMatch) {
           game.value.restartMatch({ levelRank: 15, seed: newSeed })
@@ -874,6 +915,7 @@ function onAutoFindBest() {
               payload: { levelRank: 15, seed: newSeed, restartId: `rr${Date.now()}` },
             })
           } catch (e) { /* 离线或非 host 时 noop */ }
+          afterMatchRestartRefresh()
         }
       }
       return
@@ -882,15 +924,7 @@ function onAutoFindBest() {
     if (game.value && game.value.restartMatch) {
       game.value.restartMatch({ levelRank: 15, seed: newSeed })
     }
-    // 刷新 UI refs
-    const st = game.value.getState()
-    levelRank.value = st.levelRank
-    myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
-    selected.value = new Array(myHand.value.length).fill(false)
-    selectedColKeys.value = {}
-    phase.value = st.phase
-    isRestartAfterA.value = false  // 消费掉,重置标志
-    startDealAnimation()
+    afterMatchRestartRefresh()
   }
 
   // ★ v0.4.9:暴露主按钮动作分发(配合 GameView 按钮文案切换)
@@ -975,27 +1009,36 @@ function onAutoFindBest() {
   //   joiner 调 game.restartMatch 清状态 + 重新发牌 + 刷 UI
   //   防自循环:host 自己也 emit 了,但 onRestartMatch 用 isNetworkHost 判定
   //   只在 P2P 模式 broadcast,joiner 端不会重复 broadcast
-  function onP2PMatchRestart(payload) {
+  function onP2PMatchRestart(payload, from, msg) {
     if (!payload || !game.value) return
     if (!game.value.restartMatch) return
+    // ★ V0410-03 修复:sender authority 检查 — 只有当前权威 host(seat 0)发出的
+    //   MATCH_RESTART 才被接受,防 joiner 恶意/异常发包强制洗牌
+    //   消息 from 是网络层 emit 时附带的发送方 seat,网络 host 始终在 seat 0
+    if (typeof from === 'number' && from !== 0) return
+    // ★ V0410-03 修复:phase gate — 只有当前 phase=finished 且 isRestartAfterA=true
+    //   才允许执行重开,防正常牌局中途收到旧 MATCH_RESTART 包被误清空
+    try {
+      const st0 = game.value.getState()
+      if (st0.phase !== 'finished') return
+      if (st0.isRestartAfterA !== true) return
+    } catch (e) { return }
+    // ★ V0410-03 修复:restartId 去重 — 同一 restartId 只应用一次,防重放攻击
+    if (payload.restartId) {
+      if (_appliedRestartIds.has(payload.restartId)) return
+      _appliedRestartIds.add(payload.restartId)
+    }
     const lr = (typeof payload.levelRank === 'number') ? payload.levelRank : 15
     // ★ V049-03 修复:接 host 广播的 seed,用同一种子保证 host/joiner 牌局一致
     //   payload.seed 缺失时回退到本机自己生成(防御性,理论上 host 必带)
     const seed = (typeof payload.seed === 'number') ? payload.seed : (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0
     // 调 game.restartMatch 统一清状态 + 重新发牌(用 host 的 seed)
     game.value.restartMatch({ levelRank: lr, seed })
-    // 刷 UI refs
-    const st = game.value.getState()
-    levelRank.value = st.levelRank
-    if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
-      myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
-      selected.value = new Array(myHand.value.length).fill(false)
-      selectedColKeys.value = {}
-    }
-    phase.value = st.phase
-    isRestartAfterA.value = false  // 消费掉
-    startDealAnimation()
+    // ★ V0410-04 修复:统一刷 UI refs(走共享 afterMatchRestartRefresh)
+    afterMatchRestartRefresh()
   }
+  // ★ V0410-03:restartId 去重集合(MATCH_RESTART 一次性应用)
+  const _appliedRestartIds = new Set()
 
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false

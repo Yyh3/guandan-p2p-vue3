@@ -130,7 +130,7 @@ console.log('\n=== 3. V049-03: restartMatch seed 参数 + MATCH_RESTART 携带 =
     !!onRestartMatch && /MATCH_RESTART[\s\S]*?payload[\s\S]*?seed:\s*newSeed/.test(onRestartMatch[1])
   )
   // 3.4 onP2PMatchRestart 接收 seed
-  const onP2PMatchRestart = logicSrc.match(/function onP2PMatchRestart\(payload\) \{([\s\S]*?)\n\s{2}\}/)
+  const onP2PMatchRestart = logicSrc.match(/function onP2PMatchRestart\(payload[^)]*\) \{([\s\S]*?)\n\s{2}\}/)
   assert('onP2PMatchRestart 提取 payload.seed 传给 restartMatch',
     !!onP2PMatchRestart && /payload\.seed/.test(onP2PMatchRestart[1]) && /seed/.test(onP2PMatchRestart[1])
   )
