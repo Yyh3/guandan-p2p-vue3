@@ -153,6 +153,11 @@ export function useGameLogic(opts = {}) {
     if (st.difficulty === 'medium' || st.difficulty === 'hard') {
       gameDifficulty.value = st.difficulty
     }
+    // ★ V049-02 修复:从 game state 同步过 A 标志,保证 host 迁移 / snapshot 应用后
+    //   isRestartAfterA.value 跟 game state 一致,避免按钮文案停留在「下一局」
+    if (typeof st.isRestartAfterA === 'boolean') {
+      isRestartAfterA.value = st.isRestartAfterA
+    }
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
       selected.value = new Array(myHand.value.length).fill(false)
@@ -607,12 +612,16 @@ export function useGameLogic(opts = {}) {
     game.value.on('pass', ({ seat }) => {
       showFloatingPass(seat, 'pass')
     })
-    game.value.on('roundEnd', ({ ranks, levelUp: lu, newLevelRank }) => {
+    game.value.on('roundEnd', ({ ranks, levelUp: lu, newLevelRank, isRestartAfterA: ira, previousLevelRank }) => {
       phase.value = 'finished'
       finishedOrder.value = ranks
       levelUp.value = lu
       levelRank.value = newLevelRank
       nextLevelLabel.value = RANK_LABEL[newLevelRank]
+      // ★ V049-02 修复:UI 端同步过 A 标志(host 已经在 game 层计算,这里接住)
+      if (typeof ira === 'boolean') {
+        isRestartAfterA.value = ira
+      }
       stopTimer()
       hintCards.value = []
       mainActionsRef.value?.setShowing(false)
@@ -631,6 +640,10 @@ export function useGameLogic(opts = {}) {
           tribute: st?.tribute ?? null,
           teamLevels: st?.teamLevels ?? [newLevelRank, newLevelRank],
           round: st?.round ?? 0,
+          // ★ V049-02 修复:ROUND_END payload 带过 A 标志 + 前等级
+          //   joiner 端 onP2PRoundEnd 用权威值,不再从本地 state 推断
+          isRestartAfterA: !!ira,
+          previousLevelRank: (typeof previousLevelRank === 'number') ? previousLevelRank : null,
         }
         net.broadcast({ type: 'ROUND_END', payload })
       }
@@ -749,6 +762,8 @@ function onAutoFindBest() {
 
   function onHintToggle(show) {
     if (show) {
+      // ★ V049-01 修复:onHintToggle 作用域内 diff 未定义,补齐
+      const diff = gameDifficulty.value
       // 跟牌场景:用 AI.decide 找最小可压(autoPlayGrouped 贪最强,不看 lastPlay,会导致提示用炸弹)
       // 首家场景:lastPlay=null,继续用 autoPlayGrouped 领出
       const r = lastPlay.value
@@ -839,24 +854,33 @@ function onAutoFindBest() {
   // ★ v0.4.9:过 A 后重开一局(逻辑接入 docs/restart-after-a-flow.md)
   //   AI/单机模式直接调 game.restartMatch;P2P 模式由 host 发起,广播 MATCH_RESTART
   //   当前实现:仅单机模式 + AI 模式;P2P MATCH_RESTART 广播 TODO(下一迭代)
+  // ★ V049-03 修复:host 重开时生成新 seed 并广播,避免复用旧 seed 导致牌局重复
+  function _newRestartSeed() {
+    // 高强度 seed:Date.now + 32 位 Math.random + 弱 entropy 来源
+    return (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0
+  }
   function onRestartMatch() {
+    const newSeed = _newRestartSeed()
     if (isP2PMode.value) {
-      // TODO:P2P MATCH_RESTART 广播 + 等所有 joiner ack 后统一 restartMatch
-      // 当前简化:本机先 restart,joiner 暂不同步
+      // ★ V049-03 修复:P2P 模式下 host 广播新 seed + levelRank,
+      //   joiner 收到后用同一 seed restartMatch 保证牌局一致
       if (isNetworkHost.value) {
         if (game.value && game.value.restartMatch) {
-          game.value.restartMatch({ levelRank: 15 })
-          // 广播(joiner 端收到后也 restart)
+          game.value.restartMatch({ levelRank: 15, seed: newSeed })
+          // 广播(joiner 端收到后也 restart,带 seed 保证一致)
           try {
-            net.broadcast({ type: 'MATCH_RESTART', payload: { levelRank: 15, ts: Date.now() } })
+            net.broadcast({
+              type: 'MATCH_RESTART',
+              payload: { levelRank: 15, seed: newSeed, restartId: `rr${Date.now()}` },
+            })
           } catch (e) { /* 离线或非 host 时 noop */ }
         }
       }
       return
     }
-    // AI/单机模式:直接调
+    // AI/单机模式:直接调,带新 seed 让牌局每次都不同
     if (game.value && game.value.restartMatch) {
-      game.value.restartMatch({ levelRank: 15 })
+      game.value.restartMatch({ levelRank: 15, seed: newSeed })
     }
     // 刷新 UI refs
     const st = game.value.getState()
@@ -955,8 +979,11 @@ function onAutoFindBest() {
     if (!payload || !game.value) return
     if (!game.value.restartMatch) return
     const lr = (typeof payload.levelRank === 'number') ? payload.levelRank : 15
-    // 调 game.restartMatch 统一清状态 + 重新发牌
-    game.value.restartMatch({ levelRank: lr })
+    // ★ V049-03 修复:接 host 广播的 seed,用同一种子保证 host/joiner 牌局一致
+    //   payload.seed 缺失时回退到本机自己生成(防御性,理论上 host 必带)
+    const seed = (typeof payload.seed === 'number') ? payload.seed : (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0
+    // 调 game.restartMatch 统一清状态 + 重新发牌(用 host 的 seed)
+    game.value.restartMatch({ levelRank: lr, seed })
     // 刷 UI refs
     const st = game.value.getState()
     levelRank.value = st.levelRank

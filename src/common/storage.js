@@ -56,7 +56,18 @@ function getSettings() {
   } catch (e) { return { ...DEFAULT_SETTINGS } }
 }
 function setSettings(s) {
-  try { localStorage.setItem(KEY_SETTINGS, JSON.stringify({ ...DEFAULT_SETTINGS, ...s })); return true } catch (e) { return false }
+  // ★ V049-06 修复:setSettings 合并当前存储值,而不是默认值
+  //   旧版:{ ...DEFAULT_SETTINGS, ...s } → 调用方传局部字段(如只 aiDifficulty)
+  //   会把 bgmEnabled / sfxEnabled / bgmVolume / sfxVolume / theme / bgmStyle / sfxMode
+  //   等其他设置重置为默认值,导致用户改 AI 难度后其他设置被悄悄恢复默认
+  //   新版:getSettings() 拿到当前(已经合并默认值的完整对象),再叠加本次传入的 s
+  if (!s || typeof s !== 'object') return false
+  try {
+    const current = getSettings()  // 已经合并 DEFAULT_SETTINGS 的完整对象
+    const next = { ...current, ...s }
+    localStorage.setItem(KEY_SETTINGS, JSON.stringify(next))
+    return true
+  } catch (e) { return false }
 }
 
 function getHistory() {

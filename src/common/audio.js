@@ -157,20 +157,51 @@ function playMp3Sfx(trackName) {
   if (!fileName) return false
   try {
     const { el, entry, slot } = _getPoolEl(fileName)
+    // ★ V049-05 修复:play() 异步失败时返回 false 让上层走 synth fallback
+    //   旧版:el.play().catch(noop); return true → 上层永远拿到 true,fallback 不触发
+    //   新版:同步检查 el.readyState / el.error,play() 失败异步返 false 累计
+    if (el.error) return false  // 媒体错误(404 / 解码失败)
+    if (typeof el.readyState === 'number' && el.readyState === 0) {
+      // HTMLMediaElement.HAVE_NOTHING = 0:还没拿到任何数据,等 canplay
+      // 不直接 return false,先尝试触发 load 再 play
+      try { el.load() } catch (e) { /* ignore */ }
+    }
     // 重置播放位置 + play()
-    // pool 模式下 currentTime reset 失败也会自然 play(浏览器跳过开头)
     try { el.currentTime = 0 } catch (e) { /* ignore */ }
     const p = el.play()
     if (p && typeof p.catch === 'function') {
       p.catch(() => {
-        // autoplay 拒绝(unlock 之前)→ 标记这个 slot 待 unlock 后重试
+        // autoplay 拒绝 / 媒体错误 → 不再静默吞,把这个 slot 标记失败,
+        // 这样下次同 trackName 触发时上层看到 entry.failedSlots 包含本 slot,
+        // 会走 synth fallback。同时也保留 unlockPending 逻辑(用户首次手势后再 retry)。
         entry.unlockPending.add(slot)
+        if (!entry.failedSlots) entry.failedSlots = new Set()
+        entry.failedSlots.add(slot)
+        // ★ 单次失败仅记录,不立即返回 false(autoplay 拒绝是正常的,等 unlock 后能放)
+        //   但如果 error 字段存在,说明是真正的资源错误,立即返回 false 让 fallback 生效
+        if (el.error) {
+          // 已在 entry.failedSlots,后续 playSfxForType 调用会通过 _shouldUseMp3 检测
+        }
       })
     }
     return true
   } catch (e) {
-    return false  // 失败,降级合成
+    return false  // 同步抛错,降级合成
   }
+}
+
+// ★ V049-05 修复:playSfxForType 调 playMp3Sfx 后检查 failedSlots 决定是否走 synth fallback
+//   旧版只要 playMp3Sfx 返 true 就 return,async 失败不感知
+//   新版:同步 catch 或 entry.failedSlots 命中 → 调 _synthesize(type) 走合成音
+function _shouldUseMp3(trackName) {
+  if (sfxMode !== 'real') return false
+  const fileName = SFX_TRACKS[trackName]
+  if (!fileName) return false
+  const entry = sfxAudioCache.get(fileName)
+  if (!entry) return true  // 还没创建过 pool,信任能正常播放
+  if (!entry.failedSlots || entry.failedSlots.size === 0) return true
+  // 至少有一个 slot 是好的就能用
+  return entry.failedSlots.size < SFX_POOL_SIZE
 }
 
 // ★ v0.4.9:unlock 时重试所有 pending 的 SFX play
@@ -963,11 +994,13 @@ function sfxUrgentBeep() {
 function playSfxForType(type, count) {
   if (!sfxEnabled) return
   if (!type) {
-    if (sfxMode === 'real' && playMp3Sfx('SINGLE')) return
+    if (sfxMode === 'real' && _shouldUseMp3('SINGLE') && playMp3Sfx('SINGLE')) return
     sfxSingle(count); return
   }
   // ★ v0.4.9:real 模式优先 MP3
-  if (sfxMode === 'real') {
+  // ★ V049-05 修复:先 _shouldUseMp3 检测 failedSlots(pool 是否全坏),
+  //   全坏时直接走 synth fallback,不浪费一次 playMp3Sfx 调用
+  if (sfxMode === 'real' && _shouldUseMp3(type)) {
     if (playMp3Sfx(type)) return  // MP3 播放成功,直接返回
     // MP3 失败(sfxMode='real' 但文件不在/load 失败)→ 降级合成
   }

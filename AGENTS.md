@@ -37,7 +37,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（16 套件 / 862 通过 / 0 失败，v0.4.0 / v3.x 收官基线）
+# 跑全部测试（33 套件 / 1675 通过 / 0 失败，v0.4.10 收官基线）
 npm test
 
 # 跑单个测试套件
@@ -88,7 +88,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 16 套件 Node assert 单测（862 case 全过）
+│   │   └── *.test.js               # 33 套件 Node assert 单测（1675 case 全过）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -135,19 +135,19 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.8 收官：21 套件 / 972 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.10 收官：33 套件 / 1675 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
 | `npm run test:engine` | 规则引擎：牌组 / 牌型识别 / 大小比较 / 升级 / 进贡 / 种子发牌 / groupHandByRank | 109 |
-| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 / autoPlayGrouped | 54 |
-| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass / v3.8 P1 联机同步 / v2.1 P3 host 迁移 | 102 |
-| `npm run test:anim` | 发牌动画 + 音效（playSfxForType × 牌型 × count 全覆盖） | 13 + 117 |
+| `npm run test:ai` | AI：领出 / 跟牌 / 鬼牌凑牌 / 炸弹 / 接风 / autoPlayGrouped | 68 |
+| `npm run test:game` | 对局状态机：发牌 / 出牌 / 非法牌型 / 首家 pass / v3.8 P1 联机同步 / v2.1 P3 host 迁移 | 128 |
+| `npm run test:anim` | 发牌动画 + 音效（deal-animation + audio,playSfxForType × 牌型 × count 全覆盖） | 13 + 135 |
 | `npm run test:ws` | WebSocket server + 真机 transport 桥接 + parseHostAddress + joinRemoteRoom | 29 + 50 |
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 | **862 / 0 fail** |
+| `npm test` | 全部 33 套件 | **1675 / 0 fail** |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -271,7 +271,7 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 2. **昵称 + 头像可自设**（自己挑，不强制随机）
 3. **改昵称后其他玩家实时看到**（本地存 + P2P 广播）
 4. **对局中禁止改名**（防作弊）
-5. **AI 中等难度**（规则 + 贪心搜索，**非**深度学习）
+5. **AI 三档难度（easy / medium / hard）**（规则 + 贪心搜索，**非**深度学习；v0.4.9 加 hard 难度——防守优先 + 炸弹保留）
 6. **纯自实现**（不借鉴任何已有掼蛋项目，版权干净）
 
 ## 修改 / 扩展约定
@@ -305,14 +305,25 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 - ~~QR 库失败没兜底~~ → **v2.2 QrFallbackCard.vue + qr-fallback.js 纯函数（36 case 测 formatHostAddress / buildJoinUrl / shouldShowFallback / describeFallbackMode / clipboardPayload）**
 - ~~BUG-7 host self-broadcast 导致 ai:takeover 误触发~~ → **v2.1 transport onMessage 路径加 host 自屏蔽 + ai:takeover 触发次数限制**
 
-## 真没做（v3.0+ 候选）
+## 真没做（v4.0+ 候选）
 
-- AI 难度分档（Easy / Hard）——当前只有中等难度（规则 + 贪心搜索）
 - 录像回放——对局过程没存盘
 - iOS 脚手架——只有 Android（Capacitor 配了 ios/ 但未跑过 `cap add ios`）
-- 玩家统计 / 战绩分析——`storage.js` 只存原始 record，没做趋势图
 - 弱网 / 隧道 / 高铁 压测数据——只在高速局域网 + WiFi 测过
-- 二维码扫码加入——当前需要手动输入 IP:port（QrFallbackCard 只解决"QR 库失败"的兜底，不是真正的扫码）
+
+### v0.4.10 已落地
+
+- ✅ 移动端响应式（GameView 桌面 1280×800 → 手机竖屏 + 横屏双布局,`GameViewMobile.vue` 1333 行,横屏 .is-landscape 兜底）
+
+### v0.4.10 已落地
+
+- ✅ v0.4.9 静态审查 9 bug 修复(V049-01 onHintToggle `diff` / V049-02 isRestartAfterA 贯通 / V049-03 MATCH_RESTART seed / V049-04 relay 白名单 / V049-05 真实音效 fallback / V049-06 setSettings 合并当前值 / V049-09 IP/port 校验)——`v049-bug-fixes.test.js` 66 case
+
+### v0.4.9 已落地
+
+- ✅ AI 难度分档（Easy / Medium / Hard）——`59be6f2` + AIView 接入
+- ✅ 玩家统计 / 战绩趋势图——`daa06ca` + HistoryChart 升级
+- ✅ 二维码真扫码加入——`6cec587` + html5-qrcode 集成
 
 ## Agent 团队（本仓库专属）
 
@@ -361,7 +372,7 @@ Mavis 多 agent 团队配置在 `.harness/`：
 
 ### 测试时间预算（v2.2 cross-device + kick 教训）
 
-- 跨实例 mock BC 测试加 2-3s 到 npm test（16 套件 862 case 总耗时 ~10s 还能接受）
+- 跨实例 mock BC 测试加 2-3s 到 npm test（33 套件 1675 case 总耗时 ~12s 还能接受）
 - 不要无脑加 mock 跨实例测试，先看现有 mock 是否够用
 - 真 BroadcastChannel 跨实例需要 `globalThis.BroadcastChannel` 注入 + dynamic-import cache-bust (`?tag=xxx&t=Date.now()`)
 

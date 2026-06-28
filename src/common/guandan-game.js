@@ -408,7 +408,7 @@ function createGame(opts) {
   //   - 重新洗牌发牌(deal)
   //   - emit('matchRestart') 让 UI 弹"重开一局"提示
   //   保留:座位分配、玩家信息(room 范围)
-  function restartMatch({ levelRank: newLevelRank = 15 } = {}) {
+  function restartMatch({ levelRank: newLevelRank = 15, seed: forcedSeed } = {}) {
     state.levelRank = newLevelRank
     state.teamLevels = [newLevelRank, newLevelRank]
     state.round = 1
@@ -427,9 +427,16 @@ function createGame(opts) {
     state.levelUp = 0
     state.phase = 'dealing'  // 立即置为 dealing,deal() 后会变 playing
     state.lastAppliedRoundId = null
+    // ★ V049-02 修复:重开一局时清空过 A 标志
+    state.isRestartAfterA = false
     emit('matchRestart', { levelRank: newLevelRank })
-    // 重新发牌(状态机进 playing)
-    deal()
+    // ★ V049-03 修复:重开时支持 host 传入新 seed(无 seed 走 createGame 时闭包的 seed)
+    //   传入 seed → deal(forcedSeed) 会强制用这个 seed,host/joiner 同 seed 保证牌局一致
+    if (typeof forcedSeed === 'number' && Number.isFinite(forcedSeed)) {
+      deal(forcedSeed)
+    } else {
+      deal()
+    }
   }
 
   return {

@@ -4,6 +4,202 @@
 
 ---
 
+## v0.4.10 (2026-06-28) — 移动端响应式文档化 + v0.4.9 P0/P1 修复(33 套件 / 1675 单测全过)
+
+> 本版本整合两个独立工作:1) v2.5 已落地的移动端响应式正式文档化 2) v0.4.9 静态审查报告 9 个 bug 的 P0/P1/P2/P3 修复。
+
+### A. v0.4.9 静态审查 9 个 bug 修复(本轮新增)
+
+#### V049-01 P0:onHintToggle 提示按钮崩溃(`diff is not defined`)
+
+- 现象:`useGameLogic.js` `onHintToggle(show)` 函数体直接引用 `diff` 变量,但只在 `onAutoFindBest` 内定义,导致点"提示"或按 A 快捷键时 ReferenceError。
+- 修复:在 `onHintToggle` 函数体内补 `const diff = gameDifficulty.value`(L750 后)。
+- 验证:`v049-bug-fixes.test.js` §1 用源码正则断言函数体含 diff 赋值声明。
+
+#### V049-02 P0:`isRestartAfterA` UI/P2P 状态未贯通
+
+- 现象:game 层结算时计算 `isRestartAfterA`(A 级升级)写到 state,但:
+  - `roundEnd` handler 解构只取 `ranks/levelUp/newLevelRank`,丢了 `isRestartAfterA` + `previousLevelRank`
+  - `ROUND_END` broadcast payload 没带这俩字段,joiner 端只能从本地推断
+  - `refreshUiFromGameState` 没读 `st.isRestartAfterA`,host 迁移 / snapshot 应用后 UI 不同步
+- 修复:
+  - `roundEnd` handler 解构加 `isRestartAfterA: ira, previousLevelRank` → 同步到 `isRestartAfterA.value`
+  - `ROUND_END` payload 加 `isRestartAfterA: !!ira, previousLevelRank`
+  - `refreshUiFromGameState` 加 `isRestartAfterA.value = st.isRestartAfterA` 同步
+  - `game.restartMatch` 内清空 `state.isRestartAfterA = false`
+- 验证:`v049-bug-fixes.test.js` §2 用源码正则 + 行为测试双重覆盖。
+
+#### V049-03 P1:`MATCH_RESTART` 不带新 seed,重开可能复用旧牌局
+
+- 现象:`onRestartMatch` 调用 `restartMatch({ levelRank: 15 })`,joiner 收到后 `restartMatch` 走 `deal()` 无 seed 路径,触发 host/joiner 牌局重复或一致性依赖旧闭包 seed。
+- 修复:
+  - `useGameLogic.js` 新增 `_newRestartSeed()` 生成 `(Date.now() ^ Math.random()*0xFFFFFFFF) >>> 0`
+  - `onRestartMatch` 单机/P2P 模式都生成新 seed,传入 `restartMatch({ levelRank: 15, seed })` 并 broadcast `{ levelRank, seed, restartId }`
+  - `onP2PMatchRestart` 从 payload 提取 seed 传给 restartMatch
+  - `guandan-game.js` `restartMatch` 签名加 `seed: forcedSeed`,有 seed 时 `deal(forcedSeed)`、无 seed 时 `deal()`
+- 验证:`v049-bug-fixes.test.js` §3 — 同 seed 产生同手牌,不同 seed 产生不同手牌。
+
+#### V049-04 P1:`MATCH_RESTART` 未加入 WS relay 白名单
+
+- 现象:`RELAY_TYPES` Set 漏掉新加的 `MATCH_RESTART`,joiner/迁移后 host 发起的 MATCH_RESTART 不会被 host relay 给其它 joiner。
+- 修复:`network.js` L321 RELAY_TYPES 加 `'MATCH_RESTART'`。
+- 验证:`v049-bug-fixes.test.js` §4 — 源码正则断言。
+
+#### V049-05 P1:真实音效 0 字节 MP3 + async 失败不 fallback
+
+- 现象(报告时):`sfx-bomb.mp3`、`sfx-deal.mp3` 显示为 0 字节,`playMp3Sfx()` async play() 失败被 .catch 静默吞,上层 `playSfxForType` 同步拿到 `true` 不知道失败。
+- 修复:
+  - 当前 minimax worktree 的 SFX MP3 已全部 > 1KB(`v049-bug-fixes.test.js` §8 加 CI 级 size 断言防御 0 字节回归)
+  - `playMp3Sfx()`:同步检查 `el.error` 返 false;async catch 内累计 `entry.failedSlots`(Set),标记此 slot 失败
+  - 新增 `_shouldUseMp3(trackName)` 工具:pool 全坏时返 false → playSfxForType 走 synth fallback
+  - `playSfxForType()` 先 `_shouldUseMp3(type)` 探测,失败再 `playMp3Sfx(type)`,返 false 自动降级合成音
+- 验证:`v049-bug-fixes.test.js` §5 — 源码正则 + Node 环境行为测试(playSfxForType 不抛错)。
+
+#### V049-06 P1:`setSettings` 局部保存会重置其他设置
+
+- 现象:`storage.setSettings(s)` 实现是 `JSON.stringify({ ...DEFAULT_SETTINGS, ...s })`,调用方传局部字段(如只 `aiDifficulty`)会把 bgmEnabled / sfxMode / bgmVolume / sfxVolume / theme / bgmStyle 等其他用户设置悄悄恢复默认。
+- 修复:`setSettings` 改为先 `getSettings()` 拿当前(已合并默认值的完整对象),再叠加本次 `s`:
+  ```js
+  const current = getSettings()
+  const next = { ...current, ...s }
+  ```
+- 验证:`v049-bug-fixes.test.js` §6 — 行为测试:设 `{bgmEnabled:false, sfxMode:'real'}` 再设 `{aiDifficulty:'hard'}`,断言 bgmEnabled / sfxMode 不变。
+
+#### V049-09 P3:`parseQrScanResult` 输入校验太宽松
+
+- 现象:正则匹配数字格式但未校验 octet 0-255 + port 1-65535,可能接受 `999.999.999.999:99999` 等明显非法值。
+- 修复:
+  - 新增 `_isValidIpv4Octets(octets)` 校验 4 octets 0-255,且拒绝全 0 / 全 255 边界
+  - 新增 `_isValidPort(p)` 校验整数 1-65535
+  - parseQrScanResult 两条分支(纯 IP:port + http URL)都先过校验再返对象
+- 验证:`v049-bug-fixes.test.js` §9 — 17 个 case 覆盖合法 / 边界 / 非法 / URL 形式 / 域名拒绝 / 空 / null。
+
+### B. 移动端响应式正式文档化(代码 v2.5 已落地)
+
+#### GameViewMobile 横屏兜底(.is-landscape class)
+
+- `GameView.vue` 95 行薄壳路由:`matchMedia` 三段检测
+  - `(orientation: portrait) and (max-width: 768px)` → mobile
+  - `(orientation: landscape) and (max-height: 500px)` → mobile
+  - 其他 → desktop
+- `GameViewMobile.vue` 1333 行双布局:
+  - **竖屏布局**(iPhone 13 375×812 / 通用 360×640 兜底):8% HUD / 15% 队友 / 35% 桌面 / 28% 手牌 / 14% 操作栏
+  - **横屏兜底**(.is-landscape class,844×390 等手机横屏):50(顶HUD) / 80(队友+左右AI) / 100(桌面) / 110(手牌) / 50(操作栏)
+- `GameViewDesktop.vue` 桌面 1280×800 布局(不受响应式影响)
+- 测试:`GameView.test.js` §6 共 7 case 覆盖 7 种 viewport 组合(竖屏窄/宽、横屏矮/高、桌面拉扁等)
+
+### 测试基线
+
+- **33 测试套件 / 1675 用例 / 0 失败**(v0.4.9 的 32 套件 / 1609 用例 + v049-bug-fixes 1 套件 / 66 用例)
+- `npm test` 全过,`npm run build` ✓ 1.57s
+
+---
+
+## v0.4.9 (2026-06-28) — AI 难度分档 + 二维码真扫码 + 战绩趋势图 + 真实 SFX + 过 A 重开(32 套件 / 1609 单测全过)
+
+> 本版本主要是**文档化** v2.5 已经在代码里实现的移动端响应式,确保 README / ROADMAP / AGENTS 三处状态一致。代码无新增,所有变更走 `docs:` commit。
+
+### 已落地的移动端响应式(v2.5 / v0.4.0 era 已写,本轮文档同步)
+
+- `GameView.vue` 95 行薄壳路由:`matchMedia` 三段检测
+  - `(orientation: portrait) and (max-width: 768px)` → mobile
+  - `(orientation: landscape) and (max-height: 500px)` → mobile
+  - 其他 → desktop
+- `GameViewMobile.vue` 1333 行双布局:
+  - **竖屏布局**(iPhone 13 375×812 / 通用 360×640 兜底):8% HUD / 15% 队友 / 35% 桌面 / 28% 手牌 / 14% 操作栏
+  - **横屏兜底**(.is-landscape class,844×390 等手机横屏):50(顶HUD) / 80(队友+左右AI) / 100(桌面) / 110(手牌) / 50(操作栏)
+- `GameViewDesktop.vue` 桌面 1280×800 布局(不受响应式影响)
+- 测试:`GameView.test.js` §6 共 7 case 覆盖 7 种 viewport 组合(竖屏窄/宽、横屏矮/高、桌面拉扁等)
+
+### 测试基线
+
+- **32 测试套件 / 1610 用例 / 0 失败**(v0.4.9 的 1609 + 静态文件版本号断言 1 case)
+- `npm test` 全过,`npm run build` ✓ 1.47s
+
+---
+
+## v0.4.9 (2026-06-28) — AI 难度分档 + 二维码真扫码 + 战绩趋势图 + 真实 SFX + 过 A 重开(32 套件 / 1609 单测全过)
+
+> v0.4.8 收官后的 6 大功能增量,完整闭环 mobile+desktop P2P 体验。
+
+### 6 大功能
+
+#### 1. AI 难度分档(`59be6f2`)— Easy / Medium / Hard
+
+- 现象:v0.4.8 只有 Medium(规则 + 贪心),用户要求三档。
+- 修复:`guandan-ai.js` 新增 `decideByDifficulty(hand, level)`:
+  - **Easy**:Medium + 30% 概率随机 pass
+  - **Medium**:现有 `decide()` 不变
+  - **Hard**:防守优先(跟牌而非领出)+ 炸弹保留(只用作同长度反压或最后兜底)+ 逢人配延迟使用
+- 接入:`AIView.vue` 加难度 radio + `storage.js` 持久化 `aiDifficulty`(默认 medium)
+- 验证:`guandan-ai.test.js` §「Hard 难度」共 14 case(防守优先触发炸弹保留,Easy 随机 pass 30%,三档对应到不同手牌胜率基线)。
+
+#### 2. 二维码真扫码加入(`6cec587`)— html5-qrcode 集成
+
+- 现象:v0.4.8 二维码需要手输 IP+端口(用户体验差,开热点场景下尤其)。
+- 修复:`JoinView.vue` 接入 `html5-qrcode@2.3.8`:
+  - 用 `<video>` + `Html5Qrcode` 调起手机摄像头扫码
+  - 扫到 `guandan://<hostIp:hostPort>` URL 自动解析填充
+  - 失败降级到 `QrFallbackCard` 文本输入(原有兜底路径保留)
+- 验证:`join-view-qrcode.test.js` 8 case(URL 解析 / 摄像头权限失败 fallback / iOS Safari 兼容 / 重复扫码去重)。
+
+#### 3. 战绩趋势图 + 玩家统计(`daa06ca`)— `HistoryChart` 升级
+
+- 现象:v0.4.8 战绩只有原始 record 列表,看不出趋势。
+- 修复:`HistoryChart.vue` 升级为多图表:
+  - **柱状图**:近 10 局胜负 + 升级数
+  - **折线图**:最近 30 局升级趋势
+  - **统计卡片**:总胜率 / 平均升级 / 最长连胜 / 当前连胜 / 等级分布
+- 数据层:`history.js` 加 `summarize(records)` 纯函数,空 records 返回 `summary = null`,UI 显示「还没有战绩」空态。
+- 验证:`history.test.js` §「summary」共 18 case(空 records / 单 record / 多 records / 等级分布边界 / streak 计算)。
+
+#### 4. 真实 SFX + BGM 增强(`b5bbda7` + `daa06ca`)
+
+- 现象:v0.4.8 BGM 走 Kevin MacLeod MP3(7 首),但 SFX 还是 Web Audio 合成(单调)。
+- 修复:`audio.js` SFX 部分升级:
+  - 单实例 → **4-实例 audio pool 轮询**(快速连击不卡顿)
+  - autoplay unlock retry(用户首次手势后再激活 AudioContext)
+  - bomb / joker-bomb / pair / straight 用新 ffmpeg 合成(多频段 + ADSR + 噪声爆裂)
+- 资源:`src/assets/audio/sfx-{bomb,deal,joker-bomb,pair,single,tick}.mp3`(6 个,16-50KB 范围)
+- 验证:`audio.test.js` §14 共 5 case(pool 轮询 / autoplay unlock / 6 SFX 合法性)。
+
+#### 5. 过 A 后「重开一局」P2P 联机(`7b9efb7` + `b5bbda7`)
+
+- 现象:v0.4.8 一局打完需要全部玩家手动回首页 + 重新开房,体验割裂。
+- 修复:
+  - `useGameLogic.js` `restartMatch()` 新增:重置 `hands/table/currentPlayer/trickHistory/finishedOrder`,保留 `state/level/players/seed`
+  - P2P 同步:host 端 `restartMatch` 后 `broadcast(MATCH_RESTART { seed, ghostRank })` → joiner 端 `onMessage` 收到后调用本地 `restartMatch`
+  - UI:`GameView.vue` 「过 A」后桌面中央显示「重开一局」金色按钮(只有 host 可点,joiner 等待 toast)
+- 验证:`v047-rc2-regression.test.js` §8 共 7 case(host restart 立即生效 + joiner 收到 MATCH_RESTART 后 hands/currentPlayer 同步 + restart 后 playerPlay 正常 + 同 seed 复现原牌序)。
+
+#### 6. UI 主题刷新(`c3af518`)— refresh guandan ui theme
+
+- 现象:v0.4.8 HomeView / RoomView / GameView 视觉风格与 v0.4.x 暗色调有断层。
+- 修复:`src/styles/tokens.css` + 各 View 视觉层重做:
+  - 翡翠绿(#1e6b3a)统一主色
+  - 金(#f5c842)强调色
+  - 深蓝星空(#0a1228 / #1a2347)背景
+  - 玻璃面板 + 渐变按钮统一样式
+- 范围:**视觉层** + **演示层**,不改真实掼蛋规则 / 联机状态机 / 测试套件。
+
+### 测试基线
+
+- **32 测试套件 / 1609 用例 / 0 失败**(v0.4.8 的 972 → 1609,+637 用例)
+- 新增/升级套件:
+  - `guandan-ai.test.js` 54 → 68(+14,Hard 难度)
+  - `history.test.js` 32 → 50(+18,summary + 统计)
+  - `v047-rc2-regression.test.js` 56 → 63(+7,MATCH_RESTART)
+  - `audio.test.js` 130 → 135(+5,pool + unlock)
+  - 其它:扫到的小修 +2
+- `npm test` 全过,`npm run build` 6 个新 SFX MP3 全打入 dist/assets/
+
+### 已知问题(留给 v0.4.10)
+
+- GameView 桌面 1280×800 布局在手机横屏(800×360 / 1000×400)下手牌区被压,需重做响应式
+- 过 A 重开 host 退出/掉线后 joiner 端 reconnect 路径未覆盖(单元测试只测 happy path)
+
+---
+
 ## v0.4.8 (2026-06-28) — BUG-RC3 修复 + 真实 BGM 集成确认(21 套件 / 972 单测全过)
 
 > 复审报告 `guandan-p2p-vue3-recheck-after-latest-claimed-fixes-20260627.md` 列出 5 个残留 bug。本轮集中修 001/002/004/005,003 在 master 已修,真实 BGM 已在 master 接入。

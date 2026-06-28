@@ -203,14 +203,18 @@ console.log('\n=== 5. BUG-F: READY 已在 RELAY_TYPES 中(常量级验证) ===')
 // ============== BUG-H:package.json version ==============
 // 2026-06-28: BUG-RC3-005 修复后,package.json version 已升到 0.4.8
 //   反映 v0.4.8 收官状态(7 首真实 BGM + 8 BUG 修复 + BUG-RC3 修复)
-console.log('\n=== 6. BUG-H: package.json version (v0.4.8) ===')
+// 2026-06-28: v0.4.9 收官,version 升到 0.4.9
+//   反映 6 大功能增量(AI 难度分档 + 二维码真扫码 + 战绩趋势图 + 真实 SFX + 过 A 重开 + UI 主题刷新)
+// 2026-06-28: v0.4.10 收官,version 升到 0.4.10
+//   反映 v0.4.9 静态审查 9 个 bug 修复 + 移动端响应式文档化
+console.log('\n=== 6. BUG-H: package.json version (v0.4.10) ===')
 {
   // 静态文件读取验证
   const fs = await import('fs')
   const path = await import('path')
   const pkgPath = path.resolve('./package.json')
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-  eq('package.json version = 0.4.8', pkg.version, '0.4.8')
+  eq('package.json version = 0.4.10', pkg.version, '0.4.10')
 }
 
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============

@@ -319,6 +319,9 @@ function _onTransportMessage(msg) {
  */
 const RELAY_TYPES = new Set([
   'PLAY', 'PASS', 'STATE_SNAPSHOT', 'ROUND_END', 'CHAT', 'NICK_UPDATE', 'READY',
+  // ★ V049-04 修复:把 MATCH_RESTART 加入 WS relay 白名单
+  //   之前遗漏导致 joiner 端发起的 MATCH_RESTART(异常恢复 / 迁移后 host)无法被 host relay 给其它 joiner
+  'MATCH_RESTART',
 ])
 
 function relayFromClient(msg) {

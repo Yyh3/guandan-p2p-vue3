@@ -69,6 +69,22 @@ export function clipboardPayload(hostIp, hostPort) {
 //     3) 含路径      "http://192.168.43.1:8848/#/join"  → 取 origin
 //   返回 { host, port } 或 null(无法解析)
 //
+// ★ V049-09 修复:IP / port 范围校验
+//   旧版:只匹配数字格式,接受 999.999.999.999:99999 等明显非法值
+//   新版:octets 0-255 + port 1-65535 强校验,失败返回 null
+function _isValidIpv4Octets(octets) {
+  if (!Array.isArray(octets) || octets.length !== 4) return false
+  for (const o of octets) {
+    if (!Number.isInteger(o) || o < 0 || o > 255) return false
+  }
+  // 拒绝全 0 (0.0.0.0) 和全 255 (255.255.255.255 广播地址)
+  if (octets.every(o => o === 0) || octets.every(o => o === 255)) return false
+  return true
+}
+function _isValidPort(p) {
+  return Number.isInteger(p) && p >= 1 && p <= 65535
+}
+
 //   设计:不依赖 parseHostAddress(network.js)避免循环依赖
 export function parseQrScanResult(text) {
   if (typeof text !== 'string' || text.trim() === '') return null
@@ -76,18 +92,26 @@ export function parseQrScanResult(text) {
   // 1) 纯 IP:port
   const ipPortMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?$/)
   if (ipPortMatch) {
+    const octets = ipPortMatch[1].split('.').map(Number)
+    if (!_isValidIpv4Octets(octets)) return null
+    const port = ipPortMatch[2] ? Number(ipPortMatch[2]) : 8848
+    if (!_isValidPort(port)) return null
     return {
       host: ipPortMatch[1],
-      port: ipPortMatch[2] ? Number(ipPortMatch[2]) : 8848,
+      port,
     }
   }
   // 2) http(s)://... → 提取 host:port
   try {
     const url = new URL(trimmed)
     if (url.hostname && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname)) {
+      const octets = url.hostname.split('.').map(Number)
+      if (!_isValidIpv4Octets(octets)) return null
+      const port = url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80)
+      if (!_isValidPort(port)) return null
       return {
         host: url.hostname,
-        port: url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80),
+        port,
       }
     }
     // hostname 不是 IP(比如域名)→ 暂不支持
