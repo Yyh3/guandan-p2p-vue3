@@ -209,14 +209,16 @@ console.log('\n=== 5. BUG-F: READY 已在 RELAY_TYPES 中(常量级验证) ===')
 //   反映 v0.4.9 静态审查 9 个 bug 修复 + 移动端响应式文档化
 // 2026-06-28: v0.4.11 收官,version 升到 0.4.11
 //   反映 v0.4.10 静态审查 8 个 P0/P1/P2 bug 修复(ROUND_END 鉴权 / 过 A 落盘 / MATCH_RESTART 门禁 / 真实音效 unlock 清理 / AI 难度对所有 AI 生效 / SettingsView 版本号动态化)
-console.log('\n=== 6. BUG-H: package.json version (v0.4.11) ===')
+// 2026-06-28: v0.4.12 收官,version 升到 0.4.12
+//   反映 v0.4.11 修复后的回归测试补充(P2P 端到端 56 case 覆盖 ROUND_END / MATCH_RESTART / state 落盘 / 同 seed restartMatch 等关键路径)
+console.log('\n=== 6. BUG-H: package.json version (v0.4.12) ===')
 {
   // 静态文件读取验证
   const fs = await import('fs')
   const path = await import('path')
   const pkgPath = path.resolve('./package.json')
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-  eq('package.json version = 0.4.11', pkg.version, '0.4.11')
+  eq('package.json version = 0.4.12', pkg.version, '0.4.12')
 }
 
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============

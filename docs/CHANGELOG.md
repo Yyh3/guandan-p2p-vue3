@@ -4,6 +4,36 @@
 
 ---
 
+## v0.4.12 (2026-06-28) — v0.4.11 修复的 P2P 端到端回归测试补充(35 套件 / 1837 单测全过)
+
+> 本版本纯增量:**为 v0.4.11 的 8 个 P2P bug 修复补充端到端回归测试**。无代码改动,只新增测试套件和文档同步。
+
+### 新增测试套件
+
+#### `v0410-p2p-regression.test.js` — 56 case 端到端回归
+
+- **§1 V0410-01 回归**:ROUND_END 广播 host-only 守卫行为模拟 — joiner 不广播,host 广播 1 次,suppress=true 时 host 也不广播(防自循环)
+- **§2 V0410-02 回归**:`applyRoundEndFromPayload` 后 `state.isRestartAfterA` + `state.previousLevelRank` 写回 + 同 roundId 二次应用去重(幂等) + 不同 roundId 视为新结算 + snapshot 序列化保留 isRestartAfterA
+- **§3 V0410-03 回归**:MATCH_RESTART 三重门禁 — sender authority (from===0) + phase gate (phase==='finished' && isRestartAfterA===true) + restartId 去重(_appliedRestartIds Set)
+- **§4 V0410-04 回归**:host / joiner 同 seed `restartMatch({seed})` 产生同手牌,不同 seed 不同手牌;`restartMatch` 后 `state.isRestartAfterA` 自动清空(消费掉)
+- **§5 V0410-06 回归**:`applySettingsToAudio` 同步 6 项 (enabled / volume / bgmStyle / sfxMode) + audio 模块函数验证
+- **§6 V0410-07 回归**:`scheduleAI` 传 `state.difficulty` + createGame 时 difficulty 字段透传到 state
+- **§7 V0410-08 回归**:SettingsView 从 package.json 读版本号,模板用 `{{ appVersion }}` 动态渲染
+
+### 设计说明
+
+- 用源码正则 + 行为模拟,不直接挂载 Vue(useGameLogic 依赖 Vue ref)
+- ROUND_END 守卫 / MATCH_RESTART 门禁用模拟函数验证逻辑分支
+- applyRoundEndFromPayload / restartMatch 用真实 createGame 验证 state 写回行为
+- 跨实例 BroadcastChannel 端到端测试已有 `network-multitab.test.js` 覆盖 4-tab BC 通信基础;P2P 业务层端到端由本套件补充
+
+### 测试基线
+
+- **35 测试套件 / 1837 用例 / 0 失败**(v0.4.11 的 34 套件 / 1781 用例 + v0410-p2p-regression 1 套件 / 56 用例)
+- `npm test` 全过,`npm run build` ✓ 1.43s
+
+---
+
 ## v0.4.11 (2026-06-28) — v0.4.10 静态审查 8 个 P0/P1/P2 bug 修复(34 套件 / 1781 单测全过)
 
 > v0.4.10 发布后第二轮静态审查,集中修 P2P 联机的鉴权 / 落盘 / 重开门禁 / 音效解锁 / AI 难度全链路 / 版本号硬编码问题。

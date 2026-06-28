@@ -37,7 +37,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（34 套件 / 1781 通过 / 0 失败，v0.4.11 收官基线）
+# 跑全部测试（35 套件 / 1837 通过 / 0 失败，v0.4.12 收官基线）
 npm test
 
 # 跑单个测试套件
@@ -88,7 +88,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 34 套件 Node assert 单测（1781 case 全过）
+│   │   └── *.test.js               # 35 套件 Node assert 单测（1837 case 全过）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -135,7 +135,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.11 收官：34 套件 / 1781 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.12 收官：35 套件 / 1837 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -147,7 +147,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 34 套件 | **1781 / 0 fail** |
+| `npm test` | 全部 35 套件 | **1837 / 0 fail** |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -315,6 +315,10 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 
 - ✅ 移动端响应式（GameView 桌面 1280×800 → 手机竖屏 + 横屏双布局,`GameViewMobile.vue` 1333 行,横屏 .is-landscape 兜底）
 
+### v0.4.12 已落地
+
+- ✅ v0.4.11 修复的 P2P 端到端回归测试 56 case 补充(ROUND_END host-only 行为模拟 / applyRoundEndFromPayload 幂等 / MATCH_RESTART sender authority + phase gate + restartId dedup / 同 seed restartMatch 一致性 / afterMatchRestartRefresh 副作用 / applySettingsToAudio 同步 6 项 / scheduleAI difficulty / SettingsView 版本号)——`v0410-p2p-regression.test.js`
+
 ### v0.4.11 已落地
 
 - ✅ v0.4.10 静态审查 8 bug 修复(V0410-01 ROUND_END host-only / V0410-02 过 A 落盘 / V0410-03 MATCH_RESTART 鉴权去重 / V0410-04 host UI refresh / V0410-05 音效 unlock 清理 / V0410-06 bgmStyle+sfxMode / V0410-07 scheduleAI difficulty / V0410-08 版本号动态化)——`v0410-bug-fixes.test.js` 40 case
@@ -376,7 +380,7 @@ Mavis 多 agent 团队配置在 `.harness/`：
 
 ### 测试时间预算（v2.2 cross-device + kick 教训）
 
-- 跨实例 mock BC 测试加 2-3s 到 npm test（34 套件 1781 case 总耗时 ~12s 还能接受）
+- 跨实例 mock BC 测试加 2-3s 到 npm test（35 套件 1837 case 总耗时 ~12s 还能接受）
 - 不要无脑加 mock 跨实例测试，先看现有 mock 是否够用
 - 真 BroadcastChannel 跨实例需要 `globalThis.BroadcastChannel` 注入 + dynamic-import cache-bust (`?tag=xxx&t=Date.now()`)
 
