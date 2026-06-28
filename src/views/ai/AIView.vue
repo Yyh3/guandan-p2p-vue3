@@ -20,14 +20,14 @@
           <button
             class="config-chip"
             :class="{ active: difficulty === 'medium' }"
-            @click="difficulty = 'medium'">
+            @click="setDifficulty('medium')">
             中等
             <small class="chip-hint">规则 + 贪心</small>
           </button>
           <button
             class="config-chip"
             :class="{ active: difficulty === 'hard' }"
-            @click="difficulty = 'hard'">
+            @click="setDifficulty('hard')">
             困难
             <small class="chip-hint">防守 + 炸弹保留</small>
           </button>
@@ -41,8 +41,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import storage from '@/common/storage.js'
 const router = useRouter()
 const levelRank = ref(15)
 const levelOptions = [
@@ -52,8 +53,21 @@ const levelOptions = [
   { rank: 10, label: '10' },
   { rank: 15, label: '2' },
 ]
-// ★ v0.4.9:AI 难度(默认 medium)
+// ★ v0.4.9:AI 难度,默认从 SettingsView 持久化的 storage.aiDifficulty 读
+//   旧版写死 ref('medium') — 用户上次选 hard 会被覆盖;现在尊重全局默认
 const difficulty = ref('medium')
+onMounted(() => {
+  const s = storage.getSettings()
+  if (s.aiDifficulty === 'medium' || s.aiDifficulty === 'hard') {
+    difficulty.value = s.aiDifficulty
+  }
+})
+// 切换时立刻持久化(AIView 改 → SettingsView 也会跟着变,反之亦然)
+function setDifficulty(id) {
+  if (id !== 'medium' && id !== 'hard') return
+  difficulty.value = id
+  storage.setSettings({ aiDifficulty: id })
+}
 function onStart() {
   router.push(`/game?levelRank=${levelRank.value}&ai=1&difficulty=${difficulty.value}`)
 }

@@ -124,6 +124,30 @@
       </div>
     </section>
 
+    <!-- ★ v0.4.9:全局 AI 难度(SettingsView 改 → AIView 默认读这里) -->
+    <section class="card">
+      <h2 class="card-title">🤖 AI 难度</h2>
+      <div class="row">
+        <span class="row-label">
+          <span class="row-icon">🎯</span>
+          默认 AI 难度
+        </span>
+        <div class="seg-group">
+          <button
+            v-for="opt in aiDifficulties"
+            :key="opt.id"
+            class="seg-btn"
+            :class="{ active: aiDifficulty === opt.id }"
+            @click="setAiDifficulty(opt.id)"
+          >{{ opt.label }}</button>
+        </div>
+      </div>
+      <p class="card-hint">
+        中等 = 规则 + 贪心搜索;困难 = 防守 + 炸弹保留。设置后,<b>单机 AI 模式</b>
+        进入时自动应用,也可在 AI 模式配置页临时覆盖。
+      </p>
+    </section>
+
     <!-- 数据 -->
     <section class="card">
       <h2 class="card-title">🗂️ 数据</h2>
@@ -206,6 +230,11 @@ const sfxModes = [
   { id: 'synth', label: '合成' },
   { id: 'real', label: '真实' },
 ]
+// ★ v0.4.9:全局 AI 难度(SettingsView → AIView 默认读 storage.aiDifficulty)
+const aiDifficulties = [
+  { id: 'medium', label: '中等' },
+  { id: 'hard', label: '困难' },
+]
 const themes = [
   { id: 'dark', label: '深色' },
   { id: 'light', label: '浅色' },
@@ -223,6 +252,8 @@ onMounted(() => {
   sfxMode.value = s.sfxMode || audio.getSfxMode() || 'synth'
   animationEnabled.value = s.animationEnabled !== false
   theme.value = s.theme || 'dark'
+  // ★ v0.4.9:从 storage 灌入全局 AI 难度
+  aiDifficulty.value = s.aiDifficulty === 'hard' ? 'hard' : 'medium'
   historyCount.value = (storage.getHistory() || []).length
   nickname.value = storage.getNickname()
   avatar.value = storage.getAvatar()
@@ -242,6 +273,7 @@ function saveAll() {
     sfxMode: sfxMode.value,
     animationEnabled: animationEnabled.value,
     theme: theme.value,
+    aiDifficulty: aiDifficulty.value,
   })
   // 实时反映到 audio 模块
   audio.setBgmEnabled(bgmEnabled.value)
@@ -264,6 +296,13 @@ function setSfxMode(id) {
   sfxMode.value = id
   audio.setSfxMode(id)
   saveAll()
+}
+
+// ★ v0.4.9:全局 AI 难度切换(立即持久化,AIView 重新进会读到)
+function setAiDifficulty(id) {
+  if (id !== 'medium' && id !== 'hard') return
+  aiDifficulty.value = id
+  storage.setSettings({ aiDifficulty: id })
 }
 
 function setTheme(id) {

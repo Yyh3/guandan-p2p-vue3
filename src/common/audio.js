@@ -117,9 +117,35 @@ function sfxTrackUrl(name) {
   }
 }
 
-// 当前 SFX 用 <audio> 元素
+// ★ v0.4.9:SFX 真实采样 — Audio element pool
+//   - 旧版单 Audio element 复用:连续快速出牌 reset currentTime 会卡(0.05s 重置+play 跟不上)
+//   - 新版 4 池轮询:每个 track 4 个 Audio element,index++ 循环取下一个
+//     单次出牌最多 4 张同牌型,pool=4 足够覆盖"同时按 4 下的极限"
+//   - pool 也在 autoplay 解锁时重试(用户首次点击 unlock() 后触发未成功的 play)
+const SFX_POOL_SIZE = 4
 let sfxAudioEl = null
-let sfxAudioCache = new Map()  // 缓存:trackName → Audio element(避免重复创建)
+// 缓存:trackName → { elements: Audio[4], nextIndex: 0, unlockPending: Set<index> }
+let sfxAudioCache = new Map()
+
+function _getPoolEl(fileName) {
+  let entry = sfxAudioCache.get(fileName)
+  if (!entry) {
+    const elements = []
+    for (let i = 0; i < SFX_POOL_SIZE; i++) {
+      const el = new window.Audio()
+      el.src = sfxTrackUrl(fileName)
+      el.volume = sfxVol
+      el.preload = 'auto'
+      elements.push(el)
+    }
+    entry = { elements, nextIndex: 0, unlockPending: new Set() }
+    sfxAudioCache.set(fileName, entry)
+  }
+  // 轮询取下一个
+  const el = entry.elements[entry.nextIndex]
+  entry.nextIndex = (entry.nextIndex + 1) % SFX_POOL_SIZE
+  return { el, entry, slot: (entry.nextIndex + SFX_POOL_SIZE - 1) % SFX_POOL_SIZE }
+}
 
 function playMp3Sfx(trackName) {
   if (typeof window === 'undefined' || typeof window.Audio !== 'function') {
@@ -130,23 +156,39 @@ function playMp3Sfx(trackName) {
   const fileName = SFX_TRACKS[trackName]
   if (!fileName) return false
   try {
-    let el = sfxAudioCache.get(fileName)
-    if (!el) {
-      el = new window.Audio()
-      el.src = sfxTrackUrl(fileName)
-      el.volume = sfxVol
-      el.preload = 'auto'
-      sfxAudioCache.set(fileName, el)
-    }
-    // 重置播放位置 + play()(允许多次快速播放)
-    el.currentTime = 0
+    const { el, entry, slot } = _getPoolEl(fileName)
+    // 重置播放位置 + play()
+    // pool 模式下 currentTime reset 失败也会自然 play(浏览器跳过开头)
+    try { el.currentTime = 0 } catch (e) { /* ignore */ }
     const p = el.play()
     if (p && typeof p.catch === 'function') {
-      p.catch(() => { /* autoplay 阻止,不报错 */ })
+      p.catch(() => {
+        // autoplay 拒绝(unlock 之前)→ 标记这个 slot 待 unlock 后重试
+        entry.unlockPending.add(slot)
+      })
     }
     return true
   } catch (e) {
     return false  // 失败,降级合成
+  }
+}
+
+// ★ v0.4.9:unlock 时重试所有 pending 的 SFX play
+//   用户首次点击后 AudioContext 解锁,此时可以正常 play 之前被拒绝的 SFX
+function _retryPendingSfx() {
+  for (const [fileName, entry] of sfxAudioCache.entries()) {
+    if (!entry.unlockPending || entry.unlockPending.size === 0) continue
+    for (const slot of entry.unlockPending) {
+      const el = entry.elements[slot]
+      try {
+        el.currentTime = 0
+        const p = el.play()
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => { /* 仍失败,保留 slot */ })
+        }
+      } catch (e) { /* ignore */ }
+    }
+    entry.unlockPending.clear()
   }
 }
 

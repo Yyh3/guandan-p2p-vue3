@@ -393,5 +393,92 @@ console.log('\n=== 5.7 BUG-RC3-001 验证:network.requestPromoteToHost 存在 ==
     r === 0)
 }
 
+// ============================================================
+// v0.4.9:match:restart 事件 + restartMatch P2P 路径
+// ============================================================
+console.log('\n=== 8. match:restart 事件 + restartMatch P2P 集成 ===')
+{
+  // 直接验证 game.restartMatch 仍正常(已在 game.test.js 测过,这里再覆盖一次)
+  const { createGame } = await import('./guandan-game.js')
+  const g = createGame({ players: [{}, {}, {}, {}], seed: 100, difficulty: 'medium' })
+  g.deal()
+  // 模拟打完一局
+  g.getState().levelRank = 14
+  g.getState().finishedOrder = [0, 2, 1, 3]
+  g.applyRoundEnd()
+  let matchRestartEvent = null
+  g.on('matchRestart', (p) => { matchRestartEvent = p })
+  g.restartMatch({ levelRank: 15 })
+  // restartMatch 内会重新 deal() → emit 'matchRestart'
+  // 注意:game.restartMatch 内部 deal() 不会再次 emit(只在 restartMatch 顶部 emit 一次)
+  assert('★ restartMatch emit matchRestart 事件', matchRestartEvent !== null)
+  assert('★ matchRestart payload.levelRank=15', matchRestartEvent && matchRestartEvent.levelRank === 15)
+  // restartMatch 状态完整
+  const st = g.getState()
+  assert('★ restartMatch 后 levelRank=15', st.levelRank === 15)
+  assert('★ restartMatch 后 hands[0] 已发牌(27 张)', st.hands[0].length === 27)
+  assert('★ restartMatch 后 finishedOrder 清空', st.finishedOrder.length === 0)
+  assert('★ restartMatch 后 abandonedSeats 清空', st.abandonedSeats.length === 0)
+  assert('★ restartMatch 后 round 重置为 1', st.round === 1)
+}
+
+// 9. network emit message:MATCH_RESTART 路径已通过 useGameLogic 注册验证
+//    (测试 onP2PMatchRestart 走 net.on('message:MATCH_RESTART') 监听
+//     host 端 onRestartMatch 已 broadcast({ type: 'MATCH_RESTART', payload: { levelRank: 15 }})
+//     transport 收到后 _onTransportMessage 自动 emit('message:' + msg.type)
+//     joiner 端 onP2PMatchRestart 调 game.restartMatch,见 game.test.js §32 覆盖)
+
+// ============================================================
+// v0.4.9:storage.js DEFAULT_SETTINGS 新增 aiDifficulty 字段
+//   + AIView.vue 默认从 storage 读,SettiongsView 全局设置
+// ============================================================
+console.log('\n=== 10. storage.aiDifficulty 持久化(全局默认 AI 难度) ===')
+{
+  // Node 环境无 localStorage,需注入 mock
+  const store = new Map()
+  globalThis.localStorage = {
+    getItem: (k) => store.has(k) ? store.get(k) : null,
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  }
+  const storage = await import('./storage.js')
+  // ★ 1:DEFAULT_SETTINGS 含 aiDifficulty='medium'
+  const s = storage.getSettings()
+  assert('★ getSettings().aiDifficulty 默认 = medium', s.aiDifficulty === 'medium')
+  // 其它字段仍正确(防止我加字段时 typo)
+  assert('★ getSettings().bgmEnabled 默认 = true', s.bgmEnabled === true)
+  assert('★ getSettings().bgmStyle 默认 = energetic', s.bgmStyle === 'energetic')
+
+  // ★ 2:setSettings({ aiDifficulty: 'hard' }) 持久化 + get 回来
+  storage.setSettings({ aiDifficulty: 'hard' })
+  const s2 = storage.getSettings()
+  assert('★ setSettings({aiDifficulty:hard}) 后 get = hard', s2.aiDifficulty === 'hard')
+
+  // ★ 3:setSettings({ aiDifficulty: 'invalid' }) 合并默认值,允许非法值(由 UI 防)
+  //   (storage 只负责存,合法值由 SettingsView.setAiDifficulty 校验)
+  storage.setSettings({ aiDifficulty: 'invalid' })
+  const s3 = storage.getSettings()
+  // 注:storage.setSettings 用 spread {...DEFAULT_SETTINGS, ...s}
+  //     'invalid' 不是默认值,会保留 'invalid' (UI 层负责过滤)
+  assert('★ setSettings 透传 aiDifficulty 值(由 UI 校验合法值)', s3.aiDifficulty === 'invalid')
+
+  // ★ 4:模拟 SettingsView.setAiDifficulty('hard') + AIView.onMounted 读
+  storage.setSettings({ aiDifficulty: 'hard' })
+  const aiDefault = storage.getSettings().aiDifficulty
+  assert('★ AIView 模拟读取 storage.aiDifficulty = hard', aiDefault === 'hard')
+
+  // ★ 5:localStorage 损坏时 fallback 默认值(JSON.parse 抛错)
+  store.set('guandan_settings', '{invalid json')
+  const sBroken = storage.getSettings()
+  assert('★ localStorage 损坏时 getSettings() fallback 默认值', sBroken.aiDifficulty === 'medium')
+
+  // 清理:还原 medium + 移除 mock
+  store.clear()
+  delete globalThis.localStorage
+  const sClean = storage.getSettings()
+  assert('★ 清理后 storage.aiDifficulty 还原 medium', sClean.aiDifficulty === 'medium')
+}
+
 console.log(`\n========== v047-rc2-regression 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
 setTimeout(() => process.exit(fail > 0 ? 1 : 0), 100)

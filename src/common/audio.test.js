@@ -275,5 +275,80 @@ console.log('\n=== 13. SFX 资源存在性:占位 MP3 已生成 ===')
   }
 }
 
+console.log('\n=== 14. SFX audio pool:多实例轮询 + autoplay unlock retry ===')
+{
+  // ★ v0.4.9:audio.js 把 sfxAudioCache 从 Map<file, Audio> 单实例改成 Map<file, {elements[4], nextIndex}>
+  // 验证 Node 环境可注入 mock Audio + 测 pool 行为 + unlock retry
+  // 真实浏览器:window.Audio 不可用 → playMp3Sfx 早退,pool 不创建
+  const origAudio = globalThis.Audio
+  const origWindow = globalThis.window
+  // 构造 mock Audio class,记录所有创建
+  const createdEls = []
+  const playCalls = []
+  class MockAudio {
+    constructor() {
+      this.src = ''
+      this.volume = 0
+      this.preload = ''
+      this.currentTime = 0
+      this._rejected = false
+      createdEls.push(this)
+    }
+    play() {
+      playCalls.push(this)
+      // 模拟 autoplay 拒绝(只有 rejectNoUnlock=true 的元素才 reject)
+      if (this._rejected) {
+        return Promise.reject(new Error('autoplay blocked'))
+      }
+      return Promise.resolve()
+    }
+    set src(v) { this._src = v }
+    get src() { return this._src }
+  }
+  globalThis.Audio = MockAudio
+  globalThis.window = { Audio: MockAudio }
+
+  // 重置状态(避免上轮测试遗留)
+  try { audio.destroyAudio() } catch (e) { /* ignore */ }
+  audio.setSfxMode('real')
+
+  // ★ 测试 1:连续 5 次 playSfxForType('SINGLE', 1) → 5 次调 playMp3Sfx('SINGLE')
+  //   pool=4 → 第一次 play 创建 4 个,后 4 次轮询不创建新的
+  const beforeCreate = createdEls.length
+  audio.playSfxForType('SINGLE', 1)
+  audio.playSfxForType('SINGLE', 1)
+  audio.playSfxForType('SINGLE', 1)
+  audio.playSfxForType('SINGLE', 1)
+  const afterCreate4 = createdEls.length - beforeCreate
+  eq('★ 连续 4 次 playSfxForType(SINGLE) 创建一个 pool = 4', afterCreate4, 4)
+  // 第 5 次:轮询到 slot 0,复用,不再创建
+  audio.playSfxForType('SINGLE', 1)
+  const afterCreate5 = createdEls.length - beforeCreate
+  eq('★ 第 5 次 playSfxForType(SINGLE) 复用 pool slot,不再创建新 Audio', afterCreate5, 4)
+
+  // ★ 测试 2:不同 trackName 各自一个 pool(SINGLE 和 PAIR 共 8 个 Audio)
+  const beforeNew = createdEls.length
+  audio.playSfxForType('PAIR', 2)
+  audio.playSfxForType('PAIR', 2)
+  audio.playSfxForType('PAIR', 2)
+  audio.playSfxForType('PAIR', 2)
+  const afterPair = createdEls.length - beforeNew
+  eq('★ PAIR 也是独立 pool,4 次创建 4 个', afterPair, 4)
+  eq('★ SINGLE+PAIR 独立 pool,共 8 个 Audio 实例', createdEls.length - beforeCreate, 8)
+
+  // ★ 测试 3:play 调用次数
+  const playsBefore = playCalls.length
+  audio.playSfxForType('SINGLE', 1)
+  audio.playSfxForType('SINGLE', 1)
+  eq('★ 两次 playSfxForType 调用 2 次 .play()', playCalls.length - playsBefore, 2)
+
+  // 还原环境
+  audio.setSfxMode('synth')
+  if (origAudio === undefined) delete globalThis.Audio
+  else globalThis.Audio = origAudio
+  if (origWindow === undefined) delete globalThis.window
+  else globalThis.window = origWindow
+}
+
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
 if (fail > 0) process.exit(1)

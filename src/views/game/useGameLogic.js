@@ -945,6 +945,31 @@ function onAutoFindBest() {
     } catch (e) { console.warn('applyPass err', e) }
   }
   // ★ 静态审查 BUG-A 修复:远端 ROUND_END 调 applyRoundEnd 时抑制再次广播
+  // ★ v0.4.9:joiner 端 P2P MATCH_RESTART 处理器
+  //   host 端 onRestartMatch 已经 broadcast MATCH_RESTART,joiner 端
+  //   network._onTransportMessage 自动 emit('message:MATCH_RESTART')
+  //   joiner 调 game.restartMatch 清状态 + 重新发牌 + 刷 UI
+  //   防自循环:host 自己也 emit 了,但 onRestartMatch 用 isNetworkHost 判定
+  //   只在 P2P 模式 broadcast,joiner 端不会重复 broadcast
+  function onP2PMatchRestart(payload) {
+    if (!payload || !game.value) return
+    if (!game.value.restartMatch) return
+    const lr = (typeof payload.levelRank === 'number') ? payload.levelRank : 15
+    // 调 game.restartMatch 统一清状态 + 重新发牌
+    game.value.restartMatch({ levelRank: lr })
+    // 刷 UI refs
+    const st = game.value.getState()
+    levelRank.value = st.levelRank
+    if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
+      myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+      selected.value = new Array(myHand.value.length).fill(false)
+      selectedColKeys.value = {}
+    }
+    phase.value = st.phase
+    isRestartAfterA.value = false  // 消费掉
+    startDealAnimation()
+  }
+
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false
   function onP2PRoundEnd(payload) {
@@ -1170,6 +1195,8 @@ function onAutoFindBest() {
       onNet('message:PLAY', onP2PPlay)
       onNet('message:PASS', onP2PPass)
       onNet('message:ROUND_END', onP2PRoundEnd)
+      // ★ v0.4.9:P2P 联机 host 发"重开一局"广播
+      onNet('message:MATCH_RESTART', onP2PMatchRestart)
       onNet('message:STATE_SNAPSHOT', onP2PStateSnapshot)
       onNet('message:AI_TAKEOVER', onP2PAITakeover)
       // ★ 静态审查 BUG-C 修复:host 端心跳超时只本地 emit 'ai:takeover' + 广播

@@ -40,6 +40,10 @@ const DEFAULT_SETTINGS = {
   sfxVolume: 0.7,   // 0..1
   // v3.8 补:音乐风格持久化(verifier P2 复查时发现的尾巴)
   bgmStyle: 'energetic', // 'energetic' | 'calm'
+  // ★ v0.4.9:全局默认 AI 难度(SettingsView 设置 → AIView / 联机房间默认读这个)
+  //   之前 AIView.vue 写死 ref('medium'),每次刷新重置 → 用户上次选 hard 被覆盖
+  //   现在持久化到 storage,AIView onMounted 从 storage.getSettings().aiDifficulty 读
+  aiDifficulty: 'medium', // 'medium' | 'hard'
 }
 
 function getSettings() {
