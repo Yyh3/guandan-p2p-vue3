@@ -58,6 +58,8 @@ export function useGameLogic(opts = {}) {
   const levelLabel = ref('2')
   const nextLevelLabel = ref('2')
   const levelUp = ref(0)
+  // ★ v0.4.9:过 A 标志(本轮打 A 升级后才为 true)→ GameView 按钮文案切换
+  const isRestartAfterA = ref(false)
   const multiplier = ref(1)
   // ★ v0.4.9:AI 难度(从 game.state.difficulty 读,默认 'medium')
   const gameDifficulty = ref(opts.difficulty || 'medium')
@@ -833,6 +835,48 @@ function onAutoFindBest() {
     selectedColKeys.value = {}
     startDealAnimation()
   }
+
+  // ★ v0.4.9:过 A 后重开一局(逻辑接入 docs/restart-after-a-flow.md)
+  //   AI/单机模式直接调 game.restartMatch;P2P 模式由 host 发起,广播 MATCH_RESTART
+  //   当前实现:仅单机模式 + AI 模式;P2P MATCH_RESTART 广播 TODO(下一迭代)
+  function onRestartMatch() {
+    if (isP2PMode.value) {
+      // TODO:P2P MATCH_RESTART 广播 + 等所有 joiner ack 后统一 restartMatch
+      // 当前简化:本机先 restart,joiner 暂不同步
+      if (isNetworkHost.value) {
+        if (game.value && game.value.restartMatch) {
+          game.value.restartMatch({ levelRank: 15 })
+          // 广播(joiner 端收到后也 restart)
+          try {
+            net.broadcast({ type: 'MATCH_RESTART', payload: { levelRank: 15, ts: Date.now() } })
+          } catch (e) { /* 离线或非 host 时 noop */ }
+        }
+      }
+      return
+    }
+    // AI/单机模式:直接调
+    if (game.value && game.value.restartMatch) {
+      game.value.restartMatch({ levelRank: 15 })
+    }
+    // 刷新 UI refs
+    const st = game.value.getState()
+    levelRank.value = st.levelRank
+    myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+    selected.value = new Array(myHand.value.length).fill(false)
+    selectedColKeys.value = {}
+    phase.value = st.phase
+    isRestartAfterA.value = false  // 消费掉,重置标志
+    startDealAnimation()
+  }
+
+  // ★ v0.4.9:暴露主按钮动作分发(配合 GameView 按钮文案切换)
+  function onPrimaryResultAction() {
+    if (isRestartAfterA.value) {
+      onRestartMatch()
+    } else {
+      onNext()
+    }
+  }
   function showMenu() { /* 路由跳转留给组件层 */ }
   function onChat() { showChatPanel.value = true }
   function onSeatClick(seat, e) { /* 占位 */ }
@@ -930,6 +974,10 @@ function onAutoFindBest() {
     if (payload.newLevelRank) {
       levelRank.value = payload.newLevelRank
       nextLevelLabel.value = RANK_LABEL[payload.newLevelRank]
+    }
+    // ★ v0.4.9:同步过 A 标志(host 权威)
+    if (typeof payload.isRestartAfterA === 'boolean') {
+      isRestartAfterA.value = payload.isRestartAfterA
     }
     phase.value = 'finished'
     stopTimer()
@@ -1193,6 +1241,7 @@ function onAutoFindBest() {
     isDealing, hintCards, bombFx, floatingPasses, playedHistory,
     suitFilter, isShaking, lastCardCounts, showNickToast, showChatPanel,
     chatPhraseToast, hostMigrationToast, hostMigrationBadge, urgent,
+    isRestartAfterA,  // ★ v0.4.9:过 A 标志
     isP2PMode, selfSeat,
     // computed
     myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
@@ -1209,5 +1258,7 @@ function onAutoFindBest() {
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
     // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
     commitPlay, commitPass,
+    // ★ v0.4.9:过 A 后重开
+    onRestartMatch, onPrimaryResultAction,
   }
 }

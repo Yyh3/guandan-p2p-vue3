@@ -140,10 +140,11 @@
     </div>
 
     <!-- 结算遮罩 -->
-    <div v-if="phase === 'finished'" class="result-mask" @click.self="onNext">
+    <div v-if="phase === 'finished'" class="result-mask" @click.self="onPrimaryResultAction">
       <div class="result-card">
-        <h2 class="result-title">本局结束</h2>
-        <p class="result-meta">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
+        <h2 class="result-title">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
+        <p class="result-meta" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
+        <p class="result-meta" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局(levelRank 重置为 2)</p>
         <div class="result-list">
           <div
             v-for="(seat, i) in finishedOrder"
@@ -158,7 +159,10 @@
         </div>
         <div class="result-actions">
           <button class="r-btn ghost" @click="onBack">退出</button>
-          <button class="r-btn primary" @click="onNext">下一局</button>
+          <!-- ★ v0.4.9:isRestartAfterA 时按钮文案/动作切到「重开一局」 -->
+          <button class="r-btn primary" @click="onPrimaryResultAction">
+            {{ isRestartAfterA ? '重开一局' : '下一局' }}
+          </button>
         </div>
       </div>
     </div>
@@ -292,6 +296,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
+  onPrimaryResultAction, onRestartMatch, isRestartAfterA,  // ★ v0.4.9
   onIcon, initGame,
 } = useGameLogic({
   mainActionsRef,

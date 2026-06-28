@@ -359,6 +359,12 @@ function createGame(opts) {
     // v3.x P2-27 修复(E-6):tributeInfo 接受 levelUp 参数,严格"双下不贡"规则下
     //   levelUp=0(实际 2v2 不可达)会返回 needTribute:false。让字段有真正判断意义。
     const tribute = E.tributeInfo(ranks, teams, levelUp)
+    // ★ v0.4.9:记录升级前的 levelRank,用于判定"过 A"重开
+    //   严格规则:打 A(previousLevelRank=14)且本轮胜方继续升级(levelUp>0)→ 本轮过 A
+    //   - previousLevelRank=14 + levelUp=0 → 本轮没升级,继续打 A
+    //   - previousLevelRank=15(2) 升到 14(A) → 只是下一局打 A,不算过 A
+    const previousLevelRank = state.levelRank
+    const isRestartAfterA = previousLevelRank === 14 && levelUp > 0
     state.levelUp = levelUp
     state.tribute = tribute
     // v3.x P2-22 修复(G-5):升级时更新双方 teamLevels(简化:双方同步)
@@ -376,8 +382,16 @@ function createGame(opts) {
     const newLevelRank = E.getLevelRank(state.levelRank, levelUp)
     state.teamLevels = [newLevelRank, newLevelRank]
     state.levelRank = newLevelRank
+    // ★ v0.4.9:过 A 标志存到 state,getState() 可读 + 后续 restartMatch 消费
+    state.isRestartAfterA = isRestartAfterA
     state.round++
-    emit('roundEnd', { ranks, levelUp, tribute, newLevelRank: state.levelRank, teamLevels: state.teamLevels.slice() })
+    emit('roundEnd', {
+      ranks, levelUp, tribute,
+      previousLevelRank,
+      newLevelRank: state.levelRank,
+      teamLevels: state.teamLevels.slice(),
+      isRestartAfterA,  // ★ v0.4.9:过 A 标志
+    })
   }
 
   // ============ 下一局(发新牌) ============
@@ -385,10 +399,44 @@ function createGame(opts) {
     deal()
   }
 
+  // ★ v0.4.9:重开一局(过 A 后) — 清空本轮状态,levelRank 回到 15(打 2)
+  //   参考 docs/restart-after-a-flow.md §"重开一局动作"
+  //   - 清空 finishedOrder / tableCards / lastPlay / trickHistory / passCount
+  //   - 清空 abandonedSeats(新局从干净状态开始)
+  //   - 重置 levelRank / teamLevels 到指定值(默认 15)
+  //   - 重置 round 到 1
+  //   - 重新洗牌发牌(deal)
+  //   - emit('matchRestart') 让 UI 弹"重开一局"提示
+  //   保留:座位分配、玩家信息(room 范围)
+  function restartMatch({ levelRank: newLevelRank = 15 } = {}) {
+    state.levelRank = newLevelRank
+    state.teamLevels = [newLevelRank, newLevelRank]
+    state.round = 1
+    state.hands = [[], [], [], []]
+    state.tableCards = []
+    state.lastPlay = null
+    state.currentPlayer = 0
+    state.firstPlayer = 0
+    state.leaderPlayer = 0
+    state.trickHistory = []
+    state.finishedOrder = []
+    state.abandonedSeats = []
+    state.passCount = 0
+    state.tribute = null
+    state.ghost = null
+    state.levelUp = 0
+    state.phase = 'dealing'  // 立即置为 dealing,deal() 后会变 playing
+    state.lastAppliedRoundId = null
+    emit('matchRestart', { levelRank: newLevelRank })
+    // 重新发牌(状态机进 playing)
+    deal()
+  }
+
   return {
     on, off, emit,
     getState,
     deal, nextRound,
+    restartMatch,  // ★ v0.4.9:过 A 后重开
     playerPlay, playerPass,
     // ★ v3.8 P1:无校验同步接口,4-tab 联机用
     applyPlay, applyPass, applyRoundEnd,
@@ -421,13 +469,23 @@ function createGame(opts) {
       // round 不在此处自增(round++ 在 host 端的 applyRoundEnd 走),权威语义:
       // host 端本地 round 已经走完一轮并 round++,joiner 端只接收结果
       if (typeof p.round === 'number') state.round = p.round
+      // ★ v0.4.9:isRestartAfterA — host 权威计算(joiner 不重复推断)
+      //   payload.isRestartAfterA 缺失时:回退到 host 已经写在 state.levelUp /
+      //   levelRank 上的值(快照已经应用过),但更稳的判断是
+      //   previousLevelRank + levelUp 都在 payload 里(都要在 p 里)
+      const isRestart = typeof p.isRestartAfterA === 'boolean'
+        ? p.isRestartAfterA
+        : (typeof p.previousLevelRank === 'number' && typeof p.levelUp === 'number'
+            && p.previousLevelRank === 14 && p.levelUp > 0)
       emit('roundEnd', {
         ranks: state.finishedOrder.slice(),
         levelUp: state.levelUp,
         tribute: state.tribute,
+        previousLevelRank: p.previousLevelRank,
         newLevelRank: state.levelRank,
         teamLevels: state.teamLevels.slice(),
         roundId: rid,
+        isRestartAfterA: isRestart,  // ★ v0.4.9
       })
     },
     // ★ v3.8 P1:运行时把某 seat 加入 AI 列表(断线接管)

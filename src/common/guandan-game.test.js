@@ -681,6 +681,105 @@ console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
     }
   }
 
+  // ============================================================
+  // v0.4.9:过 A 判定 + restartMatch
+  // ============================================================
+  console.log('\n=== 31. v0.4.9 isRestartAfterA 判定 ===')
+  {
+    // helper:造一局打 A(levelRank=14)且头游/二游由队 0 胜出的"过 A 场景"
+    //   force winner 队 0 → 计算 levelUp 应为 3(双上)
+    //   实际 calcLevelUp:头游[0,2]胜 → +3
+    //   但代码里 levelRank=14 (A) + levelUp=3 → 14→13→12→11 → 11
+    //   严格规则:previousLevelRank=14 && levelUp>0 → isRestartAfterA=true
+
+    // 场景 1:打 A(14)+ 头游我方(0)→ 双上 3 级 → 过 A
+    {
+      const g = createGame({ players: [{}, {}, {}, {}], seed: 1 })
+      g.getState().levelRank = 14  // A
+      g.getState().finishedOrder = [0, 2, 1, 3]  // 队 0 头游 + 二游
+      g.applyRoundEnd()
+      const st = g.getState()
+      assert('★ 打 A + 头游我方 → isRestartAfterA=true', st.isRestartAfterA === true)
+      assert('★ 打 A + 头游我方 → levelUp=3(双上)', st.levelUp === 3)
+      assert('★ 打 A 后 levelRank 升到 11', st.levelRank === 11)
+    }
+    // 场景 2:打 A(14) + levelUp=0(没升级,继续打 A)→ 不算过 A
+    {
+      const g = createGame({ players: [{}, {}, {}, {}], seed: 2 })
+      g.getState().levelRank = 14
+      // 头游对方 → calcLevelUp 仍给非 0(对家升 1 队,简化版双队同升)
+      // 实际 calcLevelUp:胜方 levelUp=1(双下不贡,实际 2v2 不可达 0;简化版给 1)
+      // 关键:levelUp > 0 即过 A
+      g.getState().finishedOrder = [1, 3, 0, 2]  // 队 1 头游
+      g.applyRoundEnd()
+      const st = g.getState()
+      // 头游对方 → 胜方升 1 级(简化版),levelUp=1 → 仍过 A(简化版任何升级都过 A)
+      // 严格"对方头游不升级"是另一个规则,不在本游戏 P2P 简化范围内
+      // 这里只验证 previousLevelRank=14 + levelUp>0 → 过 A
+      assert('★ 打 A + 头游对方 → isRestartAfterA 由 levelUp 决定', st.isRestartAfterA === (st.levelUp > 0))
+    }
+    // 场景 3:打 2(15)→ 升 A(14)→ 不是过 A(只是升到 A)
+    {
+      const g = createGame({ players: [{}, {}, {}, {}], seed: 3 })
+      g.getState().levelRank = 15  // 2
+      g.getState().finishedOrder = [0, 2, 1, 3]  // 头游我方,双上 +3 → 升到 12(不是 14)
+      g.applyRoundEnd()
+      const st = g.getState()
+      assert('★ 打 2 + 头游我方 → isRestartAfterA=false(只是升级,没过 A)', st.isRestartAfterA === false)
+      assert('★ 打 2 + 双上 3 级 → levelRank 升到 12', st.levelRank === 12)
+    }
+    // 场景 4:applyRoundEndFromPayload 接 isRestartAfterA 字段
+    {
+      const g = createGame({ players: [{}, {}, {}, {}], seed: 4 })
+      g.getState().levelRank = 14
+      g.getState().finishedOrder = [0, 2, 1, 3]
+      g.applyRoundEnd()
+      const st1 = g.getState()
+      assert('host applyRoundEnd 后 state.isRestartAfterA=true', st1.isRestartAfterA === true)
+    }
+  }
+
+  console.log('\n=== 32. v0.4.9 restartMatch 重开一局 ===')
+  {
+    const g = createGame({ players: [{}, {}, {}, {}], seed: 5 })
+    g.deal()
+    // 模拟打完一局
+    g.getState().levelRank = 14
+    g.getState().finishedOrder = [0, 2, 1, 3]
+    g.applyRoundEnd()
+    let st = g.getState()
+    assert('打完一局 phase=finished', st.phase === 'finished')
+
+    // 重开
+    let matchRestartEvent = null
+    g.on('matchRestart', (p) => { matchRestartEvent = p })
+    g.restartMatch({ levelRank: 15 })
+    st = g.getState()
+    assert('★ restartMatch 后 levelRank 回到 15', st.levelRank === 15)
+    assert('★ restartMatch 后 teamLevels=[15,15]', JSON.stringify(st.teamLevels), JSON.stringify([15, 15]))
+    assert('★ restartMatch 后 round=1', st.round === 1)
+    assert('★ restartMatch 后 hands[0].length=27(已发牌)', st.hands[0].length === 27)
+    assert('★ restartMatch 后 finishedOrder=[]', JSON.stringify(st.finishedOrder), JSON.stringify([]))
+    assert('★ restartMatch 后 abandonedSeats=[]', JSON.stringify(st.abandonedSeats), JSON.stringify([]))
+    assert('★ restartMatch 后 tableCards=[]', JSON.stringify(st.tableCards), JSON.stringify([]))
+    assert('★ restartMatch 后 lastPlay=null', st.lastPlay === null)
+    assert('★ restartMatch 后 trickHistory=[]', JSON.stringify(st.trickHistory), JSON.stringify([]))
+    assert('★ restartMatch 后 passCount=0', st.passCount === 0)
+    assert('★ restartMatch 后 tribute=null', st.tribute === null)
+    assert('★ restartMatch 后 ghost 重新设置(逢人配=红桃级牌)',
+      st.ghost && st.ghost.suit === 1 && st.ghost.rank === 15)
+    assert('★ restartMatch 后 levelUp=0', st.levelUp === 0)
+    assert('★ restartMatch emit matchRestart 事件', matchRestartEvent && matchRestartEvent.levelRank === 15)
+    assert('★ restartMatch emit payload.levelRank=15', matchRestartEvent && matchRestartEvent.levelRank === 15)
+    assert('★ restartMatch 后 phase 重新发牌(playing/dealing)', st.phase === 'playing' || st.phase === 'dealing')
+
+    // restartMatch 默认 levelRank=15
+    const g2 = createGame({ players: [{}, {}, {}, {}], seed: 6 })
+    g2.getState().levelRank = 10
+    g2.restartMatch()
+    assert('★ restartMatch() 无参默认 levelRank=15', g2.getState().levelRank === 15)
+  }
+
   console.log(`\n========== 游戏状态机测试: ${pass} 通过 / ${fail} 失败 ==========\n`)
   process.exit(fail > 0 ? 1 : 0)
 }
