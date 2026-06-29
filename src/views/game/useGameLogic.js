@@ -1318,6 +1318,10 @@ function onAutoFindBest() {
       //   修法:同时监听本地 'ai:takeover' 事件
       onNet('ai:takeover', onP2PAITakeover)
       onNet('host:migrated', onHostMigrated)
+      // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 'host:lost' — host 崩溃/断电
+      //   业务事件(V0416-04 修复:网络层 _DISCONNECT payload.seat=-1 自动 emit),
+      //   joiner 端明确提示"房主已断开,请重新开房"+ 跳回首页,不再静默卡住。
+      //   实际 router.push 在 GameView / GameViewDesktop 组件层做(本 composable 不用 router)
       // ★ v3.x P2-29(N-3 闭环):joiner 端监听 host 离开,调 requestPromoteToHost 兜底
       onNet('peer:leave', onPeerLeave)
       // v0.4.8 N-2:AI 补位 — host 端监听 peer:join,移除该 seat 的 AI 标记

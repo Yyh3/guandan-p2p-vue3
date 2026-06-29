@@ -267,6 +267,14 @@ onMounted(() => {
       mqLandscape.addListener(updateLandscape)
     }
   }
+  // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 host:lost — host 崩溃/断电
+  //   业务事件(网络层 _DISCONNECT payload.seat=-1 自动 emit)。joinerr 端立即跳回首页
+  //   + 提示"房主已断开连接,请重新开房"。注意只有 joiner 端触发,host 自己的 _DISCONNECT
+  //   走的是 host 端清理逻辑(isHostFlag=true 时不会 emit host:lost)。
+  //   兜底:RoomView 也有同样的 host:lost 处理,这里 GameView 退出时不会重复弹。
+  net.on('host:lost', () => {
+    router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
+  })
 })
 onUnmounted(() => {
   if (mqLandscape) {
@@ -275,6 +283,10 @@ onUnmounted(() => {
     } else if (mqLandscape.removeListener) {
       mqLandscape.removeListener(updateLandscape)
     }
+  }
+  // ★ v0.4.17 对抗性审查 (V0416-04):清理 host:lost 监听器,避免残留导致下次进入重复跳页
+  if (typeof net.off === 'function') {
+    net.off('host:lost')
   }
 })
 

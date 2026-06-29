@@ -362,8 +362,23 @@ async function initNetwork() {
   })
   // ★ v2.1 P1 host 主动踢人:host 端 transport forceDisconnectSeat → _DISCONNECT → peer:leave
   //   host 自己调用后立即在 UI 上把该 seat 显示"等待加入" (因为对端会被踢 + release)
-  onNet('peer:leave', ({ seat }) => {
-    if (seat != null) peers.delete(seat)
+  // ★ v0.4.17 对抗性审查 (V0416-03):joiner 端 host(seat=0)离开时必须跳回首页 + 提示
+  //   旧版只 peers.delete(0),joiner 还留在房间页但没人能开局 → "无 host 房间"死锁。
+  //   产品定义:房间页 host 退出即房间解散(因为 RoomView 没有 lobby 级 host 迁移 —
+  //   lobby 迁移需要更新 isHost/mySeat/peers/net.selfSeat/isHostFlag,实现成本大,
+  //   而产品语义上 host 离开大厅 = 房间解散更符合用户预期)。
+  //   实现:joiner 端检测 seat=0,弹提示 + 跳首页;host 自己也会走这路径(自己退自己删)。
+  onNet('peer:leave', ({ seat, reason }) => {
+    if (seat == null) return
+    peers.delete(seat)
+    if (seat === 0) {
+      // host 离开 → 房间解散
+      const isMyself = (() => { try { return net.getSelfSeat && net.getSelfSeat() === 0 } catch { return false } })()
+      if (isMyself) return  // host 自己退,已经在 showMenu 里处理了,这里不重复跳页
+      cleanupRoomListeners()
+      try { net.close() } catch (e) { /* swallow */ }
+      router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已退出,房间解散'))
+    }
   })
   // ★ v2.1 P1 host 主动踢人:joiner 端收到 self:kicked → 跳 /?force_disconnected=1
   onNet('self:kicked', ({ reason }) => {

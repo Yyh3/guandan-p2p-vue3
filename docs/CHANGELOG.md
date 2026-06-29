@@ -4,6 +4,59 @@
 
 ---
 
+## v0.4.17 (2026-06-29) — v0.4.16 对抗性复查 5 项 V0416 真 bug 修复 + 1 项误报澄清(39 套件 / 1927 单测全过)
+
+> v0.4.16 静态复查 6 项问题里 1 项误报 / 5 项真问题,本版本集中修 5 项 + 1 项误报澄清:
+> 1. **V0416-02 (P0)** `network.js rebuildAsHost()` 顺序修复 — 旧版 close 旧 transport → 用新 transport 广播(无 client) → joiner 永远收不到新 host 地址。新流程:先起新 server → 用**旧 transport 引用**广播 → close 旧 → 切换
+> 2. **V0416-03 (P1)** RoomView `onNet('peer:leave')` 检测 `seat===0`(host 离开) → joiner 立即跳首页 + 提示"房主已退出,房间解散"
+> 3. **V0416-04 (P1)** 网络层 `_DISCONNECT payload.seat===-1` (joiner 端 ws.onclose) → emit `'host:lost'` 业务事件;GameViewDesktop 监听 → joiner 跳首页 + 提示
+> 4. **V0416-06 (P2)** README 测试数字统一(删除 1887 作当前基线描述 + 测试覆盖段 v0.4.16 → 1889)
+> 5. **V0416-05 (误报澄清)** 审查报告称 RoomView `netStatusClass` 有重复空字符串判断 — **实际代码用 emoji `🟢`/`🔴`**,新版本段固化这个事实
+> 6. **V0416-01 (P0 未做)** 修复未合入默认 master 分支 — 下个 release 必须 fast-forward master
+
+### A. V0416-02 rebuildAsHost 顺序关键修复(WS / AndroidWs 真机 host 迁移闭环)
+
+**问题**: 旧版顺序 `close 旧 → 起新 → sendMessage 用新 transport` 但新 server 上没 client,广播消息发到空客户端集合,joiner 永远收不到。
+
+**修复**: 关键顺序 — `起新 → 算地址 → 用旧 transport 引用广播 → close 旧 → 切换`。
+
+**测试**: `v0417-adversarial-fixes.test.js` §2 — 9 case(顺序断言:open newTransport < broadcast < close old < switch)
+
+### B. V0416-03 RoomView 房间页 host 退出 joiner 处理
+
+**问题**: RoomView `onNet('peer:leave')` 只 `peers.delete(seat)`,joiner 还留在房间页但没人能开局。
+
+**修复**: 加 seat===0 检测分支,joiner 端 cleanup + net.close + router.push 首页。
+
+**测试**: `v0417-adversarial-fixes.test.js` §3 — 5 case
+
+### C. V0416-04 网络层 _DISCONNECT → host:lost 业务事件
+
+**问题**: WS / AndroidWs joiner 端 ws.onclose 触发 `_DISCONNECT payload.seat===-1`,但业务层 `peer:leave` 只看 `from===0` 路径 → joiner 端 client 关闭不产生业务事件 → "host 崩溃"静默卡住。
+
+**修复**:
+1. `network.js _onTransportMessage._DISCONNECT` 分支: 检测 `payload.seat===-1 && !isHostFlag` → emit `'host:lost'`
+2. `GameViewDesktop.onMounted`: `net.on('host:lost', () => router.push('/?force_disconnected=1&reason=...'))`
+3. `GameViewDesktop.onUnmounted`: `net.off('host:lost')` 清理
+
+**测试**: `v0417-adversarial-fixes.test.js` §4 — 8 case
+
+### D. V0416-05 误报澄清 + E. V0416-06 README 一致性
+
+- V0416-05: 实际代码用 emoji `🟢`/`🔴`,不是空字符串。v0417 §5 固化
+- V0416-06: README "完整工程化"段从 1887 → 1889 + 测试覆盖段 v0.4.16 补 1889
+
+### F. V0416-01 修复未合入 master — 已知未做
+
+v0.4.17 修复仍在 `codex/ui-mobile-joker-card-preview` 分支,`master` HEAD 仍是 v0.4.14。下个 release 必须 fast-forward master(或创建 PR)。
+
+### 测试基线
+
+- **1927 通过 / 0 失败**(v0.4.16 的 1889 + v0417-adversarial-fixes 38 case)
+- `npm run build` ✓ 1.53s
+
+---
+
 ## v0.4.16 (2026-06-29) — v0.4.14 对抗性复查 5 项 V0414 真 bug 修复(38 套件 / 1889 单测全过)
 
 > v0.4.14 静态复查 6 项问题里 1 项误报 / 5 项真问题,本版本集中修 4 项 P0/P1/P2 + 1 项留 v0.4.17 follow-up:

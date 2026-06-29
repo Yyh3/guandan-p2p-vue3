@@ -292,7 +292,7 @@ console.log('\n=== 8. V0410-08: SettingsView 从 package.json 读版本号 ===')
   // 行为验证:package.json 实际版本号
   const path = await import('path')
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'))
-  eq('package.json 当前版本', pkg.version, '0.4.16')
+  eq('package.json 当前版本', pkg.version, '0.4.17')
 }
 
 console.log(`\n========== v0410-bug-fixes 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

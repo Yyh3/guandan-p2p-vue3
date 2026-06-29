@@ -449,6 +449,17 @@ function _handleHostMessage(msg) {
       // 可选:立即触发 peer:leave(但 joiner 端 close 时也会触发,避免重复)
       // emit('peer:leave', { seat })
     }
+    // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端 ws.onclose (payload.seat === -1 表示
+    //   没有具体 seat — 即 client 端连接关闭) → emit 'host:lost' 让业务层响应。
+    //   旧版只有 _DISCONNECT with valid seat 触发 peer:leave,joiner 端 client 关闭
+    //   (host 崩溃/断电/被杀进程) 不产生业务事件 → joiner 不知道 host 走了,
+    //   只能等 6-8s 心跳超时,而且即使超时也只是看 STALE 状态,不会跳页或提示。
+    //   现在 emit host:lost 一次,GameView/RoomView 监听后明确提示 + 跳回首页。
+    //   防御:如果是 host 自己被踢/自己 close,不应该 emit host:lost(避免提示自己) —
+    //   host 端 isHostFlag=true,所以下面条件天然排除。
+    if (msg.payload && msg.payload.seat === -1 && !isHostFlag && !_kickedSeats.has(-1)) {
+      emit('host:lost', { reason: 'client_disconnect', ts: Date.now() })
+    }
   }
 }
 
@@ -1255,51 +1266,70 @@ async function rebuildAsHost() {
   if (transport.constructor.name === 'BroadcastChannelTransport') {
     return { ok: true, skipped: 'bc' }
   }
-  // WS / AndroidWs:关 client + 起 server
-  // 注意:_createTransport() 创建一个新的 transport 实例(用同一个 factory)
-  //   新实例走 server mode;旧 client 实例 close。
+  // ★ v0.4.17 对抗性审查 (V0416-02):WS / AndroidWs 拓扑关键修复
+  //   旧流程:close 旧 client → 起新 server → sendMessage(用新 transport 变量)
+  //     → 但 sendMessage 走新 transport.sendMessage,而新 transport 是新 server,此时还
+  //     没有 client 连接过来(其他 joiner 还连在旧 host server 上)→ 广播消息发到空客户端集合,
+  //     其他 joiner 永远收不到 TRANSPORT_REBUILD_ANNOUNCE → 无法自动重连到新 host。
+  //   新流程(关键顺序):
+  //     1) 先创建新 transport 实例(不开 server,避免占位冲突)
+  //     2) 起新 server open('self') → 拿到 newHostAddress
+  //     3) 用**旧 transport 引用**(连旧 host server 的 client)广播 TRANSPORT_REBUILD_ANNOUNCE
+  //        — 此时旧 host server 还活着,会转发给其他 joiner → joiner 收到新地址立即 connect
+  //     4) 把新 transport 挂到全局 transport 变量
+  //     5) close 旧 transport
+  //     6) emit + 重启心跳
   let newTransport
   try {
     newTransport = _createTransport()
   } catch (e) {
     return { ok: false, error: 'transport 工厂失败: ' + (e?.message || e) }
   }
-  // 1) 关闭旧 client transport
-  try { await transport.close() } catch (e) { /* swallow */ }
-  // 2) 起 server mode
+  // 1) 起新 server,拿地址
   try {
     // 复用原 port(host 通常用 8848;若是 ephemeral 测试,这里会失败 — 测试环境另行 mock)
     await newTransport.open('self')
   } catch (e) {
     return { ok: false, error: '新 transport open(self) 失败: ' + (e?.message || e) }
   }
-  // 3) 把新 transport 挂到 network.js 的 transport 变量 + 挂 _onTransportMessage
-  transport = newTransport
-  transport.onMessage(_onTransportMessage)
-  // 4) 取新 IP:port
-  const newPort = (typeof transport.getBoundPort === 'function') ? transport.getBoundPort() : null
+  // 2) 计算新 IP:port
+  const newPort = (typeof newTransport.getBoundPort === 'function') ? newTransport.getBoundPort() : null
   let newIp = null
-  if (typeof transport.getHostIp === 'function') {
-    newIp = transport.getHostIp()
+  if (typeof newTransport.getHostIp === 'function') {
+    newIp = newTransport.getHostIp()
   }
   if (!newIp) {
     // fallback:用 selfInfo 里之前记录的 host IP(可能不对,但至少有地址)
     newIp = selfInfo?.hostIp || '127.0.0.1'
   }
   const newHostAddress = `${newIp}:${newPort || 8848}`
-  // 5) 广播给其它 joiner
+  // 3) ★关键:用**旧 transport 引用**广播(旧 host server 还活着,会转发给其他 joiner)
+  //   不用新的 transport 变量,因为那时新 server 还没有 joiner 客户端连接过来。
+  //   这里捕获异常不致命 — 即使广播失败,新 host 自身状态已重建,joiner 走 reconnect:failed fallback。
   try {
-    sendMessage({
-      type: 'TRANSPORT_REBUILD_ANNOUNCE',
-      payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
-    })
+    if (typeof transport.sendMessage === 'function') {
+      transport.sendMessage({
+        type: 'TRANSPORT_REBUILD_ANNOUNCE',
+        payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
+      })
+    } else {
+      sendMessage({
+        type: 'TRANSPORT_REBUILD_ANNOUNCE',
+        payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
+      })
+    }
   } catch (e) {
     // 广播失败不算致命 — 新 host 自己的 transport 已 ready
+    console.warn('[rebuildAsHost] pre-close broadcast failed:', e?.message || e)
   }
-  // 6) emit 本端事件
+  // 4) 把新 transport 挂到 network.js 全局变量 + 挂 _onTransportMessage
+  try { await transport.close() } catch (e) { /* swallow */ }
+  transport = newTransport
+  transport.onMessage(_onTransportMessage)
+  // 5) emit 本端事件
   emit('transport:rebuild:announce', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
   emit('transport:rebuild:done', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
-  // 7) 重启心跳
+  // 6) 重启心跳
   startHeartbeatChecker()
   return { ok: true, newHostAddress }
 }
