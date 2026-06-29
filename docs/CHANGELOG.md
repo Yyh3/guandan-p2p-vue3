@@ -4,6 +4,87 @@
 
 ---
 
+## v0.4.18 (2026-06-29) — V0414-04 本地选举协议最小修复(40 套件 / 1947 单测全过)
+
+> v0.4.14 对抗性复查的 V0414-04(WS / AndroidWs 模式 `requestPromoteToHost` 无 self-loop,
+> 旧 host transport 死了 joiner 永远不升级)留 v0.4.17 follow-up → v0.4.17 推了 v0.4.18 修。
+>
+> **核心问题**: 旧版 `requestPromoteToHost` 只在 BC 模式下本地 self-loop,WS / AndroidWs 模式下
+> joiner 发的 `PROMOTE_HOST_REQUEST` 走旧 host transport,旧 host 已死/被杀进程/断电时
+> 消息发不出去 → joiner 永远不升级。
+>
+> **修复方案**(最小可行,不引入 mDNS / UDP 广播等大改造):
+> 1. `requestPromoteToHost` 扩展本地 self-loop 到所有 transport(不只 BC)
+> 2. `rebuildAsHost` 失败分支(`_createTransport` / `open('self')`)emit `'host:lost'`
+> 3. `useGameLogic.onHostMigrated` 的 rebuildAsHost promise.catch 也 emit `'host:lost'`
+> 4. 浏览器 ws joiner 无 server 能力 → rebuildAsHost 失败 → host:lost → 跳首页让用户重连
+> 5. AndroidWs native / Node ws joiner → rebuildAsHost 成功 → 起新 server → broadcast TRANSPORT_REBUILD_ANNOUNCE
+>
+> **已知未做**(留 v0.4.19+):
+> - 确定性本地选举(基于 UUID 字典序 / selfSeat 优先级)避免多 joiner 同时本地升级冲突
+> - peer:join 时上报 `canHost` + `hostAddress` 让新 host 选择更优
+> - 主动退出时旧 host 把新 host 的 `hostAddress` 塞进 PEER_LEAVE
+> - 崩溃场景的第二发现通道(mDNS / UDP 广播 / 固定房间发现服务)
+
+### A. V0414-04 修复 1: requestPromoteToHost 扩展本地 self-loop
+
+**问题**: 旧版 `if (transport && transport.constructor.name === 'BroadcastChannelTransport')` 只在 BC 模式 self-loop,WS / AndroidWs joiner 调 requestPromoteToHost 时发消息给旧 host transport,旧 host 死了就发不出。
+
+**修复**: 改为 `if (transport)` 无差别 self-loop。同时把 sendMessage 包到 try/catch,允许失败(失败时本地 self-loop 兜底)。
+
+```js
+// 旧版
+sendMessage({ type: 'PROMOTE_HOST_REQUEST', ... })  // 失败 → joiner 永远不升级
+if (transport.constructor.name === 'BroadcastChannelTransport') {
+  _onTransportMessage({ PROMOTE_HOST_REQUEST, ... })  // 只 BC self-loop
+}
+
+// 新版
+try {
+  sendMessage({ type: 'PROMOTE_HOST_REQUEST', ... })  // 失败 → warn,继续走 self-loop
+} catch (e) { console.warn('sendMessage failed (host transport likely dead):', e?.message) }
+if (transport) {  // 所有 transport 都 self-loop
+  _onTransportMessage({ PROMOTE_HOST_REQUEST, ... })
+}
+```
+
+**测试**: `v0418-adversarial-fixes.test.js` §1 — 6 case(无 BC-only 旧写法 / 通用 self-loop / sendMessage try/catch / _promotedHostSeat 不重置)
+
+### B. V0414-04 修复 2: rebuildAsHost 失败 → emit host:lost
+
+**问题**: `rebuildAsHost` 内部 `_createTransport()` / `newTransport.open('self')` 失败分支只返回 error,不 emit 业务事件。浏览器 ws joiner 走这条会"假装自己是 host"但 transport 没起 → 业务层不知道。
+
+**修复**: 两个失败分支都 `emit('host:lost', { reason: 'rebuildAsHost_failed', error, ts })`。
+
+```js
+} catch (e) {
+  const errMsg = '...transport 工厂失败: ' + (e?.message || e)
+  emit('host:lost', { reason: 'rebuildAsHost_failed', error: errMsg, ts: Date.now() })
+  return { ok: false, error: errMsg }
+}
+```
+
+**测试**: `v0418-adversarial-fixes.test.js` §2 — 5 case(两个失败分支存在 + emit host:lost)
+
+### C. V0414-04 修复 3: useGameLogic.onHostMigrated promise.catch emit host:lost
+
+**问题**: v0.4.16 加的 `onHostMigrated isMyself=true + rebuildAsHost fire-and-forget` 失败时只 `console.warn`,业务层不响应。
+
+**修复**: promise.catch 内 `net.emit('host:lost', { reason: 'rebuildAsHost_failed', error, ts })`,复用 v0.4.17 GameViewDesktop 已有 host:lost → router.push 首页链路。
+
+**测试**: `v0418-adversarial-fixes.test.js` §3 — 4 case(isMyself 路径 / .catch 存在 / emit host:lost)
+
+### D. V0414-04 业务层链路复用 v0.4.17
+
+`GameViewDesktop.onMounted` 已有 `net.on('host:lost', () => router.push('/?force_disconnected=1&reason=...'))` 监听,`onUnmounted` 已清理。v0.4.18 不需要重复实现,只验证链路完整。
+
+### 测试基线
+
+- **1947 通过 / 0 失败**(v0.4.17 的 1927 + v0418-adversarial-fixes 20 case)
+- `npm run build` ✓ 1.76s
+
+---
+
 ## v0.4.17 (2026-06-29) — v0.4.16 对抗性复查 5 项 V0416 真 bug 修复 + 1 项误报澄清(39 套件 / 1927 单测全过)
 
 > v0.4.16 静态复查 6 项问题里 1 项误报 / 5 项真问题,本版本集中修 5 项 + 1 项误报澄清:

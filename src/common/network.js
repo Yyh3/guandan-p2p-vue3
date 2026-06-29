@@ -1283,14 +1283,22 @@ async function rebuildAsHost() {
   try {
     newTransport = _createTransport()
   } catch (e) {
-    return { ok: false, error: 'transport 工厂失败: ' + (e?.message || e) }
+    // ★ v0.4.18 V0414-04:rebuildAsHost 失败 → emit host:lost 让业务层跳首页
+    //   浏览器 ws joiner 走这里:浏览器无 ws server 能力,不能当新 host。
+    //   业务层 GameViewDesktop 已经监听 host:lost → router.push 首页
+    const errMsg = 'transport 工厂失败: ' + (e?.message || e)
+    emit('host:lost', { reason: 'rebuildAsHost_failed', error: errMsg, ts: Date.now() })
+    return { ok: false, error: errMsg }
   }
   // 1) 起新 server,拿地址
   try {
     // 复用原 port(host 通常用 8848;若是 ephemeral 测试,这里会失败 — 测试环境另行 mock)
     await newTransport.open('self')
   } catch (e) {
-    return { ok: false, error: '新 transport open(self) 失败: ' + (e?.message || e) }
+    // ★ v0.4.18 V0414-04:同上,open(self) 失败(典型场景:浏览器 ws joiner 无 server 能力)
+    const errMsg = '新 transport open(self) 失败: ' + (e?.message || e)
+    emit('host:lost', { reason: 'rebuildAsHost_failed', error: errMsg, ts: Date.now() })
+    return { ok: false, error: errMsg }
   }
   // 2) 计算新 IP:port
   const newPort = (typeof newTransport.getBoundPort === 'function') ? newTransport.getBoundPort() : null
@@ -1363,15 +1371,28 @@ function requestPromoteToHost(snapshot) {
     })
     return true
   }
-  // 广播 PROMOTE_HOST_REQUEST
-  sendMessage({
-    type: 'PROMOTE_HOST_REQUEST',
-    payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
-  })
-  // ★ BC 模式 BroadcastChannel 不回环,本端必须自己处理升级逻辑
-  //   WS 模式下 joiner 发给 host → host 转发回来 → 走 _handleJoinerMessage 路径(回环)
-  //   BC 模式下没有回环,这里手动模拟"收到自己消息"
-  if (transport && transport.constructor.name === 'BroadcastChannelTransport') {
+  // 广播 PROMOTE_HOST_REQUEST(可能因旧 host transport 死掉失败,失败不致命)
+  try {
+    sendMessage({
+      type: 'PROMOTE_HOST_REQUEST',
+      payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
+    })
+  } catch (e) {
+    // ★ v0.4.18 对抗性审查 (V0414-04):WS / AndroidWs 模式下旧 host transport 可能已死
+    //   sendMessage 失败不算致命 — 本地 self-loop (下面) 保证升级仍然能发生
+    console.warn('[requestPromoteToHost] sendMessage failed (host transport likely dead):', e?.message || e)
+  }
+  // ★ v0.4.18 对抗性审查 (V0414-04):本地 self-loop — 不依赖旧 host transport
+  //   旧版只在 BC 模式下 self-loop。WS / AndroidWs 模式下旧 host transport 已死时
+  //   (host 崩溃 / 杀进程 / 断电),joiner 发的 PROMOTE_HOST_REQUEST 发不出去 → 永远不升级
+  //   现在统一:不论 transport 类型,都本地 self-loop 一次,让 joiner 端能确定性地升级。
+  //   _handleJoinerMessage 内部 _promotedHostSeat 去重(本进程内) + 旁观分支(其他 joiner 让位)。
+  //   多 joiner 同时本地升级:每个进程独立去重,可能多 host。靠 rebuildAsHost 内部判断
+  //   (浏览器 ws 客户端无 server 能力 → open('self') 失败 → onHostMigrated isMyself+rebuildAsHost
+  //    failed → emit host:lost → 业务层跳首页让用户重连)。
+  //   兼容原 BC 逻辑:BC 不回环,必须本地 self-loop;WS 回环(理论),但 host transport 死了
+  //   也得本地 self-loop,所以现在统一都做。
+  if (transport) {
     _onTransportMessage({
       type: 'PROMOTE_HOST_REQUEST',
       from: selfSeat,

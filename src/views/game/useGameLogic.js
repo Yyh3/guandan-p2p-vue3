@@ -208,11 +208,18 @@ export function useGameLogic(opts = {}) {
     //   后续 P2P 消息转发 / 心跳 / 重连全部失败,表现为"UI 显示迁移成功但真机联机不可用"
     //   修法:fire-and-forget 调 rebuildAsHost(),失败仅 warn 不阻塞(BC 模式下 rebuildAsHost
     //   内部判断 selfSeat==0 且 isHostFlag=true 会自处理,不会真触发重建)
+    // ★ v0.4.18 对抗性审查 (V0414-04):rebuildAsHost 失败时 emit host:lost 让业务层跳首页
+    //   典型场景:浏览器 ws joiner 走 V0414-04 本地 self-loop 升级自己,但浏览器无 ws server 能力,
+    //   rebuildAsHost open('self') 失败 → emit host:lost → GameViewDesktop 监听 → router.push 首页。
+    //   rebuildAsHost 内部失败分支已经在 network.js emit host:lost,这里补 promise.catch 路径
     if (isMyself && net.rebuildAsHost) {
       try {
         const p = net.rebuildAsHost()
         if (p && typeof p.catch === 'function') {
-          p.catch((e) => console.warn('[P2P] rebuildAsHost after migration failed:', e))
+          p.catch((e) => {
+            console.warn('[P2P] rebuildAsHost after migration failed:', e)
+            try { net.emit && net.emit('host:lost', { reason: 'rebuildAsHost_failed', error: e?.message || String(e), ts: Date.now() }) } catch (_) {}
+          })
         }
       } catch (e) { console.warn('[P2P] rebuildAsHost sync err:', e) }
     }
