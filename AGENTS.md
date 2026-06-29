@@ -37,7 +37,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（35 套件 / 1837 通过 / 0 失败，v0.4.13 收官基线）
+# 跑全部测试（36 套件 / 1887 通过 / 0 失败，v0.4.14 收官基线）
 npm test
 
 # 跑单个测试套件
@@ -88,7 +88,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 35 套件 Node assert 单测（1837 case 全过,v0.4.13）
+│   │   └── *.test.js               # 36 套件 Node assert 单测（1887 case 全过,v0.4.14）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -135,7 +135,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.13 收官：35 套件 / 1837 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.14 收官：36 套件 / 1887 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -147,7 +147,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 35 套件 | **1837 / 0 fail** (v0.4.13,含 v0412-adversarial-fixes 34 case) |
+| `npm test` | 全部 36 套件 | **1887 / 0 fail** (v0.4.14,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 50 case) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -314,6 +314,12 @@ getHistory() / addHistory(record) / clearHistory()  // 战绩
 ### v0.4.10 已落地
 
 - ✅ 移动端响应式（GameView 桌面 1280×800 → 手机竖屏 + 横屏双布局,`GameViewMobile.vue` 1333 行,横屏 .is-landscape 兜底）
+
+### v0.4.14 已落地
+
+- ✅ v0.4.12 对抗性复查 6 项 V0412 bug 修复(V0412-02 migrateHost abandonedSeats 不 push 0(避免 nextTurn 跳过新 host);V0412-03 scheduleAI pass 分支 + aiBroadcast('PASS');V0412-04 _applySnapshot 应用 isRestartAfterA/previousLevelRank/lastAppliedRoundId + state 预声明;V0412-05/07 新增 game.getSnapshot() 深拷贝完整 snapshot,useGameLogic.onPeerLeave 委托;V0412-06 onNext P2P 非 host 不动 phase ref)——`v0414-adversarial-review.test.js` 50 case
+- ✅ V0412-01 误报验证:requestPromoteToHost 已在 network.js line 1321 实现 + export,审稿人 GitHub 网页检索漏掉
+- ✅ 同步修测试:v047-rc2-regression 5 个 case 断言反向(旧行为"seat 0 在 abandonedSeats" → 新行为"seat 0 NOT in abandonedSeats")
 
 ### v0.4.13 已落地
 

@@ -217,23 +217,19 @@ export function useGameLogic(opts = {}) {
     if (!game.value) return
     const st = game.value.getState()
     if (st.phase === 'finished') return
-    // 取 snapshot:对局关键字段(joiner 端只关心手牌 / 当前出牌者 / 桌面 / 等级)
-    const snapshot = {
-      hands: st.hands,
-      tableCards: st.tableCards,
-      currentPlayer: st.currentPlayer,
-      firstPlayer: st.firstPlayer,
-      leaderPlayer: st.leaderPlayer,
-      lastPlay: st.lastPlay,
-      finishedOrder: st.finishedOrder,
-      trickHistory: st.trickHistory,
-      passCount: st.passCount,
-      tribute: st.tribute,
-      ghost: st.ghost,
-      levelRank: st.levelRank,
-      teamLevels: st.teamLevels,
-      phase: st.phase,
-    }
+    // ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):不再手写 snapshot 字段列表,
+    //   委托 game.getSnapshot() 拿到完整 + 深拷贝的 state。
+    //   - 字段全集(避免遗漏 difficulty / round / levelUp / abandonedSeats /
+    //     isRestartAfterA / previousLevelRank / lastAppliedRoundId)
+    //   - 深拷贝(避免异步发送期间 snapshot 被后续本地动作污染)
+    //   - 单一来源(getSnapshot 与 _applySnapshot 字段口径必须一致)
+    let snapshot = null
+    try {
+      snapshot = (typeof game.value.getSnapshot === 'function')
+        ? game.value.getSnapshot()
+        : null
+    } catch (e) { /* snapshot 构造失败就不发迁移请求 */ }
+    if (!snapshot) return
     try {
       net.requestPromoteToHost && net.requestPromoteToHost(snapshot)
     } catch (e) { console.warn('requestPromoteToHost err', e) }
@@ -545,7 +541,12 @@ export function useGameLogic(opts = {}) {
     })
     if (isP2P && game.value.setAIBroadcast) {
       game.value.setAIBroadcast((seat, cards, type) => {
+        // ★ v0.4.14 对抗性审查 (V0412-03):AI pass 也必须广播 — 旧版只处理
+        //   PLAY 分支,joiner 端收到 PLAY 校验过 currentPlayer === payload.seat 才 apply,
+        //   但 AI PASS 时 joiner 端 currentPlayer 没推进,后续校验失败导致 joiner 卡住。
+        //   修法:symmetrize PLAY / PASS 两个分支,都通过 net.broadcast 同步给 joiner。
         if (type === 'PLAY') net.broadcast({ type: 'PLAY', payload: { seat, cards } })
+        if (type === 'PASS') net.broadcast({ type: 'PASS', payload: { seat, source: 'ai' } })
       })
     }
     // v0.4.8 N-2:AI 补位 — P2P host 开房时,把空 seat 自动填 AI(1-3 人开局也能跑)
@@ -850,18 +851,25 @@ function onAutoFindBest() {
     mainActionsRef.value?.setShowing(false)
   }
   function onNext() {
-    phase.value = 'playing'
     if (isP2PMode.value) {
       // ★ GD-RC-001 修复:下一局发牌由网络 host 负责(原 selfSeat===0 失效)
       if (isNetworkHost.value) {
+        // ★ v0.4.14 对抗性审查 (V0412-06):phase='playing' 必须等真正进入新局
+        //   才设,旧版开头先 phase.value='playing' 再判断 P2P 模式,P2P 非 host
+        //   直接 return 但 phase 已被改,UI 提示文本从"本局结束"跳到"思考中"
+        //   按钮状态混乱。修法:phase='playing' 移到 host 分支进入 initGame 之后
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
+        phase.value = 'playing'
         initGame({ isP2P: true, seed: pendingSeed })
         setTimeout(() => {
           net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value, newRound: true } })
         }, 500)
       }
+      // P2P 非 host:什么都不做(等 host 广播 DEAL)
+      // phase 保持 'finished',UI 仍是结算页,提示"等待房主开下一局"
       return
     }
+    phase.value = 'playing'
     game.value.nextRound()
     myHand.value = E.sortHandGrouped(game.value.getState().hands[selfSeat.value].slice())
     selected.value = new Array(myHand.value.length).fill(false)

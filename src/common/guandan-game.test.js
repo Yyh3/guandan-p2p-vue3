@@ -400,11 +400,19 @@ console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
     assert('旧 host hands[0] 旧牌被清空', st1.hands[0].length !== oldHand0.length || st1.hands[oldHand0.length === 27 ? 0 : 0] !== oldHand0)
     // 3) 旧 seat 2 (现在空) hands[2] === []
     assert('旧 seat 2 hands[2] === []', st1.hands[2].length === 0)
-    // 4) 旧 host (seat 0) 加入 abandonedSeats(弃赛,不算"出完牌")
-    //   v3.x P2-30 修复(2):migrateHost 改用 abandonedSeats 而不是 finishedOrder,
-    //   避免新 host(seat 0)被 finishedOrder 校验拒绝出牌
-    assert('旧 host (seat 0) 在 abandonedSeats 里', st1.abandonedSeats?.includes(0))
+    // 4) 旧 host (seat 0) NOT in abandonedSeats
+    //   v3.x P2-30 修复(2):migrateHost 用 abandonedSeats 标记弃赛,避免新 host
+    //     (seat 0) 被 finishedOrder 校验拒绝出牌
+    //   v0.4.14 对抗性审查 (V0412-02) 修复:但 oldHostSeat=0 不能放 abandonedSeats,
+    //     否则 nextTurn() 会用 while 循环把新 host 永远跳过 — 表现新 host 永远
+    //     不能再次获得回合。修法:旧 host 用 state.hands[0] = [] 的"事实清空" +
+    //     防御性 filter(s => s !== 0),0 不进 abandonedSeats。
+    assert('★ v0.4.14:旧 host (seat 0) NOT in abandonedSeats(避免 nextTurn 跳过新 host)',
+      !st1.abandonedSeats?.includes(0))
     assert('★ 旧 host (seat 0) 不在 finishedOrder 里(不算出完牌)', !st1.finishedOrder.includes(0))
+    // 5) hands[0] 旧牌被清空(新 host 手牌 = 原 seat 2)
+    assert('★ v0.4.14:旧 host hands[0] 旧牌被新 host 手牌覆盖',
+      JSON.stringify(st1.hands[0]) === JSON.stringify(newHostHand))
     // 5) levelRank 保持
     assert('levelRank 不变', st1.levelRank === st0.levelRank)
     // 6) emit 'host:migrated'

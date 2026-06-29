@@ -4,6 +4,92 @@
 
 ---
 
+## v0.4.14 (2026-06-29) — v0.4.12 对抗性复查 6 项 V0412 bug 修复(36 套件 / 1887 单测全过)
+
+> 本版本基于外部审查者对 v0.4.13 master 的复查报告,集中修 6 项残留问题(1 项误报已标注)。
+> 第一性原理精简:用 game.getSnapshot() 单一来源替代手写 snapshot 字段列表,彻底解决 V0412-05/V0412-07。
+
+### A. v0.4.12 对抗性复查 6 项 V0412 bug 修复(本轮)
+
+#### **V0412-01 误报验证(无代码改动)**
+
+- 报告:"`requestPromoteToHost` 调用存在,但未看到公开实现/导出"。
+- 本地 grep 验证:`network.js` line 1321 有 `function requestPromoteToHost(snapshot)` 实现,line 1417/1445 在 export 和 default net 中均导出。v045-bug-fixes / network-host-promote / v047-rc2-regression 三个套件共 30+ case 已覆盖。
+- 原因:审稿人在 GitHub 网页源码检索上漏掉,本地仓库 grep 即得。
+- 修法:无需代码改动,v0414-adversarial-review.test.js §1 增加 `typeof net.requestPromoteToHost === 'function'` 断言留作未来回归防御。
+
+#### **V0412-02 (P0) guandan-game.js:`migrateHost` 末尾 filter `abandonedSeats` 不含 0**
+
+- 现象:`migrateHost(oldHostSeat=0, newHostSeat)` 把 0 push 进 `state.abandonedSeats`,然后 `state.hands[0] = newHostHand`(迁移到逻辑 seat 0)。但 abandonedSeats 仍含 0,`nextTurn()` 用 `while (state.abandonedSeats.includes(next))` 循环会**永远跳过 seat 0(新 host)**——新 host 自己永远不能再获得回合,这是 host 迁移的核心逻辑错误。
+- 复现:migrateHost(0,2) → 连续 12 次 applyPlay → seat 0 只在第一次出现,后续全跳过。
+- 修法:
+  - migrateHost 不再 push `oldHostSeat=0` 进 abandonedSeats(其他 seat 1/2/3 弃赛仍可放)
+  - 末尾防御性 `state.abandonedSeats = state.abandonedSeats.filter(s => s !== 0)`,兜底历史 snapshot 同步进来带 0 的情况
+- 验证:`v0414-adversarial-review.test.js` §2 (8 case,含 12 轮 nextTurn 中 seat 0 至少出现 1 次)
+- 副作用修测试:`v047-rc2-regression.test.js` 5 个 case 断言反向(从"seat 0 在 abandonedSeats"改成"seat 0 NOT in abandonedSeats"),`guandan-game.test.js` §12 同步
+
+#### **V0412-03 (P0/P1) guandan-game.js + useGameLogic.js:AI pass 也必须广播**
+
+- 现象 1:`scheduleAI()` 中 `if (r.type === 'play')` 成功后 `aiBroadcast(seat, cards, 'PLAY')`,但 `else { playerPass(seat) }` 没调 `aiBroadcast('PASS')`。
+- 现象 2:useGameLogic 注入的 setAIBroadcast 回调只处理 `type === 'PLAY'`,没处理 `'PASS'`。
+- 后果:P2P 1-3 人开局 AI 接管场景,只要 AI 跟牌选择 pass,joiner 端 currentPlayer 不推进,后续 PLAY/PASS 校验失败 → joiner 卡住或多端状态分叉。
+- 修法:
+  - `scheduleAI` else 分支:`playerPass(seat)` 后 `if (aiBroadcast) aiBroadcast(seat, null, 'PASS')`(对称 PLAY 分支的 BUG-I 防御)
+  - useGameLogic 注入回调补 `if (type === 'PASS') net.broadcast({type: 'PASS', payload: {seat, source: 'ai'}})`
+- 验证:`v0414-adversarial-review.test.js` §3 (4 case,源码正则 + 接口存在)
+
+#### **V0412-04 (P1) guandan-game.js:`_applySnapshot` 应用过 A 标志 / 上一局级牌 / 去重 id**
+
+- 现象:`_applySnapshot` 接受并 apply 了大部分字段,但 V0410-02 新加的 `isRestartAfterA` / `previousLevelRank` / `lastAppliedRoundId` 三个字段没处理 → snapshot 同步时丢掉过 A 状态,UI refreshUiFromGameState 拿到旧值,按钮文案退回"下一局"。
+- 修法:
+  - `_applySnapshot` 末尾补:`if (typeof snap.isRestartAfterA === 'boolean')`、`if (typeof snap.previousLevelRank === 'number')`、`if ('lastAppliedRoundId' in snap)`(string / null 都接受)
+  - **state 预声明**:`isRestartAfterA: false` / `previousLevelRank: null` / `lastAppliedRoundId: null` 写到 createGame 顶部 state 初始化,保证 `getSnapshot()` 返回对象这些字段存在(避免后续维护时漏 apply)
+- 验证:`v0414-adversarial-review.test.js` §4 (5 case,含 null 清空路径)
+
+#### **V0412-05 + V0412-07 (P2) guandan-game.js + useGameLogic.js:新增 `game.getSnapshot()` 单一来源**
+
+- 现象:
+  - `useGameLogic.onPeerLeave()` 手写 snapshot 字段列表,缺 `difficulty / round / levelUp / abandonedSeats / isRestartAfterA / previousLevelRank / lastAppliedRoundId`,且 `hands / tableCards / finishedOrder` 是直接引用不是 clone
+  - `game.getState()` 直接返回可变内部 `state`,调用方能改 hands / tableCards 等核心字段
+- 第一性原理精简:**新增 `game.getSnapshot()` 返回完整 state 的 JSON 深拷贝,作为 snapshot 构造的单一来源**,useGameLogic 委托它,删除 24 行手写 snapshot 构造代码。
+- 修法:
+  - `getSnapshot() { return JSON.parse(JSON.stringify(state)) }` —— 字段口径跟 `_applySnapshot` 接受范围一致(每加字段两处同时加)
+  - `getState()` 保留兼容现有 UI 计算 / debug
+  - useGameLogic `onPeerLeave()` 改调 `game.value.getSnapshot()` 替代手写 snapshot
+- 性能:一次 deal 后 state < 5KB,JSON round-trip ~1ms,host 迁移 / 重连路径用得起
+- 验证:`v0414-adversarial-review.test.js` §5 (24 case,含字段全集断言 + 深拷贝验证 + onPeerLeave 委托)
+
+#### **V0412-06 (P2) useGameLogic.js:`onNext` P2P 非 host 不动 phase ref**
+
+- 现象:`onNext()` 开头立刻 `phase.value = 'playing'`,然后 P2P 模式判断 + 非 host 直接 return。后果:joiner 在结算页点"下一局",phase 已被改 'playing',UI 提示文本从"本局结束"跳到"思考中",按钮状态混乱,在 host 真正发出 DEAL 前看起来卡住。
+- 修法:`phase.value = 'playing'` 从 onNext 开头移到 P2P host 分支(真正进入 initGame 之前),P2P 非 host 路径保持 phase='finished',UI 仍是结算页。
+- 验证:`v0414-adversarial-review.test.js` §6 (3 case,源码正则断言开头 5 行无 phase='playing')
+
+### B. 新增测试套件
+
+#### `v0414-adversarial-review.test.js` — 50 case 端到端覆盖
+
+- **§1 V0412-01**:requestPromoteToHost 是 function + length === 1(误报防御)
+- **§2 V0412-02**:migrateHost 后 abandonedSeats 不含 0 + 12 轮 nextTurn 中 seat 0 至少出现 1 次
+- **§3 V0412-03**:scheduleAI pass 分支调 aiBroadcast('PASS') + setAIBroadcast 注入回调处理 PASS
+- **§4 V0412-04**:_applySnapshot 应用 isRestartAfterA/previousLevelRank/lastAppliedRoundId + 接受 null 清空
+- **§5 V0412-05/07**:game.getSnapshot() 深拷贝 + 字段全集(20 个)+ onPeerLeave 委托 getSnapshot
+- **§6 V0412-06**:onNext 开头无 phase='playing' + P2P 非 host 分支 return
+
+### C. 同步修测试
+
+- `guandan-game.test.js` §12 migrateHost 测试:旧断言"seat 0 在 abandonedSeats" → 新断言"seat 0 NOT in abandonedSeats"
+- `v047-rc2-regression.test.js` 5 个 case 断言反向(同上)
+- `static-bug-fixes.test.js` §6 package.json version 0.4.13 → 0.4.14
+- `v0410-bug-fixes.test.js` package.json 当前版本 0.4.13 → 0.4.14
+
+### 测试基线
+
+- **36 测试套件 / 1887 单测 / 0 失败**(v0.4.13 的 35 套件 / 1837 case + v0414-adversarial-review 1 套件 / 50 case)
+- `npm run build` ✓ 1.46s
+
+---
+
 ## v0.4.13 (2026-06-29) — v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复(35 套件 / 1837 单测全过)
 
 > 本版本基于 v0.4.12 master 静态对抗性审查,集中修 8 项 P2P / game / network 层缺陷。

@@ -61,6 +61,16 @@ function createGame(opts) {
     tribute: null,           // 进贡信息
     ghost: null,             // 逢人配(红桃级牌)
     levelUp: 0,              // 本局升级数
+    // ★ v0.4.14 对抗性复查 (V0412-04 / V0412-05):预声明过 A 标志 / 上一局级牌 /
+    //   ROUND_END 去重 id 到 state,这样 getSnapshot() 返回的对象里这些字段也存在,
+    //   _applySnapshot 用 'in' 检测时能正确判定"快照含字段"。
+    //   之前 applyRoundEndFromPayload 才写这些字段(getState 出来未结算时是 undefined),
+    //   snapshot 接收端 _applySnapshot 看到的 snap.lastAppliedRoundId === undefined,
+    //   'in' 检测 undefined vs 'lastAppliedRoundId' 还是 true 所以会写,逻辑上没爆,
+    //   但 getSnapshot 返回的对象字段不全 → 对外契约不清晰。
+    isRestartAfterA: false,  // 本局是否"打 A 后重开一局"(host 权威计算)
+    previousLevelRank: null, // 上一局级牌(用于过 A 判定;null 表示首局)
+    lastAppliedRoundId: null,// ROUND_END 去重 id(同一 roundId 重复应用跳过)
     // v3.x P2-22 修复(G-5):双方独立等级字段(简化实现下两队同升同降,但字段已分)
     //   索引 0 = [0,2] 队,索引 1 = [1,3] 队
     //   **当前简化**:不论赢家,两队 levelRank 始终同步(见 applyRoundEnd 内注释)。
@@ -97,6 +107,33 @@ function createGame(opts) {
   }
 
   function getState() { return state }
+
+  /**
+   * ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):返回完整 + 深拷贝的 state 快照。
+   *
+   * 设计动机:
+   *   - getState() 直接返回内部 state 引用,任何调用方都能改 hands / tableCards
+   *     等核心字段 — V0412-07 报告的"短期不爆但长期维护风险"
+   *   - useGameLogic.onPeerLeave 手写 snapshot 字段不完整(缺 difficulty /
+   *     round / levelUp / abandonedSeats / isRestartAfterA / previousLevelRank /
+   *     lastAppliedRoundId),且数组字段是直接引用不是 clone — V0412-05 报告
+   *
+   * 修法:
+   *   - 新增 getSnapshot() 返回完整 state 的深拷贝(JSON 序列化 / 反序列化)
+   *   - 字段口径跟 _applySnapshot 接受的范围一致(每加字段要同时加到这两处)
+   *   - getState() 保留兼容现有 UI 计算 / debug 用
+   *
+   * 注意:
+   *   - JSON 深拷贝丢失 undefined / Symbol / Date / 函数等,本 game state 全是
+   *     普通数据(数组 / 数字 / 字符串 / null),JSON 安全
+   *   - 性能:一次 deal 后 state < 5KB,JSON round-trip ~1ms,host 迁移 / 重连
+   *     路径用得起
+   *
+   * @returns {object} 深拷贝的 state(字段全集)
+   */
+  function getSnapshot() {
+    return JSON.parse(JSON.stringify(state))
+  }
 
   // ============ 发牌 ============
   // ★ v3.8 P1 修复:4-tab 联机用 host 广播的 seed 发同一手牌
@@ -327,7 +364,13 @@ function applyPlay(seat, cards, hand, rec) {
           if (aiBroadcast) aiBroadcast(seat, r.cards, 'PLAY')
         }
       } else {
-        playerPass(seat)
+        // ★ v0.4.14 对抗性审查 (V0412-03):AI pass 也必须广播给 joiner,
+        //   否则 joiner 端 currentPlayer 不推进,状态分叉。修法跟 PLAY 分支对称 —
+        //   先 playerPass 本地校验,成功后再 aiBroadcast('PASS')。
+        const res = playerPass(seat)
+        if (res?.ok !== false) {
+          if (aiBroadcast) aiBroadcast(seat, null, 'PASS')
+        }
       }
     }, 500 + Math.random() * 500)
   }
@@ -485,6 +528,9 @@ function applyPlay(seat, cards, hand, rec) {
   return {
     on, off, emit,
     getState,
+    // ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):完整 + 深拷贝的 state 快照
+    //   用于 host 迁移 / 重连 / 网络同步。getState() 仍保留兼容 UI 计算 / debug。
+    getSnapshot,
     deal, nextRound,
     restartMatch,  // ★ v0.4.9:过 A 后重开
     // ★ v0.4.13 (P0-3):销毁旧 game 实例(清 timer / handlers / aiPlayers)
@@ -612,8 +658,15 @@ function applyPlay(seat, cards, hand, rec) {
       //    v3.x P2-30 修复(2):改用 abandonedSeats 而不是 finishedOrder,
       //    避免新 host(seat 0)也在 finishedOrder 里导致 playerPlay 拒绝出牌
       //    finishedOrder 严格表示"出完牌"语义,弃赛不算出完
+      // ★ v0.4.14 对抗性审查 (V0412-02):但 oldHostSeat=0 不能放 abandonedSeats,
+      //   因为 0 已经被新 host 接管(下一步 hands[0] = newHostHand),如果 0 留在
+      //   abandonedSeats,nextTurn() 会用 while 循环把新 host 永远跳过 —
+      //   表现为新 host 自己永远不能再获得回合。修法:不要 push 0,旧 host 用
+      //   finishedOrder 末位 + state.hands[0] = [] 的"事实清空"就够了。
+      //   其他 seat(1/2/3)弃赛仍可放 abandonedSeats(比如 host 离开前某 joiner
+      //   已弃赛),保留逻辑不变。
       const oldHostHand = state.hands[oldHostSeat]
-      if (!state.abandonedSeats.includes(oldHostSeat)) {
+      if (oldHostSeat !== 0 && !state.abandonedSeats.includes(oldHostSeat)) {
         state.abandonedSeats.push(oldHostSeat)
       }
       // 旧 host 的 27 张牌作废(清空)
@@ -624,6 +677,13 @@ function applyPlay(seat, cards, hand, rec) {
       const newHostHand = state.hands[newHostSeat].slice()
       state.hands[0] = newHostHand
       state.hands[newHostSeat] = []
+
+      // ★ v0.4.14 对抗性审查 (V0412-02) 防御性清理:即使历史原因 abandonedSeats
+      //   里残留 0(老 host 端收到了旧版本广播的 snapshot 带着 [0]),也要在这里
+      //   filter 掉,保证新 host 不会被 nextTurn 跳过。
+      if (state.abandonedSeats.includes(0)) {
+        state.abandonedSeats = state.abandonedSeats.filter(s => s !== 0)
+      }
 
       // 3) 调整 currentPlayer:如果当时是旧 host (0) 或新 host 原 seat (newHostSeat) 回合
       //    → 切到新 host 回合(逻辑 seat 0)
@@ -720,6 +780,14 @@ state.trickHistory = state.trickHistory.map(h => {
     }
       if (typeof snap.round === 'number') state.round = snap.round
       if (snap.phase && validPhase.includes(snap.phase)) state.phase = snap.phase
+      // ★ v0.4.14 对抗性审查 (V0412-04):补齐 _applySnapshot 缺字段
+      //   旧版只 apply 了基础字段,isRestartAfterA / previousLevelRank /
+      //   lastAppliedRoundId 没处理 → snapshot 同步时丢掉过 A 标志、上一局级牌、
+      //   ROUND_END 去重 id,refreshUiFromGameState 拿到旧值,UI 退回"下一局"文案
+      if (typeof snap.isRestartAfterA === 'boolean') state.isRestartAfterA = snap.isRestartAfterA
+      if (typeof snap.previousLevelRank === 'number') state.previousLevelRank = snap.previousLevelRank
+      // lastAppliedRoundId 是 string 或 null(从未应用过),用 'in' 判字段存在
+      if ('lastAppliedRoundId' in snap) state.lastAppliedRoundId = snap.lastAppliedRoundId
       // 同步发 turn 事件让 UI 重新渲染
       emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
     },
