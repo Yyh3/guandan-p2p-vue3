@@ -82,8 +82,10 @@ const ghostRank = computed(() => {
   return Number.isFinite(n) ? n : undefined
 })
 const isP2PMode = computed(() => {
-  // ?role=joiner 或 ?host=... 都视为 P2P 联机
-  return route.query.role === 'joiner' || !!route.query.host
+  // ?role=joiner / ?role=host / ?host=... 都视为 P2P 联机
+  // ★ v0.4.16 对抗性审查 (V0414-01):加 role=host 兼容 — RoomView 现在 host 跳转也带
+  //   &role=host(避免以前只有 roomNo 时 GameView 误判为非 P2P),role=host 必须识别为 P2P
+  return route.query.role === 'joiner' || route.query.role === 'host' || !!route.query.host
 })
 const remoteHost = computed(() => String(route.query.host || ''))
 const role = computed(() => String(route.query.role || ''))

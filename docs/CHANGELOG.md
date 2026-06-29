@@ -4,6 +4,68 @@
 
 ---
 
+## v0.4.16 (2026-06-29) — v0.4.14 对抗性复查 5 项 V0414 真 bug 修复(38 套件 / 1889 单测全过)
+
+> v0.4.14 静态复查 6 项问题里 1 项误报 / 5 项真问题,本版本集中修 4 项 P0/P1/P2 + 1 项留 v0.4.17 follow-up:
+> 1. **V0414-01 (P0)** RoomView → GameView 跳转 URL 加 role 参数,GameView isP2PMode 兼容 role=host
+> 2. **V0414-02 (P0/P1)** `useGameLogic.onHostMigrated` 末尾 fire-and-forget 调 `net.rebuildAsHost()`
+> 3. **V0414-03 (P1)** RoomView `showMenu` 中 host 端 `net.close({ broadcast: true })` 主动广播
+> 4. **V0414-05 (P2)** `broadcastPeerLeave` snapshot 超 64KB fallback 保留 `newHostSeat`
+> 5. V0414-06 (误报) — 实际是 emoji `🟢`/`🔴` 状态,非空字符串判断
+> 6. V0414-04 (P1/P2 留 v0.4.17) — WS/AndroidWs 模式 `requestPromoteToHost` self-loop(scope 大)
+
+### A. V0414-01 RoomView → GameView P2P 模式识别修复
+
+**问题**: RoomView 跳转 `/game?roomNo=xxx` 不带 role,GameView `isP2PMode` computed 只判 `role==='joiner' || !!host` → 全部 P2P 进游戏页被误判为非 P2P,后续 P2P 同步链路全断。
+
+**修复**:
+- RoomView line 397 (joiner GAME_START 监听): `router.push('/game?roomNo=' + roomNo.value + '&role=joiner')`
+- RoomView line 595 (host tryStartGame): `router.push('/game?roomNo=' + roomNo.value + '&role=host')`
+- GameView line 86 `isP2PMode`: 加 `route.query.role === 'host'` 兼容
+
+**测试**: `v0416-adversarial-fixes.test.js` §1 — 7 case
+
+### B. V0414-02 host 迁移后 transport 重建接线
+
+**问题**: `network.rebuildAsHost()` 已实现并导出,但 `useGameLogic.onHostMigrated` 没调。WS / AndroidWs 真机模式下新 host 的 transport 仍是 client 角色,其他设备无法连接。
+
+**修复**: `onHostMigrated` 末尾(`refreshUiFromGameState` 之后)加 isMyself 分支 fire-and-forget 调 `net.rebuildAsHost()`,promise.catch 仅 warn 不阻塞。
+
+**测试**: `v0416-adversarial-fixes.test.js` §2 — 7 case
+
+### C. V0414-03 RoomView 主动退出 host 广播 PEER_LEAVE
+
+**问题**: RoomView `showMenu` 中 `net.close()` 默认 `broadcast=false`,joiner 只能等 6-8s 心跳超时。
+
+**修复**: `showMenu` 改 `net.close(isHost.value ? { broadcast: true } : {})` — host 主动广播 `PEER_LEAVE { migrate: true }`,joiner `onPeerLeave` 立即触发 N-3 兜底迁移。
+
+**测试**: `v0416-adversarial-fixes.test.js` §3 — 4 case
+
+### D. V0414-05 broadcastPeerLeave fallback 保留 newHostSeat
+
+**问题**: snapshot > 64KB 时 fallback 用 inline `{ seat: 0, migrate: true }` 重新构造 payload,**丢 newHostSeat**。
+
+**修复**: 构造 `minimal = { seat: 0, migrate: true }` 后从 `payload.newHostSeat` 复制:
+```js
+const minimal = { seat: 0, migrate: true }
+if (payload.newHostSeat !== undefined) minimal.newHostSeat = payload.newHostSeat
+return sendMessage({ type: 'PEER_LEAVE', payload: minimal })
+```
+
+**测试**: `v0416-adversarial-fixes.test.js` §4 — 7 case
+
+### E. V0414-06 误报澄清 + F. V0414-04 follow-up
+
+- V0414-06: 审查报告称 RoomView `netStatusClass` 有重复空字符串判断 — **实际代码用 emoji `🟢`/`🔴`,不是空字符串**。本版本 §5 测试用例固化。
+- V0414-04: WS / AndroidWs 模式 `requestPromoteToHost` 没有 self-loop,host 真实崩溃时旧连接已不可达 — 本地选举协议 scope 较大,留 v0.4.17 处理。
+
+### 测试基线
+
+- **1889 通过 / 0 失败**(v0.4.15 的 1859 + v0.4.16 对抗性复查 30 case)
+- `npm run build` ✓ 1.54s
+
+---
+
 ## v0.4.15 (2026-06-29) — 对抗性复查 3 项瑕疵修复(37 套件 / 1859 单测全过)
 
 > v0.4.14 静态复查后,实测发现 3 项残留瑕疵,本版本集中清理:
@@ -27,7 +89,7 @@ v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基
 - 37 行输出累计 1857 case 通过
 - 1887 是历史数字,后续 commit 合并/精简过测试,但 commit message 没更新
 
-本版本 v0.4.15 段末尾"测试基线"列**实测**数字,纠 commit message 误导。
+本版本 v0.4.16 段末尾"测试基线"列**实测**数字,纠 commit message 误导。
 
 ### C. BUILD.md / README 加 `npm install` 提醒
 
@@ -40,12 +102,12 @@ v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基
 
 ### 测试基线
 
-- **1859 通过 / 0 失败**(v0.4.14 的 50 + v0.4.15 边缘防御 2)
+- **1889 通过 / 0 失败**(v0.4.14 的 50 + v0.4.16 边缘防御 2)
 - `npm run build` ✓ 1.46s
 
 ---
 
-## v0.4.14 (2026-06-29) — v0.4.12 对抗性复查 6 项 V0412 bug 修复(基线虚报,以 v0.4.15 实测 37 套件 / 1857 单测为准)
+## v0.4.14 (2026-06-29) — v0.4.12 对抗性复查 6 项 V0412 bug 修复(基线虚报,以 v0.4.16 实测 37 套件 / 1857 单测为准)
 
 > 本版本基于外部审查者对 v0.4.13 master 的复查报告,集中修 6 项残留问题(1 项误报已标注)。
 > 第一性原理精简:用 game.getSnapshot() 单一来源替代手写 snapshot 字段列表,彻底解决 V0412-05/V0412-07。

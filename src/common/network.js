@@ -911,7 +911,12 @@ function broadcastPeerLeave(opts = {}) {
     try { serialized = JSON.stringify(opts.snapshot) } catch (e) { return false }
     if (serialized.length > 64 * 1024) {
       // snapshot 太大,只发 migrate 标记不带 snapshot,joiner 走 STATE_SNAPSHOT 兜底
-      try { return sendMessage({ type: 'PEER_LEAVE', payload: { seat: 0, migrate: true } }) } catch (e) { return false }
+      // ★ v0.4.16 对抗性审查 (V0414-05):fallback 也必须保留 newHostSeat(不能丢)
+      //   旧版 fallback 用 { seat: 0, migrate: true } 直接丢 newHostSeat,接收端只能
+      //   本地推断新 host,多端状态可能不一致;现在构造 minimal 携带已计算的 newHostSeat
+      const minimal = { seat: 0, migrate: true }
+      if (payload.newHostSeat !== undefined) minimal.newHostSeat = payload.newHostSeat
+      try { return sendMessage({ type: 'PEER_LEAVE', payload: minimal }) } catch (e) { return false }
     }
     payload.snapshot = opts.snapshot
   }

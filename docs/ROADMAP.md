@@ -23,7 +23,8 @@
 | **v0.4.12** | ✅ 完成 | v0.4.11 修复后回归测试补充 | P2P 端到端 56 case(ROUND_END host-only 模拟 / applyRoundEndFromPayload 幂等 / MATCH_RESTART 鉴权 phase gate / restartMatch 同 seed 等),35 套件 / 1837/0 单测 |
 | **v0.4.13** | ✅ 完成 | v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复 | network.js `canBroadcast` + `broadcastPeerLeave` + `close({broadcast})`;guandan-game.js `createGame.destroy`;useGameLogic `onP2PStateSnapshot` 走 `refreshUiFromGameState`;`migrateHost` 末尾 emit 'turn';`onP2PRoundEnd` roundId 去重;`onP2PPeerJoin` 走 `applyNetworkPlayers` 单一路径;`onP2PPlay` ts 去重 Set + `applyPlay` 防御 cards-not-found;35 套件 / 1837/0 单测 |
 | **v0.4.14** | ✅ 完成 | v0.4.12 对抗性复查 6 项 V0412 bug 修复 | `migrateHost` abandonedSeats 不 push 0(避免 nextTurn 跳过新 host);`scheduleAI` pass 分支 + `aiBroadcast('PASS')` + `setAIBroadcast` 注入回调处理 PASS;`_applySnapshot` 应用 isRestartAfterA/previousLevelRank/lastAppliedRoundId + state 预声明;新增 `game.getSnapshot()` JSON 深拷贝 + 字段全集(替代手写 snapshot 构造);`onNext` P2P 非 host 不动 phase ref;37 套件 / 1857/0 单测 |
-| **v0.4.15** | ✅ 当前 | 对抗性复查 3 项瑕疵修复 | `guandan-game.js` `_applySnapshot` 的 `lastAppliedRoundId` 加 `!== undefined` 边缘防御(防 manual `= undefined` 污染 state,保留 null 清空语义);CHANGELOG / commit message 基线数字从虚报 1887 → 实测 1857 纠正;BUILD.md / README 加 `npm install` 必跑提醒(否则 build 报 html5-qrcode 找不到);37 套件 / 1859/0 单测 |
+| **v0.4.15** | ✅ 完成 | 对抗性复查 3 项瑕疵修复 | `guandan-game.js` `_applySnapshot` 的 `lastAppliedRoundId` 加 `!== undefined` 边缘防御(防 manual `= undefined` 污染 state,保留 null 清空语义);CHANGELOG / commit message 基线数字从虚报 1887 → 实测 1857 纠正;BUILD.md / README 加 `npm install` 必跑提醒(否则 build 报 html5-qrcode 找不到);37 套件 / 1859/0 单测 |
+| **v0.4.16** | ✅ 当前 | v0.4.14 对抗性复查 5 项 V0414 真 bug 修复 | `RoomView` 跳转 URL 加 `&role=host/joiner` + `GameView.isP2PMode` 兼容 role=host(避免 P2P 进游戏页被误判为单机);`useGameLogic.onHostMigrated` 末尾 fire-and-forget 调 `net.rebuildAsHost()`(避免 WS/AndroidWs 真机 host 迁移只迁状态不重建 transport);`RoomView.showMenu` 中 host 端 `net.close({broadcast:true})` 主动广播 PEER_LEAVE(joiner 立即走 N-3 兜底);`network.js broadcastPeerLeave` snapshot > 64KB fallback 保留 `newHostSeat`(避免多端选举不一致);V0414-04 留 v0.4.17 follow-up;38 套件 / 1889/0 单测 |
 | **v4.0** | 💭 构思中 | iOS + 录像回放 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 
 ---
@@ -189,7 +190,7 @@ MINOR: 新功能(v3.0-3.7 都是 MINOR)
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前版本**:`v0.4.15`(2026-06-29,对 v0.4.14 做对抗性复查后发现 3 项瑕疵集中修复 — V0412-04 `_applySnapshot` `lastAppliedRoundId` `!== undefined` 边缘防御;CHANGELOG / commit message 基线数字从虚报 1887 → 实测 1857 纠正;BUILD.md / README 加 `npm install` 必跑提醒;37 套件 / 1859/0 单测)
+**当前版本**:`v0.4.16`(2026-06-29,v0.4.14 对抗性复查 5 项 V0414 真 bug 修复 — V0414-01 RoomView→GameView 跳转 URL 加 role + GameView isP2PMode 兼容 role=host;V0414-02 useGameLogic.onHostMigrated 末尾 fire-and-forget 调 net.rebuildAsHost;V0414-03 RoomView showMenu host 端 net.close({broadcast:true});V0414-05 broadcastPeerLeave snapshot 超 64KB fallback 保留 newHostSeat;V0414-04 留 v0.4.17 follow-up;38 套件 / 1889/0 单测)
 **首发目标**:v1.0.0(H5)
 
 ---

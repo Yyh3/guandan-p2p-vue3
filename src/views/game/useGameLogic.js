@@ -202,6 +202,20 @@ export function useGameLogic(opts = {}) {
       // 4) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
       refreshUiFromGameState()
     } catch (e) { console.warn('host migration state sync err', e) }
+    // ★ v0.4.16 对抗性复查 (V0414-02):本机是新 host 时,必须重建服务端 transport
+    //   旧版只迁了 game / network / UI 三层,但没调 net.rebuildAsHost() →
+    //   WS / AndroidWs 真机模式下新 host 的 transport 仍是 client 角色,其他设备无法连接,
+    //   后续 P2P 消息转发 / 心跳 / 重连全部失败,表现为"UI 显示迁移成功但真机联机不可用"
+    //   修法:fire-and-forget 调 rebuildAsHost(),失败仅 warn 不阻塞(BC 模式下 rebuildAsHost
+    //   内部判断 selfSeat==0 且 isHostFlag=true 会自处理,不会真触发重建)
+    if (isMyself && net.rebuildAsHost) {
+      try {
+        const p = net.rebuildAsHost()
+        if (p && typeof p.catch === 'function') {
+          p.catch((e) => console.warn('[P2P] rebuildAsHost after migration failed:', e))
+        }
+      } catch (e) { console.warn('[P2P] rebuildAsHost sync err:', e) }
+    }
   }
 
   // v3.x P2-29(N-3 闭环):joiner 端兜底 — host 离开时主动提升自己为新 host

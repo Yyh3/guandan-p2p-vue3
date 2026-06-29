@@ -37,7 +37,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（37 套件 / 1859 通过 / 0 失败，v0.4.15 收官基线）
+# 跑全部测试（38 套件 / 1889 通过 / 0 失败，v0.4.16 收官基线）
 npm test
 
 # 跑单个测试套件
@@ -88,7 +88,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 37 套件 Node assert 单测（1859 case 全过,v0.4.15）
+│   │   └── *.test.js               # 38 套件 Node assert 单测（1889 case 全过,v0.4.16）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -135,7 +135,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.15 收官：37 套件 / 1859 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.16 收官：38 套件 / 1889 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -147,7 +147,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 37 套件 | **1859 / 0 fail** (v0.4.15,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 50 + v0.4.15 边缘防御 2 case) |
+| `npm test` | 全部 38 套件 | **1889 / 0 fail** (v0.4.16,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 50 + v0.4.15 边缘防御 2 case + v0416-adversarial-fixes 30 case) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录

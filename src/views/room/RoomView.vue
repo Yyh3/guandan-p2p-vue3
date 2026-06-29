@@ -392,9 +392,10 @@ async function initNetwork() {
     }
   })
   // ★ v3.8 P1 修复:joiner 收到 host 的 GAME_START 也跳到 /game(否则 host 单方面跳转,joiner 卡在 /room)
+  // ★ v0.4.16 对抗性复查 (V0414-01):跳转 URL 加 &role=joiner,GameView isP2PMode 才会判 true
   onNet('message:GAME_START', () => {
     if (!isHost.value) {
-      router.push('/game?roomNo=' + roomNo.value)
+      router.push('/game?roomNo=' + roomNo.value + '&role=joiner')
     }
   })
   // ★ v3.8 P1 修复:joiner 收到 host 的 SEAT_SWAP 也本地交换(否则 joiner 还看到旧的 seat 名字)
@@ -519,7 +520,12 @@ onUnmounted(() => {
 function showMenu() {
   if (!confirm('退出房间?')) return
   cleanupRoomListeners()
-  try { net.close() } catch (e) { /* swallow */ }
+  // ★ v0.4.16 对抗性复查 (V0414-03):host 端主动退出广播 PEER_LEAVE 让 joiner 走 N-3 兜底迁移
+  //   旧版默认 broadcast=false,joiner 只能等 6-8s 心跳超时才能发现 host 走了;
+  //   现在 host 主动广播 PEER_LEAVE { migrate: true },joiner onPeerLeave 立即触发
+  //   requestPromoteToHost(snapshot) → 队友优先升级 + TRANSPORT_REBUILD_ANNOUNCE
+  //   joiner 端走 net.close() 不广播(自己走自己的,不会影响其他人)
+  try { net.close(isHost.value ? { broadcast: true } : {}) } catch (e) { /* swallow */ }
   router.push('/')
 }
 function onEditMyInfo() { showNickEditor.value = true }
@@ -592,7 +598,9 @@ function tryStartGame() {
   if (allReady) {
     // ★ v3.8 P1 修复:广播 GAME_START 让 joiner 也跳到 /game
     net.broadcast({ type: 'GAME_START', payload: { roomNo: roomNo.value } })
-    router.push('/game?roomNo=' + roomNo.value)
+    // ★ v0.4.16 对抗性复查 (V0414-01):跳转 URL 加 &role=host,GameView isP2PMode 才会判 true
+    //   旧版只带 roomNo,GameView 的 isP2PMode = (role==='joiner' || host 参数),会判 false
+    router.push('/game?roomNo=' + roomNo.value + '&role=host')
   }
 }
 function onSwapWithTeammate() {
