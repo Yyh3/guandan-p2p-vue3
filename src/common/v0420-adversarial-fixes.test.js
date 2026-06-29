@@ -175,7 +175,7 @@ console.log('\n=== 4. V0420 GameViewDesktop.onMounted 集成 smartReconnectToPee
 // ============== 5. V0420 版本号 + npm test 集成 ==============
 console.log('\n=== 5. V0420 版本号与 npm test 集成 ===')
 {
-  check('package.json version === 0.4.20', pkg.version === '0.4.20')
+  check('package.json version === 0.4.21', pkg.version === '0.4.21')
   check('npm test 命令含 v0420-adversarial-fixes.test.js',
     /v0420-adversarial-fixes\.test\.js/.test(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')))
 }

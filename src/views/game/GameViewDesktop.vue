@@ -274,7 +274,10 @@ onMounted(() => {
   //   找到就直接 joinRoom 自动重新进房;找不到才跳首页。
   //   这覆盖了 v0.4.17 host 主动退出场景(v0.4.19 已经处理)+ v0.4.20
   //   host 崩溃场景(无 close 广播,只能靠缓存的 peer hostAddress 猜)。
-  net.on('host:lost', async () => {
+  // ★ v0.4.21 对抗性审查 V0420-3 修复:之前用 net.on('host:lost', 匿名) + onUnmounted
+  //   net.off('host:lost') 不传 fn,会清掉所有 host:lost 监听器(包括其它模块订阅)。
+  //   修法:命名函数 + 保存 handler 引用,卸载用精确 off(event, handler)。
+  const onHostLost = async () => {
     // 先尝试 smart reconnect(优先用 v0.4.20 第二发现通道)
     try {
       // 从 selfInfo 拿 self(joinRoom 需要 nickname + avatar)
@@ -299,7 +302,8 @@ onMounted(() => {
     }
     // smart reconnect 失败 → 跳首页(v0.4.17 旧行为)
     router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
-  })
+  }
+  net.on('host:lost', onHostLost)
 })
 onUnmounted(() => {
   if (mqLandscape) {
@@ -310,8 +314,9 @@ onUnmounted(() => {
     }
   }
   // ★ v0.4.17 对抗性审查 (V0416-04):清理 host:lost 监听器,避免残留导致下次进入重复跳页
+  // ★ v0.4.21 对抗性审查 V0420-3 修复:精确 off(event, handler) 避免清掉其他模块订阅
   if (typeof net.off === 'function') {
-    net.off('host:lost')
+    try { net.off('host:lost', onHostLost) } catch (e) { /* swallow */ }
   }
 })
 

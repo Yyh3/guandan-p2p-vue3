@@ -1664,25 +1664,43 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
       // joinRoom 是同步的(open 是异步 fire-and-forget),连接成功由 transport 内部 emit 'connect'
       //   失败由 transport 内部 emit 'error' 或 '_DISCONNECT'
       //   这里我们用 Promise 包装 listen 'connect'/'error' 事件
+      // ★ v0.4.21 对抗性审查 V0420-1 修复:之前用 off('connect') 不传 fn 会清空所有
+      //   connect 监听器(包含 useGameLogic.onConnectSnapshot),导致新 joiner 拿不到初始快照。
+      //   修法:保存 handler 引用,off 传具体 handler;onConnect/onError 里 clearTimeout
+      //   避免 setTimeout 泄漏(每次循环泄漏 1 个 → 1 小时反复调用越积越多)。
       const ok = await new Promise((resolve) => {
         let resolved = false
-        const onConnect = () => { if (!resolved) { resolved = true; resolve(true) } }
-        const onError = () => { if (!resolved) { resolved = true; resolve(false) } }
-        const timer = setTimeout(() => { if (!resolved) { resolved = true; resolve(false) } }, timeoutMs)
+        let timer = null
+        const onConnect = () => {
+          if (resolved) return
+          resolved = true
+          if (timer) { clearTimeout(timer); timer = null }
+          resolve(true)
+        }
+        const onError = () => {
+          if (resolved) return
+          resolved = true
+          if (timer) { clearTimeout(timer); timer = null }
+          resolve(false)
+        }
+        timer = setTimeout(() => {
+          if (resolved) return
+          resolved = true
+          timer = null
+          resolve(false)
+        }, timeoutMs)
         try {
           on('connect', onConnect)
           on('error', onError)
           // 同步调 joinRoom(open 是异步,transport 内部 emit 'connect'/'error')
           joinRoom(roomNo, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
         } catch (e) {
-          if (!resolved) { resolved = true; clearTimeout(timer); resolve(false) }
+          if (!resolved) { resolved = true; if (timer) { clearTimeout(timer); timer = null }; resolve(false) }
         }
-        // 兜底:timer 到期就 resolve(false)
-        //   timer 在 onConnect/onError 也会被 clearTimeout
       })
-      // 清理 listener
-      try { off('connect') } catch (_) {}
-      try { off('error') } catch (_) {}
+      // 清理 listener — 精确 off 传具体 handler,避免清掉其他模块订阅的监听器
+      try { off('connect', onConnect) } catch (_) {}
+      try { off('error', onError) } catch (_) {}
       if (ok) {
         if (typeof opts.onSuccess === 'function') opts.onSuccess(c.hostAddress)
         return { ok: true, hostAddress: c.hostAddress, tried }

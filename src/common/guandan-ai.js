@@ -376,7 +376,10 @@ function findMinStraightFlush(cards, targetMain) {
   for (const suit of [0, 1, 2, 3]) {
     const sc = bySuit[suit] || []
     const cnt = E.countByRank(sc)
-    const ranks = Object.keys(cnt).map(Number).filter(r => r <= 13).sort((a, b) => a - b)
+    // ★ v0.4.21 对抗性审查 VAI-1 修复:之前 filter(r => r <= 13) 把 A(14)排了,
+    //   导致手牌有 ♠10JQKA 的合法同花顺,AI 找不到(guandan-engine.test.js L62
+    //   明确 10JQKA 是合法顺子)。规则边界:不含 2(15)/王(16/17),A 作为 14 允许。
+    const ranks = Object.keys(cnt).map(Number).filter(r => r >= 3 && r <= 14).sort((a, b) => a - b)
     // 找连续 5 张
     for (let i = 0; i + 4 < ranks.length; i++) {
       const a = ranks[i], b = ranks[i + 4]

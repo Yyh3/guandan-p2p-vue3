@@ -41,7 +41,7 @@ function check(name, cond) {
 console.log('\n=== 1. V0416-01: 修复版本可访问性 ===')
 {
   // 当前 package.json version 应该是 v0.4.20(v0.4.18 已修 V0414-04,本版本 V0419 follow-up)
-  check('package.json version === 0.4.20', pkg.version === '0.4.20')
+  check('package.json version === 0.4.21', pkg.version === '0.4.21')
 
   // 当前 HEAD 应该能跑测试 — 即 working tree 的修复版本
   check('network.js 含 host:lost emit 修复', /emit\(['"]host:lost['"]/.test(networkSrc))

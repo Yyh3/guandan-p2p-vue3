@@ -4,6 +4,77 @@
 
 ---
 
+## v0.4.21 (2026-06-30) — V0421 对抗性审查 4 个 BUG 修复(42 套件 / 1916 单测全过)
+
+> v0.4.20 发布后立刻做对抗性复查(对着代码找攻击面 / 边界条件 / 资源泄漏),
+> 找到 4 个 BUG,全部修复 + 加测试。本版本是 v0.4.20 的稳健化收尾。
+
+### A. BUG-V0420-1(严重):`smartReconnectToPeers` 用 `off('connect')` 清空所有 connect 监听器
+
+**症状**: `network.js` 的 `smartReconnectToPeers` 调 `off('connect')` 不传 fn,
+而 `off(event)` 不传 handler 会 `delete handlers[event]`(整个事件列表清空)。
+这会把 `useGameLogic` 注册的 `onNet('connect', onConnectSnapshot)` 监听器也清掉。
+
+**后果**: joiner smart reconnect 成功后,host 端 `onConnectSnapshot` 回调被清空,
+新 joiner 拿不到初始 `STATE_SNAPSHOT` → 卡在空白对局页,UI 与 host 完全脱节。
+
+**修法**: `network.js:1663-1708` 保存 handler 引用,off 传具体 handler:
+```js
+const onConnect = () => { if (resolved) return; resolved = true; if (timer) { clearTimeout(timer); timer = null }; resolve(true) }
+// ... 异步完成后 ...
+try { off('connect', onConnect) } catch (_) {}  // 精确 off,不破坏其他模块订阅
+```
+
+### B. BUG-V0420-2(内存泄漏):`smartReconnectToPeers` setTimeout 没 clearTimeout
+
+**症状**: `network.js` 的 setTimeout 2s 兜底在 onConnect/onError 触发时**没** clearTimeout,
+timer 自然到期才被回收。
+
+**后果**: 每个循环泄漏 1 个 setTimeout id,1 小时反复调用 → Node 内 timer 队列越积越多。
+
+**修法**: onConnect / onError / setTimeout 回调 / catch 路径都加 `clearTimeout(timer); timer = null`。
+
+### C. BUG-V0420-3(一致性):`GameViewDesktop.onUnmounted` 用 `net.off('host:lost')` 清空所有 host:lost 监听器
+
+**症状**: `GameViewDesktop.vue` 在 `onMounted` 用 `net.on('host:lost', async () => {...})` 匿名函数,
+在 `onUnmounted` 用 `net.off('host:lost')` 不传 fn → 清空所有 host:lost 监听器(包括其它模块订阅)。
+
+**后果**: 卸载 GameViewDesktop 时清掉其它模块的 host:lost 订阅 → 后续 host 崩溃,
+其他模块失去兜底。
+
+**修法**: 改用命名函数 `const onHostLost = async () => {...}` + 精确 `net.off('host:lost', onHostLost)`。
+跟 `useGameLogic.js` 的 `onNet + disposers` 模式、`RoomView.vue` 的 `onNet + cleanupRoomListeners` 模式对齐。
+
+### D. BUG-AI-1(AI 边界):`findMinStraightFlush` 用 `r <= 13` 过滤掉 A(14)
+
+**症状**: `guandan-ai.js:findMinStraightFlush` 用 `filter(r => r <= 13)` 把 A(14)排除。
+
+**后果**: 手牌有 ♠10JQKA / ♠9TJQK 之类的合法同花顺时,AI 找不到!
+`guandan-engine.test.js` L62 明确 "10JQKA 合法",但 AI 找不到这种顺子。
+
+**修法**: `guandan-ai.js:382` 改成 `filter(r => r >= 3 && r <= 14)`(允许 A 作为 14)。
+
+### 测试基线
+
+- **42 套件 / 1916 通过 / 0 失败**(v0.4.20 的 1891 + v0421-adversarial-fixes 25 case)
+- `npm run build` ✓ 1.47s
+
+### v0.4.21 + v0.4.20 + v0.4.19 + v0.4.18 累计修复
+
+v0.4.18 留 v0.4.19+ 的 follow-up,经过 v0.4.19 + v0.4.20 + v0.4.21 三轮修复:
+- 确定性本地选举(selectNextHostCandidate UUID 字典序 + canHost 过滤)
+- canHost + hostAddress 字段上报能力
+- close({broadcast:true, newHostSeat, newHostAddress}) 主动广播完整新 host 信息
+- peer hostAddress 持久化缓存 + smart reconnect
+- 4 个 smartReconnectToPeers 边界 BUG 修复(精确 off / clearTimeout / GameViewDesktop 精确 off / AI 同花顺允许 A)
+
+**host 迁移场景覆盖**:
+- host 主动退出 → PEER_LEAVE 广播 + TRANSPORT_REBUILD_ANNOUNCE → joiner 立即收到 newHostAddress 走 N-3 兜底(v0.4.17 + v0.4.19)
+- host 崩溃 → joiner 走 smartReconnectToPeers 循环 try-connect localStorage 缓存的 peer hostAddress 找新 host(v0.4.20)
+- 浏览器 ws joiner 无 server 能力 → host:lost 跳首页让用户重连(v0.4.18)
+
+---
+
 ## v0.4.20 (2026-06-30) — V0420 真正的"第二发现通道"(纯 JS 版 — peer hostAddress 缓存 + smart reconnect)(42 套件 / 2020 单测全过)
 
 > v0.4.19 留 v0.4.20+ 的"真正的第二发现通道"(mDNS / UDP 广播 / 固定服务 scope 大需 native)。

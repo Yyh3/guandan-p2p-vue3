@@ -28,7 +28,9 @@
 | **v0.4.17** | ✅ 完成 | v0.4.16 对抗性复查 5 项 V0416 真 bug 修复 + 1 项误报澄清 | `network.js rebuildAsHost()` 关键顺序修复(先起新 server + 用**旧 transport 引用**广播 TRANSPORT_REBUILD_ANNOUNCE + 再 close 旧 transport,让 WS/AndroidWs 真机 host 迁移真正闭环);`RoomView` `onNet('peer:leave')` 检测 `seat===0` 跳首页 + 提示"房主已退出,房间解散";网络层 `_DISCONNECT payload.seat===-1` (joiner 端 ws.onclose) emit `'host:lost'` + `GameViewDesktop` 监听跳首页;V0416-06 README 测试数字统一;V0416-05 误报澄清(RoomView 实际用 emoji 🟢/🔴,非空字符串);V0416-01 修复未合入 master 留 follow-up;39 套件 / 1927/0 单测 |
 | **v0.4.18** | ✅ 完成 | V0414-04 本地选举协议最小修复 | `network.js requestPromoteToHost()` 扩展本地 self-loop 到所有 transport(不只 BC)+ `sendMessage` 包 try/catch 允许失败;`rebuildAsHost()` 失败分支(`_createTransport` / `open('self')`)emit `'host:lost'`;`useGameLogic.onHostMigrated` 的 rebuildAsHost promise.catch 也 emit host:lost。浏览器 ws joiner 无 server 能力走 host:lost → 跳首页;AndroidWs native / Node ws joiner 走 rebuildAsHost 成功 → 起新 server → broadcast TRANSPORT_REBUILD_ANNOUNCE。已知未做(留 v0.4.19+):确定性本地选举 / canHost + hostAddress 上报 / mDNS / UDP 第二发现通道;40 套件 / 1947/0 单测 |
 | **v0.4.19** | ✅ 完成 | V0419 follow-up 4 项 | `network.js selectNextHostCandidate()` 确定性 UUID 字典序 + canHost 选举(v2.1 旧版重命名 `selectNextHostBySeat` 保留);`selfInfo` 加 `canHost` + `hostAddress` 字段(peer:join 上报能力);`broadcastPeerLeave` payload 加 `newHostAddress`(自动从 peers 提取);`close({broadcast:true, newHostSeat, newHostAddress})` 关闭前广播完整新 host 信息(简化 TOMBSTONE)。`requestPromoteToHost` 集成新选举 + `canHostAsNewHost()` 守卫:浏览器 ws joiner 走 host:lost 跳首页;AndroidWs native / Node ws joiner 走 rebuildAsHost 起新 server,41 套件 / 1985/0 单测 |
-| **v0.4.20** | ✅ 当前 | V0420 真正的"第二发现通道"(纯 JS 版) | `network.js` peer hostAddress 缓存到 localStorage(跨 session 持久化,1 小时过期)+ `smartReconnectToPeers(roomNo, opts)` 循环 try-connect 缓存的 peer 地址(canHost=true 优先,ts 最新优先)找新 host。`peer:join` / `peer:update` handler 触发 `cachePeerHostAddress`,joiner 上报 hostAddress 时自动持久化。`GameViewDesktop` `host:lost` 监听先调 `smartReconnectToPeers`,找到新 host 直接 `return`(不跳首页);找不到 fallback 跳首页(v0.4.17 旧行为)。已知未做留 v0.4.21+:真 mDNS(Capacitor plugin)/ UDP 广播(原生层)/ 固定服务(scope 大需 native);41 套件 / 1891/0 单测 |
+| **v0.4.20** | ✅ 完成 | V0420 真正的"第二发现通道"(纯 JS 版) | `network.js` peer hostAddress 缓存到 localStorage(跨 session 持久化,1 小时过期)+ `smartReconnectToPeers(roomNo, opts)` 循环 try-connect 缓存的 peer 地址(canHost=true 优先,ts 最新优先)找新 host。`peer:join` / `peer:update` handler 触发 `cachePeerHostAddress`,joiner 上报 hostAddress 时自动持久化。`GameViewDesktop` `host:lost` 监听先调 `smartReconnectToPeers`,找到新 host 直接 `return`(不跳首页);找不到 fallback 跳首页(v0.4.17 旧行为)。已知未做留 v0.4.21+:真 mDNS(Capacitor plugin)/ UDP 广播(原生层)/ 固定服务(scope 大需 native);41 套件 / 1891/0 单测 |
+| **v0.4.21** | ✅ 当前 | V0421 对抗性审查 4 个 BUG 修复 | v0.4.20 发布后立刻做对抗性复查,找到 4 个 BUG 全部修复:`smartReconnectToPeers` 用 `off('connect')` 清空所有 connect 监听器 → 改为精确 off(BUG-V0420-1 严重);setTimeout 没 clearTimeout → 内存泄漏,4 处都加 clearTimeout(BUG-V0420-2);`GameViewDesktop.onUnmounted` 裸 off('host:lost') 清空所有 host:lost 监听器 → 改用命名函数 onHostLost + 精确 off(BUG-V0420-3);`findMinStraightFlush` 用 `r <= 13` 过滤掉 A(14) → 改 `r >= 3 && r <= 14` 允许 A 同花顺(BUG-AI-1);42 套件 / 1916/0 单测 |
+| **v4.0** | 💭 构思中 | iOS + 录像回放 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 | **v4.0** | 💭 构思中 | iOS + 录像回放 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 
 ---
@@ -194,7 +196,7 @@ MINOR: 新功能(v3.0-3.7 都是 MINOR)
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前版本**:`v0.4.20`(2026-06-30,V0420 真正的"第二发现通道"(纯 JS 版) — `cachePeerHostAddress` + `getCachedPeerHostAddresses` peer hostAddress 持久化到 localStorage(1 小时过期)+ `smartReconnectToPeers` 循环 try-connect 缓存的 peer 地址找新 host;`peer:join` / `peer:update` 触发缓存;`GameViewDesktop` host:lost 监听先调 smart reconnect 找到新 host 直接 return 不跳首页;已知未做留 v0.4.21+:真 mDNS / UDP 广播 / 固定服务(scope 大需 native);41 套件 / 1891/0 单测)
+**当前版本**:`v0.4.21`(2026-06-30,V0421 对抗性审查 4 个 BUG 修复 — `smartReconnectToPeers` 精确 off + clearTimeout 内存泄漏修复 + `GameViewDesktop.onUnmounted` 精确 off + `findMinStraightFlush` 允许 A 同花顺;42 套件 / 1916/0 单测)
 **首发目标**:v1.0.0(H5)
 
 ---
