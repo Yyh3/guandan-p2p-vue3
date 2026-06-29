@@ -80,6 +80,74 @@ function ensureUuid() {
   return 'u-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+// ============== v0.4.20 peer hostAddress 持久化缓存 ==============
+// 真正的"第二发现通道"纯 JS 实现(不依赖 mDNS / UDP / 固定服务):
+//   joiner 端把所有 peer 的 hostAddress + canHost 缓存到 localStorage(跨 session),
+//   host 崩溃后其他 joiner 用 smartReconnectToPeers() 循环 try-connect 缓存的地址,
+//   找到第一个能连的就是新 host(新 host 已起 server 在该地址)。
+//
+// 局限:
+//   - 本地 localStorage 只能存 joiner 自己见过的 peer;新加的 joiner 没缓存
+//   - smart reconnect 是"猜",不是发现 — 但配合 v0.4.19 确定性选举已经够用:
+//     新 host 升级后会广播 TRANSPORT_REBUILD_ANNOUNCE / PEER_LEAVE(含 newHostAddress)
+//     其他 joiner 收到后能 connect;接收不到的 joiner 走 smartReconnectToPeers 兜底
+//
+// 存储格式: localStorage[`guandan-v0420-peer-cache-${roomNo}`] = JSON.stringify([
+//   { seat, hostAddress, canHost, ts }
+// ])
+const PEER_CACHE_KEY_PREFIX = 'guandan-v0420-peer-cache-'
+const PEER_CACHE_MAX_AGE_MS = 60 * 60 * 1000  // 1 小时
+
+function _peerCacheKey(roomNo) { return PEER_CACHE_KEY_PREFIX + (roomNo || 'default') }
+
+function _loadPeerCache(roomNo) {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const raw = localStorage.getItem(_peerCacheKey(roomNo))
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    // 过滤过期(> 1 小时) + 字段缺失
+    const now = Date.now()
+    return arr.filter(e =>
+      e && typeof e.hostAddress === 'string' && e.hostAddress &&
+      typeof e.canHost === 'boolean' &&
+      typeof e.ts === 'number' && (now - e.ts) < PEER_CACHE_MAX_AGE_MS
+    )
+  } catch (e) { return [] }
+}
+
+function _savePeerCache(roomNo, entries) {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(_peerCacheKey(roomNo), JSON.stringify(entries))
+  } catch (e) { /* quota / private mode */ }
+}
+
+// 写入/更新单个 peer 的 hostAddress 缓存
+//   调用方:peer:join handler(收到 canHost + hostAddress 时)
+function cachePeerHostAddress(roomNo, seat, hostAddress, canHost) {
+  if (!roomNo || typeof seat !== 'number' || seat < 1 || seat > 3) return
+  if (typeof hostAddress !== 'string' || !hostAddress) return
+  const entries = _loadPeerCache(roomNo)
+  const filtered = entries.filter(e => e.seat !== seat)
+  filtered.push({ seat, hostAddress, canHost: !!canHost, ts: Date.now() })
+  // 按 seat 去重后保留最多 8 条(seat 0/1/2/3 + 一些备份)
+  const deduped = {}
+  for (const e of filtered) deduped[e.seat] = e
+  const final = Object.values(deduped).sort((a, b) => b.ts - a.ts).slice(0, 8)
+  _savePeerCache(roomNo, final)
+}
+
+// 读取缓存的 peer 列表(按 canHost=true 优先,再按 ts 最新)
+//   调用方:smartReconnectToPeers() / 调试 UI
+function getCachedPeerHostAddresses(roomNo) {
+  const entries = _loadPeerCache(roomNo)
+  return entries
+    .filter(e => e.canHost && e.hostAddress)
+    .sort((a, b) => (b.ts - a.ts))  // 最新优先
+}
+
 // ============== Transport 工厂 ==============
 let _transportFactory = null
 
@@ -437,6 +505,12 @@ function _handleHostMessage(msg) {
         _kickedSeats.delete(assignedSeat)
       }
       emit('peer:update', { seat: assignedSeat, info: updated })
+      // ★ v0.4.20 V0420 修复:peer:update 触发 hostAddress 缓存
+      //   joiner 上报 hostAddress + canHost 时,host 端缓存到 localStorage
+      //   供 host 崩溃后其他 joiner smartReconnectToPeers 用
+      if (updated.hostAddress) {
+        try { cachePeerHostAddress(roomId, assignedSeat, updated.hostAddress, updated.canHost) } catch (_) {}
+      }
       // ★ WebSocket:告诉 transport 这个 ws 对应哪个 seat,后续定向消息才能路由
       if (transport && typeof transport.bindLastSenderSeat === 'function') {
         transport.bindLastSenderSeat(assignedSeat)
@@ -475,6 +549,12 @@ function _handleHostMessage(msg) {
     // v0.4.8 N-2:AI 补位通知 — host 端 emit peer:join,useGameLogic 监听后
     //   从 game.aiPlayers 移除该 seat,更新 UI
     emit('peer:join', { seat: assignedSeat, info: msg.payload })
+    // ★ v0.4.20 V0420 修复:peer:join 触发 hostAddress 缓存
+    //   joiner 上报 hostAddress + canHost 时,host 端缓存到 localStorage
+    //   供 host 崩溃后其他 joiner smartReconnectToPeers 用
+    if (msg.payload && msg.payload.hostAddress) {
+      try { cachePeerHostAddress(roomId, assignedSeat, msg.payload.hostAddress, msg.payload.canHost) } catch (_) {}
+    }
     sendMessage({
       type: 'SYNC',
       payload: { peers: Array.from(peers.entries()) },
@@ -1541,6 +1621,86 @@ function isConnected() { return !!transport }
 function getPeers() { return peers }
 function getSelfInfo() { return selfInfo }
 
+// ============== v0.4.20 V0420 真正的"第二发现通道"(纯 JS 版)==============
+// smartReconnectToPeers(roomNo, opts):
+//   循环尝试 connect 所有缓存的 peer hostAddress(canHost=true 优先,ts 最新优先)
+//   找到第一个能连的就是新 host(他升级后已经起 server 在该地址)
+//   成功后调 joinRoom(...) 自动重新进房
+//
+// 参数:
+//   roomNo: 房间号(必传)
+//   opts:
+//     - self: { nickname, avatar } 重新进房用的玩家信息(必传)
+//     - onSuccess: (newHostAddress) => {} 找到新 host 回调
+//     - onFail: (tried) => {} 全部失败回调(tried 是尝试过的地址列表)
+//     - timeoutMs: 每个地址尝试超时(默认 2000ms)
+//     - maxRetries: 最多尝试几个地址(默认 5)
+//
+// 局限:
+//   - 本地 localStorage 只能存 joiner 自己见过的 peer;新加的 joiner 没缓存
+//   - 这是"猜",不是真正发现 — 配合 v0.4.19 确定性选举 + v0.4.17 TRANSPORT_REBUILD_ANNOUNCE
+//     兜底(host 主动退出场景能直接收到地址,host 崩溃场景走 smartReconnectToPeers)
+async function smartReconnectToPeers(roomNo, opts = {}) {
+  if (!roomNo) return { ok: false, reason: 'no_room' }
+  const candidates = getCachedPeerHostAddresses(roomNo)
+  if (candidates.length === 0) {
+    return { ok: false, reason: 'no_candidates', tried: [] }
+  }
+  const self = opts.self || (selfInfo && { nickname: selfInfo.nickname, avatar: selfInfo.avatar })
+  if (!self) {
+    return { ok: false, reason: 'no_self_info', tried: [] }
+  }
+  const timeoutMs = opts.timeoutMs || 2000
+  const maxRetries = Math.min(opts.maxRetries || 5, candidates.length)
+
+  const tried = []
+  for (let i = 0; i < maxRetries; i++) {
+    const c = candidates[i]
+    tried.push(c.hostAddress)
+    // ★ 解析 hostAddress 为 hostIp:hostPort → 调 joinRoom
+    let parsed = null
+    try { parsed = parseHostAddress(c.hostAddress) } catch (e) { continue }
+    try {
+      // joinRoom 是同步的(open 是异步 fire-and-forget),连接成功由 transport 内部 emit 'connect'
+      //   失败由 transport 内部 emit 'error' 或 '_DISCONNECT'
+      //   这里我们用 Promise 包装 listen 'connect'/'error' 事件
+      const ok = await new Promise((resolve) => {
+        let resolved = false
+        const onConnect = () => { if (!resolved) { resolved = true; resolve(true) } }
+        const onError = () => { if (!resolved) { resolved = true; resolve(false) } }
+        const timer = setTimeout(() => { if (!resolved) { resolved = true; resolve(false) } }, timeoutMs)
+        try {
+          on('connect', onConnect)
+          on('error', onError)
+          // 同步调 joinRoom(open 是异步,transport 内部 emit 'connect'/'error')
+          joinRoom(roomNo, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+        } catch (e) {
+          if (!resolved) { resolved = true; clearTimeout(timer); resolve(false) }
+        }
+        // 兜底:timer 到期就 resolve(false)
+        //   timer 在 onConnect/onError 也会被 clearTimeout
+      })
+      // 清理 listener
+      try { off('connect') } catch (_) {}
+      try { off('error') } catch (_) {}
+      if (ok) {
+        if (typeof opts.onSuccess === 'function') opts.onSuccess(c.hostAddress)
+        return { ok: true, hostAddress: c.hostAddress, tried }
+      }
+    } catch (e) { /* try next */ }
+  }
+  if (typeof opts.onFail === 'function') opts.onFail(tried)
+  return { ok: false, reason: 'all_failed', tried }
+}
+
+// 清除某房间的 peer 缓存(开新房前调用,避免旧房数据污染)
+function clearPeerHostAddressCache(roomNo) {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.removeItem(_peerCacheKey(roomNo))
+  } catch (e) { /* swallow */ }
+}
+
 /**
  * 扫描局域网房间 —— v1.0 浏览器版 / v2.0 都不返回真实数据,JoinView 显示空状态
  */
@@ -1613,6 +1773,9 @@ export {
   canBroadcast, broadcastPeerLeave,
   // ★ v0.4.19 V0419-01/02:确定性本地选举 + host 能力检测 + hostAddress 探测
   canHostAsNewHost, getSelfHostAddress,
+  // ★ v0.4.20 V0420:真正的"第二发现通道"(纯 JS 实现)— peer hostAddress 缓存 + smart reconnect
+  cachePeerHostAddress, getCachedPeerHostAddresses,
+  smartReconnectToPeers, clearPeerHostAddressCache,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1645,5 +1808,8 @@ const net = {
   canBroadcast, broadcastPeerLeave,
   // ★ v0.4.19 V0419-01/02:确定性本地选举 + 能力检测
   canHostAsNewHost, getSelfHostAddress,
+  // ★ v0.4.20 V0420:peer hostAddress 缓存 + smart reconnect
+  cachePeerHostAddress, getCachedPeerHostAddresses,
+  smartReconnectToPeers, clearPeerHostAddressCache,
 }
 export default net

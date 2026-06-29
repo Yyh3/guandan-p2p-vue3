@@ -1,7 +1,7 @@
 /**
  * v0.4.19 对抗性复查修复测试 — V0419 follow-up 4 项
  *
- * V0414-04 报告里留 v0.4.19+ 的 follow-up,本版本集中修:
+ * V0414-04 报告里留 v0.4.20+ 的 follow-up,本版本集中修:
  * - V0419-01: 确定性本地选举函数(selectNextHostCandidate — UUID 字典序 + canHost 过滤)
  * - V0419-02: peer:join / peer:update payload 加 canHost + hostAddress 字段
  * - V0419-03: broadcastPeerLeave payload 加 newHostAddress(自动从 peers 提取)
@@ -180,9 +180,9 @@ console.log('\n=== 5. requestPromoteToHost 集成 selectNextHostCandidate + canH
 }
 
 // ============== 6. 版本号 + npm test 集成 ==============
-console.log('\n=== 6. v0.4.19 版本号与 npm test 集成 ===')
+console.log('\n=== 6. v0.4.20 版本号与 npm test 集成 ===')
 {
-  check('package.json version === 0.4.19', pkg.version === '0.4.19')
+  check('package.json version === 0.4.20', pkg.version === '0.4.20')
   check('npm test 命令含 v0419-adversarial-fixes.test.js',
     /v0419-adversarial-fixes\.test\.js/.test(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')))
 }

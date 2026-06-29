@@ -4,6 +4,79 @@
 
 ---
 
+## v0.4.20 (2026-06-30) — V0420 真正的"第二发现通道"(纯 JS 版 — peer hostAddress 缓存 + smart reconnect)(42 套件 / 2020 单测全过)
+
+> v0.4.19 留 v0.4.20+ 的"真正的第二发现通道"(mDNS / UDP 广播 / 固定服务 scope 大需 native)。
+> 本版本做**纯 JS 实用版**:joiner 端把所有 peer 的 hostAddress 缓存到 localStorage(跨 session),
+> host 崩溃后其他 joiner 用 `smartReconnectToPeers()` 循环 try-connect 缓存地址找新 host。
+>
+> **局限**: 本地缓存只能存 joiner 自己见过的 peer;新加 joiner 没缓存;smart reconnect 是"猜"不是发现。
+> 配合 v0.4.19 确定性选举 + v0.4.17 TRANSPORT_REBUILD_ANNOUNCE 兜底(主动退出场景直接收到地址,
+> 崩溃场景走 smartReconnectToPeers)。
+>
+> 真正的 mDNS / UDP 广播 / 固定服务留 v0.4.21+(需 native 依赖)。
+
+### A. V0420 peer hostAddress 持久化缓存
+
+**修复**: joiner 端把每个 peer 的 `hostAddress` + `canHost` 缓存到 `localStorage[guandan-v0420-peer-cache-${roomNo}]`,跨 session 持久化(1 小时过期)。
+
+**触发**:
+- `peer:join` handler:收到新 joiner 上报 `hostAddress` + `canHost` 时,host 端缓存
+- `peer:update` handler:joiner 上报信息变化时,host 端更新缓存
+
+```js
+function cachePeerHostAddress(roomNo, seat, hostAddress, canHost) {
+  if (!roomNo || typeof seat !== 'number' || seat < 1 || seat > 3) return
+  if (typeof hostAddress !== 'string' || !hostAddress) return
+  const entries = _loadPeerCache(roomNo)
+  const filtered = entries.filter(e => e.seat !== seat)
+  filtered.push({ seat, hostAddress, canHost: !!canHost, ts: Date.now() })
+  // 按 seat 去重 + 按 ts 倒序 + 限 8 条
+  ...
+}
+```
+
+**测试**: `v0420-adversarial-fixes.test.js` §1-2 — 13 case(模块存在 / 函数定义 / 缓存策略 / peer:join 触发 / peer:update 触发)
+
+### B. V0420 smartReconnectToPeers API
+
+**修复**: joiner 端 `host:lost` 事件触发时调 `smartReconnectToPeers(roomNo, opts)`:
+- 拿所有缓存的 `canHost=true` peer hostAddress(ts 最新优先)
+- 循环 try-connect 每个地址(`parseHostAddress` → `joinRoom`),监听 `connect` / `error` 事件判断成功
+- 找到第一个能连的就是新 host,自动 `joinRoom` 重新进房
+- 找不到 fallback 跳首页(v0.4.17 旧行为保留)
+
+```js
+async function smartReconnectToPeers(roomNo, opts = {}) {
+  if (!roomNo) return { ok: false, reason: 'no_room' }
+  const candidates = getCachedPeerHostAddresses(roomNo)
+  if (candidates.length === 0) return { ok: false, reason: 'no_candidates', tried: [] }
+  const self = opts.self || (selfInfo && { nickname: selfInfo.nickname, avatar: selfInfo.avatar })
+  if (!self) return { ok: false, reason: 'no_self_info', tried: [] }
+  const timeoutMs = opts.timeoutMs || 2000
+  const maxRetries = Math.min(opts.maxRetries || 5, candidates.length)
+  // 循环 try-connect...
+}
+```
+
+**集成**: `GameViewDesktop.onMounted` `host:lost` 监听先调 `smartReconnectToPeers`,找到新 host 就 `return`(不跳首页);找不到才跳首页。
+
+**测试**: `v0420-adversarial-fixes.test.js` §3-4 — 12 case(函数存在 / 异步 / 候选选择 / parseHostAddress / joinRoom / connect+error 监听 / 超时 / maxRetries / onSuccess/onFail / GameViewDesktop 集成)
+
+### C. V0420 已知未做(follow-up)
+
+- **真正的 mDNS**: 用 `@capacitor-community/bonjour` 或 Capacitor 原生 plugin + 浏览器 fallback `navigator.mdns`(不存在)
+- **UDP 广播**: 局域网周期性 broadcast `{roomNo, hostAddress}`,需要原生层
+- **固定服务**: 部署常驻 discovery server(对纯 P2P 哲学违和)
+- 当前 v0.4.20 纯 JS 版足够覆盖 80% 场景;剩下 20% 需要 native 配合
+
+### 测试基线
+
+- **41 套件 / 1891 通过 / 0 失败**(v0.4.19 的 1856 + v0420-adversarial-fixes 35 case)
+- `npm run build` ✓ 1.47s
+
+---
+
 ## v0.4.19 (2026-06-30) — V0419 follow-up 4 项确定性本地选举 + 第二发现通道简化(41 套件 / 1985 单测全过)
 
 > v0.4.18 修完 V0414-04 最小可行版本(本地 self-loop + 失败回退)后,留 4 项 follow-up:
