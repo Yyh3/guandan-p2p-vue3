@@ -20,7 +20,8 @@
 | **v0.4.9** | ✅ 完成 | 6 大功能增量 | AI 难度分档 + 二维码真扫码 + 战绩趋势图 + 真实 SFX + 过 A 重开 + UI 主题刷新,32 套件 / 1609/0 单测 |
 | **v0.4.10** | ✅ 完成 | 移动端响应式文档化 + v0.4.9 静态审查 9 bug 修复 | onHintToggle / isRestartAfterA / MATCH_RESTART seed / relay 白名单 / 真实音效 fallback / setSettings 合并 / IP 端口校验,33 套件 / 1675/0 单测 |
 | **v0.4.11** | ✅ 完成 | v0.4.10 静态审查 8 bug 修复 | ROUND_END host-only / 过 A 落盘 / MATCH_RESTART 鉴权去重 / 抽 afterMatchRestartRefresh / 音效 unlock 清理 / bgmStyle+sfxMode / scheduleAI difficulty / SettingsView 版本号动态化,34 套件 / 1781/0 单测 |
-| **v0.4.12** | ✅ 当前 | v0.4.11 修复后回归测试补充 | P2P 端到端 56 case(ROUND_END host-only 模拟 / applyRoundEndFromPayload 幂等 / MATCH_RESTART 鉴权 phase gate / restartMatch 同 seed 等),35 套件 / 1837/0 单测 |
+| **v0.4.12** | ✅ 完成 | v0.4.11 修复后回归测试补充 | P2P 端到端 56 case(ROUND_END host-only 模拟 / applyRoundEndFromPayload 幂等 / MATCH_RESTART 鉴权 phase gate / restartMatch 同 seed 等),35 套件 / 1837/0 单测 |
+| **v0.4.13** | ✅ 当前 | v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复 | network.js `canBroadcast` + `broadcastPeerLeave` + `close({broadcast})`;guandan-game.js `createGame.destroy`;useGameLogic `onP2PStateSnapshot` 走 `refreshUiFromGameState`;`migrateHost` 末尾 emit 'turn';`onP2PRoundEnd` roundId 去重;`onP2PPeerJoin` 走 `applyNetworkPlayers` 单一路径;`onP2PPlay` ts 去重 Set + `applyPlay` 防御 cards-not-found;35 套件 / 1837/0 单测 |
 | **v4.0** | 💭 构思中 | iOS + 录像回放 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 
 ---
@@ -186,7 +187,7 @@ MINOR: 新功能(v3.0-3.7 都是 MINOR)
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前版本**:`v0.4.12`(2026-06-28,v0.4.11 修复后补充 P2P 端到端回归测试)
+**当前版本**:`v0.4.13`(2026-06-29,v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复)
 **首发目标**:v1.0.0(H5)
 
 ---

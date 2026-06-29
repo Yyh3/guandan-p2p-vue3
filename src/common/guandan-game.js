@@ -169,13 +169,26 @@ function createGame(opts) {
    * 收到 host 广播的 PLAY 后,joiner 直接调这个,不重跑校验(避免 own broadcast 双重处理)
    * 也跳过 scheduleAI(联机 4 人都是真人,没 AI)
    */
-  function applyPlay(seat, cards, hand, rec) {
+function applyPlay(seat, cards, hand, rec) {
+    // ★ v0.4.13 对抗性审查 (P1-4):防御性 — 重复 applyPlay(WS 重传 / 多次 broadcast)
+    //   会让 hand 已空时 splice(-1, 1) 静默删末尾那张牌(silent bug)。
+    //   修法:cards 任何一张不在 hand 里 → 直接 return,跳过这次 apply。
+    //   防御场景:joiner 端已经 apply 过同一 PLAY,手牌已删,再 apply 时 hand 里查不到 cards。
     if (!hand) {
       // 兼容性调用:外部只传 seat+cards,从 state 取手牌
       hand = state.hands[seat].slice()
+      let allFound = true
       for (const card of cards) {
         const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
-        if (idx >= 0) hand.splice(idx, 1)
+        if (idx < 0) {
+          allFound = false
+          break
+        }
+        hand.splice(idx, 1)
+      }
+      if (!allFound) {
+        // cards 中至少一张不在 hand 里 — 重复 apply 或错误数据,跳过
+        return
       }
     }
     if (!rec) rec = E.recognize(cards)
@@ -402,6 +415,33 @@ function createGame(opts) {
     deal()
   }
 
+  /**
+   * ★ v0.4.13 对抗性审查修复 (P0-3):销毁 game 实例,清 _aiTimer + handlers
+   *
+   * 触发场景:onP2PDeal 收到 host 发的 DEAL 重新开局时,先 destroy 旧 game 实例,
+   *   避免旧 scheduleAI 的 setTimeout callback 在旧 game 已 GC 后仍被触发。
+   *
+   * 调用方:
+   *   - useGameLogic.js onP2PDeal 收到新 seed 时
+   *   - 测试 teardown 强制清理
+   *
+   * 不变量:
+   *   - destroy() 后 _aiTimer 被 clear,handlers 清空,aiPlayers 清空
+   *   - destroy() 后再调任何方法(pay / pass / deal)是 noop,不会 crash
+   */
+  function destroy() {
+    if (state._aiTimer) {
+      try { clearTimeout(state._aiTimer) } catch (e) {}
+      state._aiTimer = null
+    }
+    // 清 handlers Map(防止旧 listener 在 emit 时被调用,虽然 destroy 后不再 emit)
+    for (const k of Object.keys(handlers)) delete handlers[k]
+    // 清 aiPlayers(避免旧 AI 配置残留)
+    aiPlayers = []
+    // 标记已 destroyed
+    state._destroyed = true
+  }
+
   // ★ v0.4.9:重开一局(过 A 后) — 清空本轮状态,levelRank 回到 15(打 2)
   //   参考 docs/restart-after-a-flow.md §"重开一局动作"
   //   - 清空 finishedOrder / tableCards / lastPlay / trickHistory / passCount
@@ -447,6 +487,8 @@ function createGame(opts) {
     getState,
     deal, nextRound,
     restartMatch,  // ★ v0.4.9:过 A 后重开
+    // ★ v0.4.13 (P0-3):销毁旧 game 实例(清 timer / handlers / aiPlayers)
+    destroy,
     playerPlay, playerPass,
     // ★ v3.8 P1:无校验同步接口,4-tab 联机用
     applyPlay, applyPass, applyRoundEnd,
@@ -622,6 +664,15 @@ state.trickHistory = state.trickHistory.map(h => {
       }
 
       emit('host:migrated', { oldHostSeat, newHostSeat, finishedOrder: state.finishedOrder.slice(), abandonedSeats: state.abandonedSeats.slice() })
+      // ★ v0.4.13 对抗性审查 (P1-1):migrateHost 后必须 emit 'turn',
+      //   让 useGameLogic.on('turn') 监听器刷新 currentPlayer / lastPlay / 计时器 /
+      //   选中态。当前 useGameLogic.onHostMigrated 走 refreshUiFromGameState() 兜底,
+      //   但 game 层 emit 是契约正确性 — 任何外部直接调 game.migrateHost() 的人
+      //   不应该需要知道要调 refreshUiFromGameState。
+      emit('turn', state.currentPlayer, state.lastPlay, {
+        isTeammateLast: state.lastPlay && ((state.lastPlay.who + 2) % 4 === state.currentPlayer),
+        postMigration: true,
+      })
       return true
     },
 

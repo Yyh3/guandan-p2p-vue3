@@ -864,7 +864,79 @@ function joinRemoteRoom(hostAddress, self) {
   return joinRoom(hostAddress, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
 }
 
-function close() {
+/**
+ * ★ v0.4.13 对抗性审查修复 (P0-2 / P1-5):统一广播能力检查 + 主动 close 广播 PEER_LEAVE
+ *
+ * 旧问题:
+ *   - host 主动 close 时 joiner 必须等 6-8s 心跳超时才能发现
+ *   - 业务代码散落 `transport && transport.isReady && transport.isReady()` 防御写法
+ *   - 语义不统一,BC / WS / AndroidWs 各 transport 的 ready 判定时机不同
+ *
+ * 修法:
+ *   - canBroadcast() 统一封装 transport 是否可发消息的判定
+ *   - broadcastPeerLeave(opts) 主动广播 host 离开(触发 joiner 走 N-3 兜底迁移)
+ *   - close({ broadcast, snapshot, newHostSeat }) 显式 opt-in,默认不广播
+ *     (避免 RoomView 退房 / 测试 teardown 误广播污染 joiner)
+ *
+ * @returns {boolean} transport 存在且 isReady() 返回 true
+ */
+function canBroadcast() {
+  if (!transport) return false
+  if (typeof transport.isReady !== 'function') return false
+  try { return !!transport.isReady() } catch (e) { return false }
+}
+
+/**
+ * 主动广播 host 离开 PEER_LEAVE { seat:0, migrate, snapshot?, newHostSeat? }
+ *
+ * 触发场景:host 主动 close (RoomView showMenu / 用户退房 / App 关闭 / kill switch)。
+ *   joiner 端 onPeerLeave 收到 seat:0 + migrate=true 立即触发 requestPromoteToHost
+ *   走 N-3 兜底迁移路径,不等 6-8s 心跳超时。
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.snapshot]    - 当前 game state 快照,joiner 端可直接 applySnapshot
+ * @param {number} [opts.newHostSeat] - 推荐的新 host seat (1/2/3),不传 joiner 自选
+ * @returns {boolean} true=广播成功,false=无 transport / 非 host
+ */
+function broadcastPeerLeave(opts = {}) {
+  if (!isHostFlag) return false
+  if (!canBroadcast()) return false
+  const payload = { seat: 0, migrate: true }
+  if (Number.isInteger(opts.newHostSeat) && opts.newHostSeat >= 1 && opts.newHostSeat <= 3) {
+    payload.newHostSeat = opts.newHostSeat
+  }
+  if (opts.snapshot && typeof opts.snapshot === 'object') {
+    // 防御:序列化测大小,超大快照 (>64KB) 拒绝带上,避免 BC / WS buffer 爆掉
+    let serialized = ''
+    try { serialized = JSON.stringify(opts.snapshot) } catch (e) { return false }
+    if (serialized.length > 64 * 1024) {
+      // snapshot 太大,只发 migrate 标记不带 snapshot,joiner 走 STATE_SNAPSHOT 兜底
+      try { return sendMessage({ type: 'PEER_LEAVE', payload: { seat: 0, migrate: true } }) } catch (e) { return false }
+    }
+    payload.snapshot = opts.snapshot
+  }
+  try {
+    return sendMessage({ type: 'PEER_LEAVE', payload })
+  } catch (e) {
+    return false
+  }
+}
+
+/**
+ * 关闭网络连接 + 清理所有 state。
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.broadcast=false] - 是否主动广播 PEER_LEAVE 给 joiner
+ *                                          (仅 host 生效;默认 false 避免误广播)
+ * @param {object} [opts.snapshot]        - 配合 broadcast 发送 game state 快照
+ * @param {number} [opts.newHostSeat]     - 推荐的新 host seat
+ */
+function close(opts = {}) {
+  // ★ P0-2 修复:host 主动 close 时,若调用方显式 opt-in 则先广播 PEER_LEAVE 再清 state
+  //   必须在 stopHeartbeat + transport.close() 之前,确保 joiner 收得到
+  if (opts.broadcast === true) {
+    try { broadcastPeerLeave({ snapshot: opts.snapshot, newHostSeat: opts.newHostSeat }) } catch (e) { /* swallow */ }
+  }
   stopHeartbeat()
   stopHeartbeatChecker()
   cancelJoinRetry()
@@ -1345,6 +1417,8 @@ export {
   requestPromoteToHost,
   // ★ v0.4.8 N-1:host 迁移后 transport rebuild(client → server)
   rebuildAsHost,
+  // ★ v0.4.13 对抗性审查 (P0-2 / P1-5):广播能力统一 + 主动 close 广播
+  canBroadcast, broadcastPeerLeave,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1371,5 +1445,7 @@ const net = {
   requestPromoteToHost,
   // ★ v0.4.8 N-1:host 迁移后 transport rebuild
   rebuildAsHost,
+  // ★ v0.4.13 (P0-2 / P1-5)
+  canBroadcast, broadcastPeerLeave,
 }
 export default net

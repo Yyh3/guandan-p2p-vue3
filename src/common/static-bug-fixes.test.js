@@ -211,14 +211,23 @@ console.log('\n=== 5. BUG-F: READY 已在 RELAY_TYPES 中(常量级验证) ===')
 //   反映 v0.4.10 静态审查 8 个 P0/P1/P2 bug 修复(ROUND_END 鉴权 / 过 A 落盘 / MATCH_RESTART 门禁 / 真实音效 unlock 清理 / AI 难度对所有 AI 生效 / SettingsView 版本号动态化)
 // 2026-06-28: v0.4.12 收官,version 升到 0.4.12
 //   反映 v0.4.11 修复后的回归测试补充(P2P 端到端 56 case 覆盖 ROUND_END / MATCH_RESTART / state 落盘 / 同 seed restartMatch 等关键路径)
-console.log('\n=== 6. BUG-H: package.json version (v0.4.12) ===')
+// 2026-06-29: v0.4.13 收官,version 升到 0.4.13
+//   反映 v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复:
+//     P0-2 / P1-5 network.js 主动 close 广播 PEER_LEAVE + canBroadcast 封装
+//     P0-3 guandan-game.js createGame.destroy() 清 timer / handlers / aiPlayers
+//     P0-4 useGameLogic.js onP2PStateSnapshot 走 refreshUiFromGameState 单一来源
+//     P1-1 guandan-game.js migrateHost 末尾 emit 'turn' 触发 UI 同步
+//     P1-2 useGameLogic.js onP2PRoundEnd roundId 去重防止 UI 抖动
+//     P1-3 useGameLogic.js onP2PPeerJoin 走 applyNetworkPlayers 单一路径
+//     P1-4 useGameLogic.js onP2PPlay ts 去重 + game.applyPlay 防御 cards-not-found
+console.log('\n=== 6. BUG-H: package.json version (v0.4.13) ===')
 {
   // 静态文件读取验证
   const fs = await import('fs')
   const path = await import('path')
   const pkgPath = path.resolve('./package.json')
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-  eq('package.json version = 0.4.12', pkg.version, '0.4.12')
+  eq('package.json version = 0.4.13', pkg.version, '0.4.13')
 }
 
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============

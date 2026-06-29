@@ -977,10 +977,41 @@ function onAutoFindBest() {
     if (!payload || payload.seed == null) return
     // ★ GD-RC-001 修复:网络 host 跳过(自己发的),用 isNetworkHost 判定
     if (isNetworkHost.value) return
+    // ★ v0.4.13 对抗性审查 (P0-3):清理旧 game 实例,避免旧 scheduleAI 的 setTimeout
+    //   在旧 game 已 GC 后仍被触发,或旧 handlers Map 残留的 listener 干扰新 game。
+    //   触发场景:player 重连 / 重新进房 / host 重发 DEAL(换种子 / 重新开局)
+    if (game.value && typeof game.value.destroy === 'function') {
+      try { game.value.destroy() } catch (e) { /* swallow */ }
+    }
+    // 重置 UI phase ref,避免残留 'finished' 状态让中间窗口玩家以为对局结束
+    phase.value = 'idle'
+    finishedOrder.value = []
+    tableCards.value = []
+    lastPlay.value = null
     initGame({ isP2P: true, seed: payload.seed, forcedLevelRank: payload.levelRank })
+  }
+  // ★ v0.4.13 对抗性审查 (P1-4):PLAY payload 去重 Set(最近 32 条)
+  //   防御:WS 重传 / 多次 broadcast / 重连后回放 history 时,同一 PLAY 被收到多次,
+  //   防御静默 hand splice(-1, 1) bug — 虽然 P0-4 在 game.applyPlay 加了 cards-not-found 防御,
+  //   但去重让上层的 useGameLogic 也更稳。
+  const _appliedPlayIds = new Set()
+  const _appliedPlayIdsOrder = []  // FIFO 队列,用于淘汰最旧
+  const _PLAY_DEDUP_MAX = 32
+  function _dedupPlayId(playId) {
+    if (playId == null) return false  // 无 id 不过滤(向下兼容老 broadcast)
+    if (_appliedPlayIds.has(playId)) return true
+    _appliedPlayIds.add(playId)
+    _appliedPlayIdsOrder.push(playId)
+    if (_appliedPlayIdsOrder.length > _PLAY_DEDUP_MAX) {
+      const old = _appliedPlayIdsOrder.shift()
+      _appliedPlayIds.delete(old)
+    }
+    return false
   }
   function onP2PPlay(payload) {
     if (!payload || !game.value) return
+    // ★ 去重:host 重发同一 PLAY payload.ts (毫秒时间戳) 跳过
+    if (_dedupPlayId(payload.ts)) return
     try {
       const st = game.value.getState()
       if (st.currentPlayer === payload.seat) {
@@ -1039,11 +1070,21 @@ function onAutoFindBest() {
   }
   // ★ V0410-03:restartId 去重集合(MATCH_RESTART 一次性应用)
   const _appliedRestartIds = new Set()
+  // ★ v0.4.13 对抗性审查 (P1-2):ROUND_END roundId 去重 — 防止 host 重传时
+  //   外层 UI 同步(refs 重复赋值 + stopTimer 重复调)产生抖动。
+  //   内层 applyRoundEndFromPayload 已有 lastAppliedRoundId 去重,
+  //   但外层 ref 同步不走内层 — 需要外层独立去重。
+  let _lastAppliedRoundEndId = null
 
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false
   function onP2PRoundEnd(payload) {
     if (!payload || !game.value) return
+    // roundId 去重:host 重传同一 ROUND_END 时跳过外层 UI 同步
+    if (payload.roundId != null && _lastAppliedRoundEndId === payload.roundId) {
+      return
+    }
+    if (payload.roundId != null) _lastAppliedRoundEndId = payload.roundId
     suppressRoundEndBroadcast = true
     try {
       // 优先用权威接口(接 host 完整 payload),fallback 旧 applyRoundEnd
@@ -1092,42 +1133,30 @@ function onAutoFindBest() {
       if (payload.seat === selfSeat.value) return
     }
     try {
-      // ★ GD-RC-004 修复:_applySnapshot 之后必须同步刷新 UI refs。
-      //   之前 _applySnapshot 写内部 state + emit('turn') → useGameLogic turn 监听
-      //   只更新 currentPlayer / lastPlay / 计时器 / 选中态,不更新 myHand /
-      //   tableCards / finishedOrder / phase / levelUp。断线重连后 UI 会和
-      //   内部 state 不同步(下次出牌校验失败或 UI 卡住)。
-      if (game.value._applySnapshot || game.value.applySnapshot) {
-        if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
-        else game.value._applySnapshot(payload.snapshot)
-        // 同步刷新 UI refs
-        const st = game.value.getState()
-        currentPlayer.value = st.currentPlayer
-        lastPlay.value = st.lastPlay
-        tableCards.value = st.tableCards || []
-        finishedOrder.value = st.finishedOrder || []
-        phase.value = st.phase
-        levelRank.value = st.levelRank
-        levelUp.value = st.levelUp || 0
-        if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
-          myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
+      // ★ v0.4.13 对抗性审查 (P0-4):applySnapshot 后统一调 refreshUiFromGameState(),
+      //   删掉之前手写的 15 行 UI 同步块。refreshUiFromGameState 是单一来源,
+      //   后续加新字段(比如 isRestartAfterA / hostMigrationToast)只改一处。
+      //   旧版本 GD-RC-004 修过 _applySnapshot 后必须同步 UI refs,但实现是手写的,
+      //   跟 onHostMigrated / ROUND_END 路径的 UI 同步代码重复,容易遗漏。
+      if (game.value.applySnapshot) {
+        game.value.applySnapshot(payload.snapshot)
+      } else if (game.value._applySnapshot) {
+        game.value._applySnapshot(payload.snapshot)
+      } else {
+        // 极端 fallback(旧版 game 没有 applySnapshot 接口):用 refreshUiFromGameState
+        // 拿当前本地 state,但 snapshot 里的 levelRank / hands 仍要应用
+        const snap = payload.snapshot
+        if (snap.levelRank != null) {
+          levelRank.value = snap.levelRank
+          nextLevelLabel.value = RANK_LABEL[snap.levelRank]
+        }
+        if (Array.isArray(snap.hands) && snap.hands[selfSeat.value]) {
+          myHand.value = E.sortHandGrouped(snap.hands[selfSeat.value].slice())
           selected.value = new Array(myHand.value.length).fill(false)
           selectedColKeys.value = {}
         }
-      } else {
-        // 旧 fallback(没有 _applySnapshot / applySnapshot 的情况)
-        const st = game.value.getState()
-        currentPlayer.value = payload.snapshot.currentPlayer ?? st.currentPlayer
-        lastPlay.value = payload.snapshot.lastPlay ?? st.lastPlay
-        finishedOrder.value = payload.snapshot.finishedOrder || []
-        if (payload.snapshot.levelRank) {
-          levelRank.value = payload.snapshot.levelRank
-          nextLevelLabel.value = RANK_LABEL[payload.snapshot.levelRank]
-        }
-        if (payload.snapshot.hands && payload.snapshot.hands[selfSeat.value]) {
-          myHand.value = E.sortHandGrouped(payload.snapshot.hands[selfSeat.value].slice())
-        }
       }
+      refreshUiFromGameState()
     } catch (e) { console.warn('applyStateSnapshot err', e) }
   }
 
@@ -1138,28 +1167,19 @@ function onAutoFindBest() {
   }
   // v0.4.8 N-2:joiner 加入时 host 端的反向操作 — 从 aiPlayers 移除 seat
   //   对称于 onP2PAITakeover(掉线/AI 接管时加 aiPlayers,真玩家进入时移除)
+  // ★ v0.4.13 对抗性审查 (P1-3):删掉手写的 players.value 更新,
+  //   统一走 applyNetworkPlayers() 从 net.getPeers() 拿权威数据,避免双路径更新
+  //   产生 race(可能 UI 闪一下从 AI 名字切到真人名字)。
   function onP2PPeerJoin(payload) {
     if (!payload || typeof payload.seat !== 'number') return
     if (!isNetworkHost.value) return  // 只有 host 端维护 aiPlayers
     if (!game.value) return
-    const seat = payload.seat
     // 从 game.aiPlayers 移除
     if (typeof game.value.removeAIPlayer === 'function') {
-      game.value.removeAIPlayer(seat)
+      game.value.removeAIPlayer(payload.seat)
     }
-    // 更新 UI(用真玩家 nickname/avatar,不再 isAI)
-    const realName = payload.info?.nickname || null
-    const realAvatar = payload.info?.avatar || null
-    const next = [...players.value]
-    if (next[seat]) {
-      next[seat] = {
-        ...next[seat],
-        isAI: false,
-        name: realName || next[seat].name,
-        avatar: realAvatar || next[seat].avatar,
-      }
-      players.value = next
-    }
+    // 委托 applyNetworkPlayers 从 net.getPeers() 单一来源更新 UI
+    applyNetworkPlayers()
   }
 
   // v0.4.8 N-2:AI 补位 — host 端扫 peers,把空 seat 自动填 AI

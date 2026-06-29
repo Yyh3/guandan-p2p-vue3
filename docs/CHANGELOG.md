@@ -4,6 +4,87 @@
 
 ---
 
+## v0.4.13 (2026-06-29) — v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复(35 套件 / 1837 单测全过)
+
+> 本版本基于 v0.4.12 master 静态对抗性审查,集中修 8 项 P2P / game / network 层缺陷。
+> 全部修复自带测试,新增 `v0412-adversarial-fixes.test.js` 34 case 端到端覆盖。
+
+### A. v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复(本轮)
+
+#### **P0-2 / P1-5 network.js:`canBroadcast()` 统一封装 + `broadcastPeerLeave()` + `close({broadcast})`**
+
+- 现象 1:host 主动 close 时 joiner 必须等 6-8s 心跳超时才能发现 host 离开,期间游戏卡住。
+- 现象 2:业务代码散落 `transport && transport.isReady && transport.isReady()` 防御写法,BC / WS / AndroidWs 三个 transport 的 ready 语义不一致。
+- 修法:
+  - 加 `canBroadcast()` 统一封装 transport 是否可发消息(用 try/catch 包 isReady 防御)
+  - 加 `broadcastPeerLeave({snapshot, newHostSeat})` 主动广播 `PEER_LEAVE {seat:0, migrate:true}`
+  - 改 `close(opts)` 接受 `{broadcast, snapshot, newHostSeat}`,**默认 broadcast=false** 避免 RoomView 退房误广播
+  - snapshot >64KB 拒绝带上,避免 BC/WS buffer 爆
+- 防御:close() 在 stopHeartbeat + transport.close() **之前**先 broadcast,确保 joiner 收得到
+- 验证:`v0412-adversarial-fixes.test.js` §1 (8 case)
+
+#### **P0-3 guandan-game.js:`createGame.destroy()` 销毁旧 game 实例**
+
+- 现象:joiner 收到 host 重发的 DEAL 时,useGameLogic `onP2PDeal` 直接 `initGame()` 覆盖旧 game,但旧 game 的 `_aiTimer` setTimeout 仍在跑。500-1000ms 后 callback 触发旧 game 实例上的 `playerPlay` / `playerPass`,可能 throw 或出过期手牌。
+- 修法:
+  - `createGame` 返回值加 `destroy()` 方法:clear `_aiTimer` + 清 `handlers` Map + 清 `aiPlayers` + 标 `_destroyed`
+  - useGameLogic `onP2PDeal` 收到 DEAL 时先 `game.value.destroy()` 再 `initGame`
+  - 重置 UI phase ref (避免残留 'finished' 中间窗口)
+- 验证:`v0412-adversarial-fixes.test.js` §2 (5 case)
+
+#### **P0-4 useGameLogic.js:`onP2PStateSnapshot` 走 `refreshUiFromGameState` 单一来源**
+
+- 现象:`onP2PStateSnapshot` 收到 snapshot 后,apply 完手写 15 行 UI 同步块。跟 `onHostMigrated` / `ROUND_END` 路径的 UI 同步代码重复,容易遗漏字段。
+- 修法:apply 完直接 `refreshUiFromGameState()` 单一来源,删掉手写块
+- 副作用:后续新增字段(如 isRestartAfterA、hostMigrationToast)只改 `refreshUiFromGameState` 一处
+- 验证:`v0412-adversarial-fixes.test.js` §3 (3 case)
+
+#### **P1-1 guandan-game.js:`migrateHost` 末尾 emit `'turn'` 触发 UI 同步**
+
+- 现象:`migrateHost` 修改了 `state.currentPlayer / firstPlayer / leaderPlayer / lastPlay.who / trickHistory`,但只 emit `'host:migrated'`,不 emit `'turn'`。
+- 防御:useGameLogic `onHostMigrated` 调 `refreshUiFromGameState()` 兜底,所以没爆。但 game 层 emit 是契约正确性 —— 任何外部直接调 `game.migrateHost()` 的人不应该需要知道要调 `refreshUiFromGameState`。
+- 修法:`migrateHost` 末尾 `emit('turn', state.currentPlayer, state.lastPlay, {isTeammateLast, postMigration: true})`
+- 验证:`v0412-adversarial-fixes.test.js` §4 (3 case)
+
+#### **P1-2 useGameLogic.js:`onP2PRoundEnd` roundId 去重防止 UI 抖动**
+
+- 现象:joiner 端收到 ROUND_END 后调 `applyRoundEndFromPayload`(内部 `lastAppliedRoundId` 去重 OK),但外层 useGameLogic 还会**再次**同步 UI ref + `stopTimer`。host 重传同一 roundId 时,UI refs 重复赋值 + `stopTimer` 重复调产生抖动。
+- 修法:useGameLogic 闭包加 `_lastAppliedRoundEndId`,外层早 return
+- 验证:`v0412-adversarial-fixes.test.js` §5 (3 case)
+
+#### **P1-3 useGameLogic.js:`onP2PPeerJoin` 走 `applyNetworkPlayers` 单一路径**
+
+- 现象:`onP2PPeerJoin` 和 `applyNetworkPlayers` 双路径更新 `players.value`,host 端 SYNC + JOIN 几乎同时到时可能 race —— 中间窗口 UI 显示 AI 名字,真人来后又改成真人名字,闪一下。
+- 修法:`onP2PPeerJoin` 删掉手写 players.value 更新,委托 `applyNetworkPlayers()` 从 `net.getPeers()` 单一来源
+- 验证:`v0412-adversarial-fixes.test.js` (行为修复,源码断言 §1 内嵌)
+
+#### **P1-4 useGameLogic.js + guandan-game.js:`onP2PPlay` ts 去重 Set + `applyPlay` 防御 cards-not-found**
+
+- 现象 1:WS 重传 / 多次 broadcast / 重连回放 history 时同一 PLAY 被收到多次,`applyPlay` 内部 `findIndex` 找不到 card 时 `splice(-1, 1)` **静默删末尾那张牌** (silent bug)。
+- 现象 2:外层 `onP2PPlay` 没有去重,每次重传都重新 apply。
+- 修法:
+  - `game.applyPlay` 加防御:cards 中任何一张不在 hand → 直接 return
+  - useGameLogic 加 `_appliedPlayIds` Set (FIFO 32 条淘汰) + `_dedupPlayId(payload.ts)` 去重
+- 验证:`v0412-adversarial-fixes.test.js` §6 (8 case)
+
+### B. 新增测试套件
+
+#### `v0412-adversarial-fixes.test.js` — 34 case 端到端覆盖
+
+- **§1 P0-2 / P1-5**:源码正则 (canBroadcast / broadcastPeerLeave / close opts 存在) + 64KB 防御 + 行为 (无 transport / 非 host 返回 false)
+- **§2 P0-3**:`createGame.destroy()` 函数存在 + handlers 清空 + aiPlayers 清空 + 标 `_destroyed` + destroy 后 deal 不抛错
+- **§3 P0-4**:源码正则 (onP2PStateSnapshot 调 refreshUiFromGameState) + 删除手写"同步刷新 UI refs"块
+- **§4 P1-1**:源码正则 (migrateHost 末尾 emit turn) + 行为 (migrateHost 后 turn 事件触发) + emit 顺序 (turn 在 host:migrated 之后)
+- **§5 P1-2**:源码正则 (_lastAppliedRoundEndId 字段去重) + 检查 payload.roundId === _lastAppliedRoundEndId 提前 return
+- **§6 P1-4**:`game.applyPlay` 防御 (cards 不全在 hand 时 state 不变) + 正常出牌仍 work + useGameLogic `_appliedPlayIds` Set + `_dedupPlayId` 函数
+
+### 测试基线
+
+- **35 测试套件 / 0 失败**(v0.4.12 的 35 套件 / 1837 case + v0412-adversarial-fixes 1 套件 / 34 case)
+- `npm run build` ✓ 1.55s
+
+---
+
 ## v0.4.12 (2026-06-28) — v0.4.11 修复的 P2P 端到端回归测试补充(35 套件 / 1837 单测全过)
 
 > 本版本纯增量:**为 v0.4.11 的 8 个 P2P bug 修复补充端到端回归测试**。无代码改动,只新增测试套件和文档同步。
