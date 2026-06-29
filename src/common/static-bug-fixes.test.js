@@ -220,14 +220,14 @@ console.log('\n=== 5. BUG-F: READY 已在 RELAY_TYPES 中(常量级验证) ===')
 //     P1-2 useGameLogic.js onP2PRoundEnd roundId 去重防止 UI 抖动
 //     P1-3 useGameLogic.js onP2PPeerJoin 走 applyNetworkPlayers 单一路径
 //     P1-4 useGameLogic.js onP2PPlay ts 去重 + game.applyPlay 防御 cards-not-found
-console.log('\n=== 6. BUG-H: package.json version (v0.4.14) ===')
+console.log('\n=== 6. BUG-H: package.json version (v0.4.15) ===')
 {
   // 静态文件读取验证
   const fs = await import('fs')
   const path = await import('path')
   const pkgPath = path.resolve('./package.json')
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-  eq('package.json version = 0.4.14', pkg.version, '0.4.14')
+  eq('package.json version = 0.4.15', pkg.version, '0.4.15')
 }
 
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============

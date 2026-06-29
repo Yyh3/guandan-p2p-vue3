@@ -78,9 +78,16 @@ ipconfig
 
 ### 1.2 生产构建
 
+> ⚠️ **新 clone 必须先 `npm install`,否则 `npm run build` 会报:**
+> ```
+> [vite]: Rollup failed to resolve import "html5-qrcode" from "src/views/join/JoinView.vue"
+> ```
+> `html5-qrcode ^2.3.8` 已在 `package.json` 声明,但需要 `npm install` 生成 `node_modules` 实体。
+
 ```bash
-npm run build     # 产物在 dist/
-npm run preview   # 本地预览 dist/（可选）
+npm install        # 第一次必跑
+npm run build      # 产物在 dist/
+npm run preview    # 本地预览 dist/（可选）
 ```
 
 `dist/` 目录就是纯静态文件（H5 + JS + CSS + 静态资源），可以丢到：
@@ -232,7 +239,7 @@ sendTo(seat, msg)    // 定向发送
 ## 五、发布检查清单
 
 - [ ] `npm run build` 成功，`dist/` 里有 `index.html` 和 `assets/`
-- [ ] `npm test` 全过（36 套件 / 1887 用例 / 0 失败,v0.4.14）
+- [ ] `npm test` 全过（37 套件 / 1859 用例 / 0 失败,v0.4.15）
 - [ ] `npm run bench` 性能基线无明显回退
 - [ ] 浏览器版手测一遍：开房 → 4 标签加入 → 完整打 1 局 → 查看战绩
 - [ ] APK/IPA 真机手测一遍（如果已实现真机网络层）

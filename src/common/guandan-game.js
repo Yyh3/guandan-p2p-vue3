@@ -787,7 +787,12 @@ state.trickHistory = state.trickHistory.map(h => {
       if (typeof snap.isRestartAfterA === 'boolean') state.isRestartAfterA = snap.isRestartAfterA
       if (typeof snap.previousLevelRank === 'number') state.previousLevelRank = snap.previousLevelRank
       // lastAppliedRoundId 是 string 或 null(从未应用过),用 'in' 判字段存在
-      if ('lastAppliedRoundId' in snap) state.lastAppliedRoundId = snap.lastAppliedRoundId
+      // ★ v0.4.15 边缘防御:仅挡 undefined(防 manual snap.lastAppliedRoundId = undefined
+      //   污染 state),保留 null 清空语义(JSON.parse 序列化会自动丢 undefined 字段,
+      //   但显式赋值 undefined 仍可能触发)。
+      if ('lastAppliedRoundId' in snap && snap.lastAppliedRoundId !== undefined) {
+        state.lastAppliedRoundId = snap.lastAppliedRoundId
+      }
       // 同步发 turn 事件让 UI 重新渲染
       emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
     },

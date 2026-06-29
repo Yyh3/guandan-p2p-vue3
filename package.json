@@ -1,6 +1,6 @@
 {
   "name": "guandan-p2p",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "掼蛋 P2P 局域网版 - 离线 4 人联机",
   "type": "module",
   "scripts": {

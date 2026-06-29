@@ -4,7 +4,48 @@
 
 ---
 
-## v0.4.14 (2026-06-29) — v0.4.12 对抗性复查 6 项 V0412 bug 修复(36 套件 / 1887 单测全过)
+## v0.4.15 (2026-06-29) — 对抗性复查 3 项瑕疵修复(37 套件 / 1859 单测全过)
+
+> v0.4.14 静态复查后,实测发现 3 项残留瑕疵,本版本集中清理:
+> 1. V0412-04 `_applySnapshot` 边缘防御(`lastAppliedRoundId` 显式 undefined 不写入)
+> 2. CHANGELOG / commit message 基线数字修正(原 1887 → 实测 1857)
+> 3. BUILD.md / README 加 `npm install` 必跑提醒(否则 build 报 html5-qrcode 找不到)
+
+### A. V0412-04 边缘防御
+
+`_applySnapshot` 的 `lastAppliedRoundId` 字段从 `if ('lastAppliedRoundId' in snap)` 改成 `if ('lastAppliedRoundId' in snap && snap.lastAppliedRoundId !== undefined)`。
+
+- **问题**: 旧版只要 `in snap` 就写,如果 sender 显式 `snap.lastAppliedRoundId = undefined`,会把 state 污染成 undefined
+- **触发条件**: 实际 JSON.parse(JSON.stringify(state)) 序列化会丢 undefined 字段,所以正常路径触发不到。但 manual `snap.lastAppliedRoundId = undefined` 这种代码模式可能写出
+- **保留契约**: `null` 仍能清空 state(原 4.2 case 不破),只挡 `undefined`
+- **测试**: v0414-adversarial-review §4.3 新增 2 case(r1-before 验证 + undefined 拒绝),套件总数 50 → 52
+
+### B. 基线数字修正
+
+v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基线是 37 套件 / 1857 单测**。
+- npm test 串接 37 个 .test.js 文件,但其中 10 个不打印"测试结果"格式(其他格式 / silent pass)
+- 37 行输出累计 1857 case 通过
+- 1887 是历史数字,后续 commit 合并/精简过测试,但 commit message 没更新
+
+本版本 v0.4.15 段末尾"测试基线"列**实测**数字,纠 commit message 误导。
+
+### C. BUILD.md / README 加 `npm install` 提醒
+
+新 clone 的工作区 `node_modules` 没装,直接 `npm run build` 会报:
+```
+[vite]: Rollup failed to resolve import "html5-qrcode" from "src/views/join/JoinView.vue"
+```
+
+`html5-qrcode ^2.3.8` 已在 `package.json` dependencies 声明,但需要先 `npm install` 才会生成 node_modules 实体。BUILD.md / README 加醒目标记。
+
+### 测试基线
+
+- **1859 通过 / 0 失败**(v0.4.14 的 50 + v0.4.15 边缘防御 2)
+- `npm run build` ✓ 1.46s
+
+---
+
+## v0.4.14 (2026-06-29) — v0.4.12 对抗性复查 6 项 V0412 bug 修复(基线虚报,以 v0.4.15 实测 37 套件 / 1857 单测为准)
 
 > 本版本基于外部审查者对 v0.4.13 master 的复查报告,集中修 6 项残留问题(1 项误报已标注)。
 > 第一性原理精简:用 game.getSnapshot() 单一来源替代手写 snapshot 字段列表,彻底解决 V0412-05/V0412-07。
@@ -85,7 +126,7 @@
 
 ### 测试基线
 
-- **36 测试套件 / 1887 单测 / 0 失败**(v0.4.13 的 35 套件 / 1837 case + v0414-adversarial-review 1 套件 / 50 case)
+- **37 测试套件 / 1857 单测 / 0 失败**(v0.4.13 的 35 套件 / 1837 case + v0414-adversarial-review 1 套件 / 50 case)
 - `npm run build` ✓ 1.46s
 
 ---

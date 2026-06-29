@@ -22,7 +22,8 @@
 | **v0.4.11** | ✅ 完成 | v0.4.10 静态审查 8 bug 修复 | ROUND_END host-only / 过 A 落盘 / MATCH_RESTART 鉴权去重 / 抽 afterMatchRestartRefresh / 音效 unlock 清理 / bgmStyle+sfxMode / scheduleAI difficulty / SettingsView 版本号动态化,34 套件 / 1781/0 单测 |
 | **v0.4.12** | ✅ 完成 | v0.4.11 修复后回归测试补充 | P2P 端到端 56 case(ROUND_END host-only 模拟 / applyRoundEndFromPayload 幂等 / MATCH_RESTART 鉴权 phase gate / restartMatch 同 seed 等),35 套件 / 1837/0 单测 |
 | **v0.4.13** | ✅ 完成 | v0.4.12 对抗性审查 8 项 P0/P1/P2 bug 修复 | network.js `canBroadcast` + `broadcastPeerLeave` + `close({broadcast})`;guandan-game.js `createGame.destroy`;useGameLogic `onP2PStateSnapshot` 走 `refreshUiFromGameState`;`migrateHost` 末尾 emit 'turn';`onP2PRoundEnd` roundId 去重;`onP2PPeerJoin` 走 `applyNetworkPlayers` 单一路径;`onP2PPlay` ts 去重 Set + `applyPlay` 防御 cards-not-found;35 套件 / 1837/0 单测 |
-| **v0.4.14** | ✅ 当前 | v0.4.12 对抗性复查 6 项 V0412 bug 修复 | `migrateHost` abandonedSeats 不 push 0(避免 nextTurn 跳过新 host);`scheduleAI` pass 分支 + `aiBroadcast('PASS')` + `setAIBroadcast` 注入回调处理 PASS;`_applySnapshot` 应用 isRestartAfterA/previousLevelRank/lastAppliedRoundId + state 预声明;新增 `game.getSnapshot()` JSON 深拷贝 + 字段全集(替代手写 snapshot 构造);`onNext` P2P 非 host 不动 phase ref;36 套件 / 1887/0 单测 |
+| **v0.4.14** | ✅ 完成 | v0.4.12 对抗性复查 6 项 V0412 bug 修复 | `migrateHost` abandonedSeats 不 push 0(避免 nextTurn 跳过新 host);`scheduleAI` pass 分支 + `aiBroadcast('PASS')` + `setAIBroadcast` 注入回调处理 PASS;`_applySnapshot` 应用 isRestartAfterA/previousLevelRank/lastAppliedRoundId + state 预声明;新增 `game.getSnapshot()` JSON 深拷贝 + 字段全集(替代手写 snapshot 构造);`onNext` P2P 非 host 不动 phase ref;37 套件 / 1857/0 单测 |
+| **v0.4.15** | ✅ 当前 | 对抗性复查 3 项瑕疵修复 | `guandan-game.js` `_applySnapshot` 的 `lastAppliedRoundId` 加 `!== undefined` 边缘防御(防 manual `= undefined` 污染 state,保留 null 清空语义);CHANGELOG / commit message 基线数字从虚报 1887 → 实测 1857 纠正;BUILD.md / README 加 `npm install` 必跑提醒(否则 build 报 html5-qrcode 找不到);37 套件 / 1859/0 单测 |
 | **v4.0** | 💭 构思中 | iOS + 录像回放 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 
 ---
@@ -188,7 +189,7 @@ MINOR: 新功能(v3.0-3.7 都是 MINOR)
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前版本**:`v0.4.14`(2026-06-29,v0.4.12 对抗性复查 6 项 V0412 bug 修复)
+**当前版本**:`v0.4.15`(2026-06-29,对 v0.4.14 做对抗性复查后发现 3 项瑕疵集中修复 — V0412-04 `_applySnapshot` `lastAppliedRoundId` `!== undefined` 边缘防御;CHANGELOG / commit message 基线数字从虚报 1887 → 实测 1857 纠正;BUILD.md / README 加 `npm install` 必跑提醒;37 套件 / 1859/0 单测)
 **首发目标**:v1.0.0(H5)
 
 ---

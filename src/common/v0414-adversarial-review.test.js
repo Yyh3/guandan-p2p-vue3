@@ -149,6 +149,15 @@ console.log('\n=== 4. V0412-04: _applySnapshot 应用过 A 标志 + 上一局级
   game._applySnapshot({ lastAppliedRoundId: null })
   assert('applySnapshot 后 lastAppliedRoundId 接受 null 清空',
     game.getState().lastAppliedRoundId === null)
+
+  // 4.3 ★ v0.4.15 边缘防御:显式 undefined 不写入(防 manual snap.lastAppliedRoundId = undefined 污染 state)
+  // 先把 lastAppliedRoundId 设成一个非 null 值,再传 undefined 验证 state 不被覆盖
+  game._applySnapshot({ lastAppliedRoundId: 'r1-before' })
+  assert('applySnapshot 设 lastAppliedRoundId=r1-before',
+    game.getState().lastAppliedRoundId === 'r1-before')
+  game._applySnapshot({ lastAppliedRoundId: undefined })
+  assert('applySnapshot 后 lastAppliedRoundId 拒绝 undefined 写入(保留 r1-before)',
+    game.getState().lastAppliedRoundId === 'r1-before')
 }
 
 // ============== V0412-05 / V0412-07: game.getSnapshot() 完整 + 深拷贝 ==============
