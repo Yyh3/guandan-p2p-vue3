@@ -522,34 +522,34 @@ console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
     assert('迁移后 aiPlayers 不含 0', !game.getAIPlayers().includes(0))
   }
 
-  console.log('\n=== 20. v2.1 P3:网络层 selectNextHostCandidate (BC 集成) ===')
-  {
-    const Host = await import('./network.js?tag=mig-cand-' + Date.now())
-    Host.startAsHost({ nickname: 'H', avatar: 'H' })
-    await new Promise(r => setTimeout(r, 30))
+console.log('\n=== 20. v2.1 P3:网络层 selectNextHostBySeat (BC 集成,seat 优先级) ===')
+{
+  const Host = await import('./network.js?tag=mig-cand-' + Date.now())
+  Host.startAsHost({ nickname: 'H', avatar: 'H' })
+  await new Promise(r => setTimeout(r, 30))
 
-    // 模拟加入 3 个 joiner(直接改 host 端 peers map)
-    Host.getPeers().set(1, { nickname: 'A', uuid: 'u1' })
-    Host.getPeers().set(2, { nickname: 'B', uuid: 'u2' })
-    Host.getPeers().set(3, { nickname: 'C', uuid: 'u3' })
+  // 模拟加入 3 个 joiner(直接改 host 端 peers map)
+  Host.getPeers().set(1, { nickname: 'A', uuid: 'u1' })
+  Host.getPeers().set(2, { nickname: 'B', uuid: 'u2' })
+  Host.getPeers().set(3, { nickname: 'C', uuid: 'u3' })
 
-    // 调用 selectNextHostCandidate → 期望 seat 2 (队友优先)
-    const cand = Host.selectNextHostCandidate()
-    assert('selectNextHostCandidate 优先选 seat 2 (队友)', cand === 2)
+  // 调用 selectNextHostBySeat → 期望 seat 2 (队友优先)
+  const cand = Host.selectNextHostBySeat()
+  assert('selectNextHostBySeat 优先选 seat 2 (队友)', cand === 2)
 
-    // 移除 seat 2 → 期望 seat 1
-    Host.getPeers().delete(2)
-    assert('seat 2 不在 → 选 seat 1', Host.selectNextHostCandidate() === 1)
+  // 移除 seat 2 → 期望 seat 1
+  Host.getPeers().delete(2)
+  assert('seat 2 不在 → 选 seat 1', Host.selectNextHostBySeat() === 1)
 
-    // 移除 seat 1 → 期望 seat 3
-    Host.getPeers().delete(1)
-    assert('seat 1 也不在 → 选 seat 3', Host.selectNextHostCandidate() === 3)
+  // 移除 seat 1 → 期望 seat 3
+  Host.getPeers().delete(1)
+  assert('seat 1 也不在 → 选 seat 3', Host.selectNextHostBySeat() === 3)
 
-    // 全部移除 → 期望 0 (没人)
-    Host.getPeers().delete(3)
-    assert('全掉光 → 返回 0', Host.selectNextHostCandidate() === 0)
+  // 全部移除 → 期望 0 (没人)
+  Host.getPeers().delete(3)
+  assert('全掉光 → 返回 0', Host.selectNextHostBySeat() === 0)
 
-    Host.close()
+  Host.close()
   }
 
   console.log('\n=== 21. v2.1 P3:网络层 requestHostMigration 自动选候选 ===')

@@ -40,8 +40,8 @@ function check(name, cond) {
 // ============== 1. V0416-01: 修复在 codex 分支 → master 合并 ==============
 console.log('\n=== 1. V0416-01: 修复版本可访问性 ===')
 {
-  // 当前 package.json version 应该是 v0.4.18(v0.4.17 已修,本版本基线;v0.4.18 增 V0414-04 修复)
-  check('package.json version === 0.4.18', pkg.version === '0.4.18')
+  // 当前 package.json version 应该是 v0.4.19(v0.4.18 已修 V0414-04,本版本 V0419 follow-up)
+  check('package.json version === 0.4.19', pkg.version === '0.4.19')
 
   // 当前 HEAD 应该能跑测试 — 即 working tree 的修复版本
   check('network.js 含 host:lost emit 修复', /emit\(['"]host:lost['"]/.test(networkSrc))

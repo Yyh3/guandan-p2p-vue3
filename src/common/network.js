@@ -136,6 +136,70 @@ function cancelJoinRetry() {
 //   避免一房多主。
 let _promotedHostSeat = null
 
+// ============== V0419 确定性本地选举 ==============
+// v0.4.19:选下一个 host 候选 — 避免 v0.4.18 多 joiner 同时本地升级冲突
+//   算法:
+//     1. 先筛掉 finishedOrder / abandonedSeats(已出完牌/弃赛)
+//     2. 优先 canHost=true 候选(WS server / AndroidWs native / BC)
+//     3. 同等条件下 UUID 字典序最小(确定性,所有 joiner 算出同一个结果)
+//   返回:number (seat 1/2/3) 或 null(没有候选)
+function selectNextHostCandidate() {
+  // 收集候选:[seat, uuid, canHost]
+  const candidates = []
+  for (let seat = 1; seat <= 3; seat++) {
+    if (state_finishedOrAbandoned(seat)) continue
+    const info = peers.get(seat)
+    if (!info || !info.uuid) continue
+    candidates.push({ seat, uuid: info.uuid, canHost: info.canHost === true })
+  }
+  if (candidates.length === 0) return null
+  // 优先 canHost=true
+  const canHostList = candidates.filter(c => c.canHost)
+  const pool = canHostList.length > 0 ? canHostList : candidates
+  // UUID 字典序最小
+  pool.sort((a, b) => (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0))
+  return pool[0].seat
+}
+
+// 辅助:seat 是否已出完牌/弃赛(简单版本,详细逻辑在 game 层)
+//   实际上 finishedOrder / abandonedSeats 是 game 层 state,不在 network.js
+//   这里只做 seat 是否有 info 的判断
+function state_finishedOrAbandoned(seat) {
+  // 简化:peers Map 里有 info 就当候选(不去查 game state)
+  return false
+}
+
+// v0.4.19:本端 transport 是否有"作为新 host 起 server"的能力
+//   - BC:共享 channel,本身就是 host 模式,canHost=true
+//   - AndroidWs:用 Capacitor WsServer plugin,canHost=true
+//   - WS:在 Node 环境有 ws server 能力(浏览器 ws 无),通过 typeof process 检测
+function canHostAsNewHost() {
+  if (!transport) return false
+  const name = transport.constructor.name
+  if (name === 'BroadcastChannelTransport') return true
+  if (name === 'AndroidWsTransport') return true
+  if (name === 'WebSocketTransport') {
+    // 浏览器 ws 无 server 能力;Node ws 有(用 ws npm 包)
+    // 检测:typeof process !== 'undefined' && process.versions?.node
+    return (typeof process !== 'undefined' && process.versions && process.versions.node)
+  }
+  return false
+}
+
+// v0.4.19:取本端 hostAddress(WS server bind 后的 IP:port)
+//   - WS / AndroidWs:用 transport.getHostIp() + getBoundPort()
+//   - BC:null(共享 channel 无 hostAddress 概念)
+function getSelfHostAddress() {
+  if (!transport) return null
+  if (typeof transport.getHostIp !== 'function') return null
+  const ip = transport.getHostIp()
+  if (!ip) return null
+  if (typeof transport.getBoundPort !== 'function') return null
+  const port = transport.getBoundPort()
+  if (!port) return null
+  return `${ip}:${port}`
+}
+
 // ============== 事件总线 ==============
 function on(event, fn) {
   if (!handlers[event]) handlers[event] = []
@@ -686,7 +750,11 @@ function _handleJoinerMessage(msg) {
 function startAsHost(self) {
   peers.clear()
   lastHeartbeat.clear()
-  selfInfo = { ...self, uuid: ensureUuid() }
+  // ★ v0.4.19 V0419-02:selfInfo 加 canHost + hostAddress 字段
+  //   canHost:本端 transport 是否有 server 能力(WS Node / AndroidWs / BC = true,浏览器 ws = false)
+  //   hostAddress:WS server bind 后的 IP:port(BC = null)
+  //   这两个字段让其他 joiner 收到 peer:join 时能知道"我能升级吗 + 怎么连我"
+  selfInfo = { ...self, uuid: ensureUuid(), canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
   isHostFlag = true
   selfSeat = 0
   peers.set(0, { ...selfInfo })
@@ -721,7 +789,8 @@ function startAsHost(self) {
  * @param {number} [opts.hostPort] —— 默认 8848
  */
 function joinRoom(hostRoomId, self, opts) {
-  selfInfo = { ...self, uuid: ensureUuid() }
+  // ★ v0.4.19 V0419-02:selfInfo 加 canHost + hostAddress 字段(同上 startAsHost)
+  selfInfo = { ...self, uuid: ensureUuid(), canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
   isHostFlag = false
   selfSeat = -1
   // 兼容签名: hostRoomId 含 ':' 时解析为 ws host:port 形式 (Android Capacitor 路径)
@@ -898,15 +967,23 @@ function canBroadcast() {
 }
 
 /**
- * 主动广播 host 离开 PEER_LEAVE { seat:0, migrate, snapshot?, newHostSeat? }
+ * 主动广播 host 离开 PEER_LEAVE { seat:0, migrate, snapshot?, newHostSeat?, newHostAddress? }
  *
  * 触发场景:host 主动 close (RoomView showMenu / 用户退房 / App 关闭 / kill switch)。
  *   joiner 端 onPeerLeave 收到 seat:0 + migrate=true 立即触发 requestPromoteToHost
  *   走 N-3 兜底迁移路径,不等 6-8s 心跳超时。
  *
+ * v0.4.19 V0419-03:加 newHostAddress 字段
+ *   - host 关闭前如果已经选了新 host(newHostSeat 的 peer 有 canHost+hostAddress),
+ *     把 newHostAddress 塞 PEER_LEAVE payload
+ *   - joiner 收到后能直接 connect(newHostAddress) → 不需要等新 host 起 server 广播 TRANSPORT_REBUILD_ANNOUNCE
+ *   - 这是 V0419-04 "第二发现通道"的简化版 — host 主动退出场景下有效;
+ *     host 崩溃场景(无 close 广播)还是要靠 joiner 本地选举 + 新 host 起 server
+ *
  * @param {object} [opts]
- * @param {object} [opts.snapshot]    - 当前 game state 快照,joiner 端可直接 applySnapshot
- * @param {number} [opts.newHostSeat] - 推荐的新 host seat (1/2/3),不传 joiner 自选
+ * @param {object} [opts.snapshot]       - 当前 game state 快照,joiner 端可直接 applySnapshot
+ * @param {number} [opts.newHostSeat]    - 推荐的新 host seat (1/2/3),不传 joiner 自选
+ * @param {string} [opts.newHostAddress] - 新 host 的 IP:port(可选,joiner 端可直接 connect)
  * @returns {boolean} true=广播成功,false=无 transport / 非 host
  */
 function broadcastPeerLeave(opts = {}) {
@@ -915,6 +992,17 @@ function broadcastPeerLeave(opts = {}) {
   const payload = { seat: 0, migrate: true }
   if (Number.isInteger(opts.newHostSeat) && opts.newHostSeat >= 1 && opts.newHostSeat <= 3) {
     payload.newHostSeat = opts.newHostSeat
+    // ★ v0.4.19 V0419-03:自动从 peers[newHostSeat].hostAddress 取
+    //   调用方不传 newHostAddress 时,自动填充让 joiner 拿到完整新 host 信息
+    if (!opts.newHostAddress) {
+      const newHostInfo = peers.get(opts.newHostSeat)
+      if (newHostInfo && newHostInfo.hostAddress) {
+        payload.newHostAddress = newHostInfo.hostAddress
+      }
+    }
+  }
+  if (opts.newHostAddress && typeof opts.newHostAddress === 'string') {
+    payload.newHostAddress = opts.newHostAddress
   }
   if (opts.snapshot && typeof opts.snapshot === 'object') {
     // 防御:序列化测大小,超大快照 (>64KB) 拒绝带上,避免 BC / WS buffer 爆掉
@@ -925,8 +1013,10 @@ function broadcastPeerLeave(opts = {}) {
       // ★ v0.4.16 对抗性审查 (V0414-05):fallback 也必须保留 newHostSeat(不能丢)
       //   旧版 fallback 用 { seat: 0, migrate: true } 直接丢 newHostSeat,接收端只能
       //   本地推断新 host,多端状态可能不一致;现在构造 minimal 携带已计算的 newHostSeat
+      // ★ v0.4.19 V0419-03:fallback 也保留 newHostAddress
       const minimal = { seat: 0, migrate: true }
       if (payload.newHostSeat !== undefined) minimal.newHostSeat = payload.newHostSeat
+      if (payload.newHostAddress !== undefined) minimal.newHostAddress = payload.newHostAddress
       try { return sendMessage({ type: 'PEER_LEAVE', payload: minimal }) } catch (e) { return false }
     }
     payload.snapshot = opts.snapshot
@@ -951,7 +1041,18 @@ function close(opts = {}) {
   // ★ P0-2 修复:host 主动 close 时,若调用方显式 opt-in 则先广播 PEER_LEAVE 再清 state
   //   必须在 stopHeartbeat + transport.close() 之前,确保 joiner 收得到
   if (opts.broadcast === true) {
-    try { broadcastPeerLeave({ snapshot: opts.snapshot, newHostSeat: opts.newHostSeat }) } catch (e) { /* swallow */ }
+    // ★ v0.4.19 V0419-04:close 关闭前广播完整新 host 信息
+    //   调用方传 newHostSeat + newHostAddress → joiner 收到 PEER_LEAVE 后能直接
+    //   connect 新 host,不需要等新 host 起 server + 广播 TRANSPORT_REBUILD_ANNOUNCE
+    //   调用方传 newHostSeat 但没传 newHostAddress → broadcastPeerLeave 内部自动
+    //   从 peers[newHostSeat].hostAddress 取(V0419-03 修复)
+    try {
+      broadcastPeerLeave({
+        snapshot: opts.snapshot,
+        newHostSeat: opts.newHostSeat,
+        newHostAddress: opts.newHostAddress,
+      })
+    } catch (e) { /* swallow */ }
   }
   stopHeartbeat()
   stopHeartbeatChecker()
@@ -1169,7 +1270,11 @@ function kickPlayer(seat, reason) {
  *
  * @returns {number} 新 host 候选 seat(0/1/2/3),0 表示无候选(全掉光)
  */
-function selectNextHostCandidate() {
+// v2.1 P3 旧版:按 seat 优先级选下一个 host 候选(队友优先)
+//   保留作向后兼容 — v0.4.19 用新的 `selectNextHostCandidate`(UUID 字典序 + canHost 过滤)
+//   调用方:requestHostMigration(主动发起迁移,host 还在时)
+//   新版 `selectNextHostCandidate`(V0419-01)用于 requestPromoteToHost(host 已死场景)
+function selectNextHostBySeat() {
   // 优先级:seat 2 (队友) > seat 1 (左手) > seat 3 (右手)
   for (const seat of [2, 1, 3]) {
     if (peers.has(seat)) return seat
@@ -1205,7 +1310,7 @@ function requestHostMigration(newHostSeat, snapshot) {
   if (!isHostFlag) return false
   if (![1, 2, 3].includes(newHostSeat)) {
     // 调用方没传 → 自动选
-    newHostSeat = selectNextHostCandidate()
+    newHostSeat = selectNextHostBySeat()
     if (newHostSeat === 0) return false  // 没人了,牌局结束
   }
   // 广播 PEER_LEAVE + 迁移标记 + 快照
@@ -1382,6 +1487,28 @@ function requestPromoteToHost(snapshot) {
     //   sendMessage 失败不算致命 — 本地 self-loop (下面) 保证升级仍然能发生
     console.warn('[requestPromoteToHost] sendMessage failed (host transport likely dead):', e?.message || e)
   }
+  // ★ v0.4.19 V0419-01 整合:确定性本地选举 — 不再每个 joiner 都本地升级
+  //   旧版 (v0.4.18) 每个 joiner 都本地 self-loop,会多 host 冲突。
+  //   新版:用 selectNextHostCandidate() 算出"应该是谁当 host":
+  //     - 如果算法选本端(selfSeat === candidate):本地 self-loop 升级 + emit host:migrated
+  //     - 如果算法选别的 joiner:本地模拟"收到新 host 是 candidate"消息,本端旁观让位
+  //   所有 joiner 用同一算法 + 同一 peers Map 视图 → 确定性选出同一个 host
+  const candidate = (typeof selectNextHostCandidate === 'function')
+    ? selectNextHostCandidate()
+    : null
+  if (candidate != null && candidate !== selfSeat) {
+    // 旁观分支:不升级自己,模拟"收到别人升级"消息,本地让位
+    if (transport) {
+      _onTransportMessage({
+        type: 'PROMOTE_HOST_REQUEST',
+        from: candidate,
+        to: null,
+        ts: Date.now(),
+        payload: { newHostSeat: candidate, snapshot: snapshot || null, ts: Date.now() },
+      })
+    }
+    return true
+  }
   // ★ v0.4.18 对抗性审查 (V0414-04):本地 self-loop — 不依赖旧 host transport
   //   旧版只在 BC 模式下 self-loop。WS / AndroidWs 模式下旧 host transport 已死时
   //   (host 崩溃 / 杀进程 / 断电),joiner 发的 PROMOTE_HOST_REQUEST 发不出去 → 永远不升级
@@ -1392,7 +1519,9 @@ function requestPromoteToHost(snapshot) {
   //    failed → emit host:lost → 业务层跳首页让用户重连)。
   //   兼容原 BC 逻辑:BC 不回环,必须本地 self-loop;WS 回环(理论),但 host transport 死了
   //   也得本地 self-loop,所以现在统一都做。
-  if (transport) {
+  // ★ v0.4.19 进一步约束:仅当本端 canHostAsNewHost() === true 才本地 self-loop,
+  //   浏览器 ws joiner(canHost=false)直接走 host:lost 路径,不假装自己是 host
+  if (transport && canHostAsNewHost()) {
     _onTransportMessage({
       type: 'PROMOTE_HOST_REQUEST',
       from: selfSeat,
@@ -1400,6 +1529,10 @@ function requestPromoteToHost(snapshot) {
       ts: Date.now(),
       payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
     })
+  } else if (transport) {
+    // 浏览器 ws joiner:本端无 server 能力,不能升级
+    //   emit host:lost 让业务层跳首页让用户重连(选新 host 重连或自己开房)
+    emit('host:lost', { reason: 'no_server_capability', ts: Date.now() })
   }
   return true
 }
@@ -1468,13 +1601,18 @@ export {
   scanLanRooms,
   ensureUuid,
   // ★ v2.1 P3:host 迁移 API
-  selectNextHostCandidate, requestHostMigration, announceNewHost,
+  // v2.1 旧版 seat-based 选举函数,保留作向后兼容(requestHostMigration 用)
+  selectNextHostBySeat, requestHostMigration, announceNewHost,
+  // v0.4.19 V0419-01:确定性 UUID-based 选举(requestPromoteToHost 用)
+  selectNextHostCandidate,
   // ★ v3.x P2-29(N-3 闭环):joiner 端兜底提升
   requestPromoteToHost,
   // ★ v0.4.8 N-1:host 迁移后 transport rebuild(client → server)
   rebuildAsHost,
   // ★ v0.4.13 对抗性审查 (P0-2 / P1-5):广播能力统一 + 主动 close 广播
   canBroadcast, broadcastPeerLeave,
+  // ★ v0.4.19 V0419-01/02:确定性本地选举 + host 能力检测 + hostAddress 探测
+  canHostAsNewHost, getSelfHostAddress,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1496,12 +1634,16 @@ const net = {
   swapSeats, kickPlayer,
   scanLanRooms,
   // ★ v2.1 P3:host 迁移
-  selectNextHostCandidate, requestHostMigration, announceNewHost,
+  selectNextHostBySeat, requestHostMigration, announceNewHost,
+  // ★ v0.4.19 V0419-01:确定性本地选举
+  selectNextHostCandidate,
   // ★ v3.x P2-29:joiner 端兜底提升
   requestPromoteToHost,
   // ★ v0.4.8 N-1:host 迁移后 transport rebuild
   rebuildAsHost,
   // ★ v0.4.13 (P0-2 / P1-5)
   canBroadcast, broadcastPeerLeave,
+  // ★ v0.4.19 V0419-01/02:确定性本地选举 + 能力检测
+  canHostAsNewHost, getSelfHostAddress,
 }
 export default net

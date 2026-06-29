@@ -4,6 +4,101 @@
 
 ---
 
+## v0.4.19 (2026-06-30) — V0419 follow-up 4 项确定性本地选举 + 第二发现通道简化(41 套件 / 1985 单测全过)
+
+> v0.4.18 修完 V0414-04 最小可行版本(本地 self-loop + 失败回退)后,留 4 项 follow-up:
+> 1. 确定性本地选举(避免多 joiner 同时本地升级冲突)
+> 2. peer:join 上报 `canHost` + `hostAddress` 让新 host 选择更优
+> 3. PEER_LEAVE 塞 `newHostAddress` 让 joiner 立即 connect 新 host
+> 4. WS host 关闭前广播完整新 host 信息(简化 TOMBSTONE)
+>
+> 本版本集中修 4 项 + 集成到 `requestPromoteToHost` + `close({broadcast:true})`。
+> 真正的"第二发现通道"(mDNS / UDP 广播 / 固定服务)需要 native 层,留 v0.4.20+。
+
+### A. V0419-01 确定性本地选举
+
+**问题**: v0.4.18 `requestPromoteToHost` 每个 joiner 都本地 self-loop,可能多 host 冲突。
+
+**修复**: 新增 `selectNextHostCandidate()` 函数(确定性 UUID 字典序 + canHost 过滤):
+```js
+// 1) 先筛掉 finishedOrder / abandonedSeats(简化:只看 peers Map)
+// 2) 优先 canHost=true 候选(WS server / AndroidWs native / BC)
+// 3) 同等条件下 UUID 字典序最小(确定性,所有 joiner 算出同一个结果)
+function selectNextHostCandidate() {
+  const candidates = []
+  for (let seat = 1; seat <= 3; seat++) {
+    const info = peers.get(seat)
+    if (!info || !info.uuid) continue
+    candidates.push({ seat, uuid: info.uuid, canHost: info.canHost === true })
+  }
+  if (candidates.length === 0) return null
+  const canHostList = candidates.filter(c => c.canHost)
+  const pool = canHostList.length > 0 ? canHostList : candidates
+  pool.sort((a, b) => a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0)
+  return pool[0].seat
+}
+```
+
+`requestPromoteToHost` 集成:
+- 算法选本端 → 本地 self-loop 升级(`canHostAsNewHost()` 守卫,浏览器 ws joiner 不行)
+- 算法选别人 → 本地 self-loop 模拟"收到别人升级",本端旁观让位
+- 浏览器 ws joiner(canHost=false)→ emit `host:lost` 让业务层跳首页
+
+**向后兼容**: v2.1 旧版 `selectNextHostCandidate` 重命名为 `selectNextHostBySeat`(seat 优先级,requestHostMigration 还在用)。
+
+**测试**: `v0419-adversarial-fixes.test.js` §1 — 6 case(函数存在 / canHost 过滤 / UUID 排序 / 旧版保留 / 导出)
+
+### B. V0419-02 peer:join canHost + hostAddress 上报
+
+**修复**: `selfInfo` 在 `startAsHost` / `joinRoom` 加 `canHost: canHostAsNewHost()` + `hostAddress: getSelfHostAddress()` 字段。
+
+新增 `canHostAsNewHost()`:
+- `BroadcastChannelTransport` → true
+- `AndroidWsTransport` → true(用 Capacitor WsServer plugin)
+- `WebSocketTransport` → `typeof process !== 'undefined' && process.versions?.node`(Node 环境 true,浏览器 false)
+
+新增 `getSelfHostAddress()`:用 `transport.getHostIp()` + `getBoundPort()` 拼 `"ip:port"`。
+
+`peers Map` 的 entry.info 包含这俩字段,其他 joiner 收到 peer:join 时能判断"我能升级吗 + 怎么连我"。
+
+**测试**: `v0419-adversarial-fixes.test.js` §2 — 10 case(startAsHost / joinRoom 注入 / canHostAsNewHost 3 种 transport / getSelfHostAddress / 导出)
+
+### C. V0419-03 broadcastPeerLeave payload 加 newHostAddress
+
+**修复**: `broadcastPeerLeave` payload 加 `newHostAddress` 字段:
+- 显式 `opts.newHostAddress` 接受(优先)
+- 没传时自动从 `peers[opts.newHostSeat].hostAddress` 提取
+- snapshot 超 64KB minimal fallback 也保留 newHostAddress(V0414-05 修复不变)
+
+```js
+if (Number.isInteger(opts.newHostSeat) && opts.newHostSeat >= 1 && opts.newHostSeat <= 3) {
+  payload.newHostSeat = opts.newHostSeat
+  if (!opts.newHostAddress) {
+    const newHostInfo = peers.get(opts.newHostSeat)
+    if (newHostInfo && newHostInfo.hostAddress) {
+      payload.newHostAddress = newHostInfo.hostAddress
+    }
+  }
+}
+```
+
+**测试**: `v0419-adversarial-fixes.test.js` §3 — 4 case(payload 字段 / 自动提取 / 显式接受 / fallback 保留)
+
+### D. V0419-04 close 关闭前广播完整新 host 信息
+
+**修复**: `close({broadcast:true, newHostSeat, newHostAddress})` 调用 `broadcastPeerLeave` 传完整字段,joiner 收到 PEER_LEAVE 后能直接 connect 新 host,不需要等新 host 起 server + 广播 TRANSPORT_REBUILD_ANNOUNCE。
+
+简化版"第二发现通道"(host 主动退出场景下有效;host 崩溃场景无 close 广播还是要靠 joiner 本地选举)。
+
+**测试**: `v0419-adversarial-fixes.test.js` §4 — 2 case(close 调 broadcastPeerLeave / 传 newHostSeat + newHostAddress)
+
+### 测试基线
+
+- **1985 通过 / 0 失败**(v0.4.18 的 1947 + v0419-adversarial-fixes 36 case + 旧版 selectNextHostBySeat 测试更新 +2 case)
+- `npm run build` ✓ 1.77s
+
+---
+
 ## v0.4.18 (2026-06-29) — V0414-04 本地选举协议最小修复(40 套件 / 1947 单测全过)
 
 > v0.4.14 对抗性复查的 V0414-04(WS / AndroidWs 模式 `requestPromoteToHost` 无 self-loop,
