@@ -85,15 +85,21 @@ console.log('\n=== 1. findDocRoot 纯函数:cwd/dist 命中 ===')
     // 把 cwd 临时切到 fake.docRoot 的 parent,这样 path.join(cwd, 'dist') = fake.docRoot
     const origCwd = process.cwd()
     process.chdir(path.dirname(fake.docRoot))
-    // symlink dist 命名
+    // 在 Windows 上，符号链接可能被权限策略阻止；改为创建真实 dist 目录并复制内容。
     const link = path.join(process.cwd(), 'dist')
-    fs.symlinkSync(fake.docRoot, link)
+    try { fs.rmSync(link, { recursive: true, force: true }) } catch (e) { /* swallow */ }
+    if (process.platform === 'win32') {
+      fs.mkdirSync(link, { recursive: true })
+      fs.cpSync(fake.docRoot, link, { recursive: true, force: true })
+    } else {
+      fs.symlinkSync(fake.docRoot, link)
+    }
     try {
       const deps = { fs, path, fileURLToPath: (await import('url')).fileURLToPath }
       const r = findDocRoot(deps)
       assert('cwd/dist 命中 index.html → 返回 docRoot', r === link)
     } finally {
-      try { fs.unlinkSync(link) } catch (e) { /* swallow */ }
+      try { fs.rmSync(link, { recursive: true, force: true }) } catch (e) { /* swallow */ }
     }
     process.chdir(origCwd)
   } finally {
