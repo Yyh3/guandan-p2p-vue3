@@ -4,6 +4,41 @@
 
 ---
 
+## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(45 套件 / 2156 单测全过)
+
+> 在 v0.4.21 基线上,按第一性原理系统性修复隐藏技术债,覆盖规则引擎、AI、对局状态机、P2P 网络、UI 生命周期与测试基线。
+
+### A. Phase 1 — 引擎 / AI / 对局状态机
+
+- `guandan-engine.js`: 新增 `materializeGhosts`,修复鬼牌具象化 suit、同花顺鬼牌判定、`canFormWithGhosts` 花色与缺张枚举。
+- `guandan-ai.js`: `chooseLead` 成组牌优先;`findMinBeat` 尊重 `ghostCount`;王炸对王炸不再压;A 高顺子/连对/钢板支持;三张 2 实牌+1 鬼;`autoPlayGrouped` 用鬼补顺子中间缺张;`findMinBeatHard` 修正 `TYPE.KINGS_BOMB` 与鬼牌判定。
+- `guandan-game.js`: `applyRoundEnd`/`nextRound` 状态重置;弃赛座位覆盖;打 A 不过不贡。
+
+### B. Phase 2 — 网络层
+
+- transport 增加稳定 `type` 字段(`bc`/`ws`/`android-ws`),替换脆弱 `constructor.name`。
+- `WebSocketTransport`: 新增 `getHostIp()`,IPv6 URL 自动加括号,client open 成功后重置 reconnect 计数器。
+- `AndroidWsTransport`: outbox 保留 `msg.to`,flush 时定向路由。
+- `network.js`: `startAsHost`/`joinRoom` 在 transport open 后刷新 `canHost`/`hostAddress`;`relayFromClient` 保留定向 `msg.to`;`SEAT_SWAP_ACK` 加入 relay 白名单;graceful host migration 旁观者 peers Map 同步;`selectNextHostCandidate` 支持排除 finished/abandoned seats;心跳 checker 跳过 `_kickedSeats`;`self:kicked` 去重。
+
+### C. Phase 3 — UI 生命周期与状态快照
+
+- `useGameLogic.js`: `initGame` 用 `getMe()` getter 替代 `selfSeat` 常量快照,host 迁移后事件监听器状态不失效。
+- `useGameLogic.js`: `afterMatchRestartRefresh` 移除多余 `startDealAnimation()`,重开一局动画不再触发两次。
+- `useGameLogic.js`: `onP2PAITakeover` 500ms 延迟内重新读取 `game.getState()`,避免过期 state。
+- `GameViewDesktop.vue`: 补充 `import { useRoute }`,把 `onHostLost` 提到 `onMounted` 外部,`onUnmounted` 可精确 `off`。
+- `GameViewMobile.vue`: 新增 game-over / 下一局 / 过 A 重开结算遮罩与按钮。
+- `GameView.vue`: `isMobile` 改为挂载时只判定一次,不再监听 viewport 变化,避免游戏中组件反复挂载导致状态丢失。
+- `useGameLogic.js` + `HomeView.vue`: 所有 `setTimeout` 统一纳入 `timers` 并在卸载时批量清理。
+
+### D. Phase 4 — 测试补强
+
+- 新增 `src/views/game/useGameLogic.test.js`(22 case):直接验证 selfSeat getter、timer 生命周期、`onRestartMatch` 重置、AI takeover 过期 state。
+- 新增 `src/common/network-host-migration-consecutive.test.js`(20 case):验证 host 主动让位后新 host 上任、旁观者收到广播,牌局网络可继续。
+- `package.json` 已把上述套件纳入 `npm test`;总基线升至 **45 套件 / 2156 通过 / 0 失败**。
+
+---
+
 ## v0.4.21 (2026-06-30) — V0421 对抗性审查 4 个 BUG 修复(42 套件 / 1916 单测全过)
 
 > v0.4.20 发布后立刻做对抗性复查(对着代码找攻击面 / 边界条件 / 资源泄漏),

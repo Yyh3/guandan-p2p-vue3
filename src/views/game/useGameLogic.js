@@ -1421,10 +1421,15 @@ function onAutoFindBest() {
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
     _fillEmptySeatsWithAI,
+    // ★ Phase4 测试:暴露 AI takeover 入口供回归测试
+    onP2PAITakeover,
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
     // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
     commitPlay, commitPass,
     // ★ v0.4.9:过 A 后重开
     onRestartMatch, onPrimaryResultAction,
+    // ★ Phase4 测试:暴露 timers / showBombFx 供回归测试验证生命周期清理与特效
+    __timers: timers,
+    __showBombFx: showBombFx,
   }
 }
