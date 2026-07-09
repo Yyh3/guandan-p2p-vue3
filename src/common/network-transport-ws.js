@@ -29,6 +29,26 @@ const DEFAULT_PORT = 8848
 const DEFAULT_HTTP_DOC_ROOT = 'dist'
 
 /**
+ * 取本机第一个非内部 IPv4 地址,作为 0.0.0.0 bind 后的对外 IP。
+ * 只在 Node server 模式调用,浏览器不会走到这里。
+ */
+async function _getLocalIp() {
+  try {
+    const osModule = await import('os')
+    const os = osModule.default || osModule
+    const interfaces = os.networkInterfaces()
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address
+        }
+      }
+    }
+  } catch (e) {}
+  return '127.0.0.1'
+}
+
+/**
  * 找到 PWA 的 dist 根目录(相对于当前文件 / cwd)。
  * 优先 process.cwd()/dist 命中 index.html;否则试 import.meta.url 解析的 src/common/../dist。
  * 测试环境通常没有 dist,返回 null 让 http server 走 503 fallback 而不是 throw。
@@ -72,6 +92,7 @@ export class WebSocketTransport {
    * @param {string} [opts.path='/'] —— ws path
    */
   constructor(opts = {}) {
+    this.type = 'ws'
     this._port = opts.port != null ? opts.port : DEFAULT_PORT
     this._host = opts.host || '0.0.0.0'
     this._path = opts.path || '/'
@@ -238,6 +259,8 @@ export class WebSocketTransport {
       this._httpServer.once('error', (err) => reject(err))
       this._httpServer.listen(this._port, this._host)
     })
+    // 取本机可用 IP(0.0.0.0 时无法直接给 joiner,需要实际 IP)
+    this._hostIp = this._host === '0.0.0.0' ? await _getLocalIp() : this._host
     this._ready = true
     this._flushOutbox()
   }
@@ -246,7 +269,8 @@ export class WebSocketTransport {
     this._mode = 'client'
     this._hostIp = hostIp
     const port = hostPort != null ? hostPort : this._port
-    this._url = `ws://${hostIp}:${port}${this._path}`
+    const bracketedHost = (hostIp.includes(':') && !hostIp.startsWith('[')) ? `[${hostIp}]` : hostIp
+    this._url = `ws://${bracketedHost}:${port}${this._path}`
     const url = this._url
     // ★ v2.2 task B:跨设备联机 — 浏览器环境用原生 WebSocket 全局,Node 测试环境用 'ws'
     //   浏览器 Vite bundle 里没有 'ws' npm 包(只在 devDependencies 里),所以 import('ws') 会失败。
@@ -269,6 +293,12 @@ export class WebSocketTransport {
     if (isNativeBrowserWs) {
       this._ws.addEventListener('open', () => {
         this._ready = true
+        this._reconnectAttempts = 0
+        this._reconnecting = false
+        if (this._reconnectTimer) {
+          try { clearTimeout(this._reconnectTimer) } catch (e) {}
+          this._reconnectTimer = null
+        }
         this._flushOutbox()
       })
       this._ws.addEventListener('message', (event) => {
@@ -300,6 +330,12 @@ export class WebSocketTransport {
       // Node 'ws' EventEmitter 风格
       this._ws.on('open', () => {
         this._ready = true
+        this._reconnectAttempts = 0
+        this._reconnecting = false
+        if (this._reconnectTimer) {
+          try { clearTimeout(this._reconnectTimer) } catch (e) {}
+          this._reconnectTimer = null
+        }
         this._flushOutbox()
       })
       this._ws.on('message', (data) => {
@@ -608,6 +644,10 @@ export class WebSocketTransport {
   /** 测试 / 诊断：server 实际绑定的端口（ephemeral 时用）
    *  v2.4-p3 T4:bind 端口的现在是我们显式起的 http server(_wss 用 noServer 模式不自 listen)
    */
+  getHostIp() {
+    return this._hostIp
+  }
+
   getBoundPort() {
     if (this._httpServer && typeof this._httpServer.address === 'function') {
       const addr = this._httpServer.address()

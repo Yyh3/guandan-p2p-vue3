@@ -6,6 +6,7 @@
 
 ## 当前任务记录
 
+- 2026-07-09：Plan C（彻底还清技术债）Phase 1 引擎/AI/game + Phase 2 网络层关键 bug 修复完成。修复内容：鬼牌具象化 `materializeGhosts`、同花顺鬼牌 suit、`canFormWithGhosts` suit 修复；`chooseLead` 成组牌优先；`findMinBeat` 尊重 `ghostCount`；王炸对王炸不再误出；顺子/连对/钢板上限支持 A 高；三张 2 实牌+1 鬼；`findMinThreeStraight` 省鬼；`autoPlayGrouped` 鬼牌补顺子中间缺张；`findMinBeatHard` 修正 `TYPE.KINGS_BOMB` 与鬼牌判定；`nextRound`/`applyRoundEnd` 状态重置与 abandonedSeats 覆盖。网络层：transport.type 稳定字段、WebSocketTransport getHostIp、IPv6 URL 括号、reconnect 计数器复位、Android outbox 保留 msg.to、canHost/hostAddress 在 transport open 后刷新、relayFromClient 保留定向 to、SEAT_SWAP_ACK host 处理与 relay、graceful migration 旁观 peers 同步、selectNextHostCandidate 排除 finished/abandoned、_tickHeartbeatChecker 跳过被踢 seat、self:kicked 去重。新增 `src/common/network-phase2.test.js`（25 case）。当前 `npm test` 全绿。
 - 2026-06-28：当前主目录有 MiniMax 与 Codex 并发工作，用户要求改为 `git worktree` 隔离。Codex 已切到独立目录 `/Users/yangyuanhao/Downloads/guandan-p2p-vue3-codex`，分支 `codex/ui-mobile-joker-card-preview-isolated`，后续 UI 预览只在此目录完成。
 - 2026-06-28：用户提供手机掼蛋横屏对局参考图，要求先用代码渲染 UI 方向，再正式修改真实对局页。预览目标：删除「社区任务福利」、用户金币数、右上角「切换 / 牌数统计 / 同花顺」面板；牌面简洁，不出现一张牌两个数字；桌面已出牌远离手牌。
 - 2026-06-28：用户继续要求手牌数字和花色更大、更美观，大小王要有专门小丑卡通图案。本 worktree 新增静态路由 `/#/ui-preview/table`，直接使用项目已有 `src/assets/cards/big-joker.png` 做 JOKER 图案，不接入网络层 / 出牌状态机。

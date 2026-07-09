@@ -44,6 +44,12 @@ export function useGameLogic(opts = {}) {
     disposers.push(() => { try { net.off(event, handler) } catch (e) {} })
   }
 
+  // ★ Phase3 UI 修复:统一 timer 生命周期管理
+  //   所有 setTimeout 注册到 timers,卸载时批量清理,避免组件已卸载后旧闭包仍访问 refs
+  //   或导致 Vue warn / 内存泄漏。单个 timer 重复 clearTimeout 是安全的。
+  const timers = []
+  function addTimer(id) { timers.push(id); return id }
+
   // ★ GD-RC-001 修复:"网络 host 身份"独立变量,不与 selfSeat 绑定。
   //   之前大量代码用 `selfSeat === 0` 判定"是否是 host/权威端",但 host 换队友后
   //   selfSeat 变成 2,本机仍是网络 host,旧判定会误判成"不是 host",导致
@@ -102,7 +108,7 @@ export function useGameLogic(opts = {}) {
   function showNickToastBrief() {
     showNickToast.value = true
     if (nickToastTimer) clearTimeout(nickToastTimer)
-    nickToastTimer = setTimeout(() => { showNickToast.value = false }, 2000)
+    nickToastTimer = addTimer(setTimeout(() => { showNickToast.value = false }, 2000))
   }
   function onNickEditRequest() {
     showNickToastBrief()
@@ -115,7 +121,7 @@ export function useGameLogic(opts = {}) {
   function onChatSelect({ phrase }) {
     chatPhraseToast.value = phrase
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
-    chatPhraseTimer = setTimeout(() => { chatPhraseToast.value = '' }, 2000)
+    chatPhraseTimer = addTimer(setTimeout(() => { chatPhraseToast.value = '' }, 2000))
   }
 
   // v2.1 P3:host 迁移提示
@@ -130,9 +136,9 @@ export function useGameLogic(opts = {}) {
       hostMigrationToast.value = { text: `${name} 已成为新房主`, isMyself: false }
     }
     if (hostMigToastTimer) clearTimeout(hostMigToastTimer)
-    hostMigToastTimer = setTimeout(() => {
+    hostMigToastTimer = addTimer(setTimeout(() => {
       hostMigrationToast.value = null
-    }, isMyself ? 5000 : 3000)
+    }, isMyself ? 5000 : 3000))
     hostMigrationBadge.value = true
   }
   // ★ BUG-RC2-003 修复:抽 refreshUiFromGameState() 公共函数
@@ -472,13 +478,13 @@ export function useGameLogic(opts = {}) {
     // 8 秒后强制 isDealing=false 并进 playing,玩家至少能玩,而不是永远卡 loading。
     // 27 张牌 × 55ms stagger + 380ms flight + 80ms 余量 ≈ 1.95s,8s 是真机慢网/真 WebView 的安全冗余。
     if (dealTimeoutId) clearTimeout(dealTimeoutId)
-    dealTimeoutId = setTimeout(() => {
+    dealTimeoutId = addTimer(setTimeout(() => {
       if (isDealing.value) {
         isDealing.value = false
         finishDeal()
       }
       dealTimeoutId = null
-    }, 8000)
+    }, 8000))
 
     nextTick(() => {
       const container = document.querySelector('.page')
@@ -527,9 +533,9 @@ export function useGameLogic(opts = {}) {
       id, kind, text,
       style: { left: pos.left, top: pos.top },
     })
-    setTimeout(() => {
+    addTimer(setTimeout(() => {
       floatingPasses.value = floatingPasses.value.filter(f => f.id !== id)
-    }, 1200)
+    }, 1200))
   }
 
   // ===== 炸弹/王炸特效 =====
@@ -538,15 +544,17 @@ export function useGameLogic(opts = {}) {
     if (!fx) return
     bombFx.value = fx
     isShaking.value = true
-    setTimeout(() => { bombFx.value = null }, 1500)
-    setTimeout(() => { isShaking.value = false }, 800)
+    addTimer(setTimeout(() => { bombFx.value = null }, 1500))
+    addTimer(setTimeout(() => { isShaking.value = false }, 800))
   }
 
   // ===== 游戏初始化 =====
   function initGame(opts2 = {}) {
     const isP2P = opts2.isP2P === true
     const seed = opts2.seed
-    const me = isP2P ? (selfSeat.value || 0) : 0
+    // ★ Phase3 UI 修复:用 getter 替代常量快照,selfSeat 在 host 迁移后会变,
+    //   旧常量 me 在事件监听器里不会更新,导致 turn/play 等事件按旧 seat 处理。
+    const getMe = () => isP2P ? (selfSeat.value || 0) : 0
     if (opts2.forcedLevelRank != null) levelRank.value = opts2.forcedLevelRank
     // ★ GD-RC-001 修复:isHost 判定用 net.isHost()(网络 host 身份),不用 selfSeat === 0。
     //   host 换队友后 selfSeat 变成 2,但本机仍是网络 host,isHost 应仍为 true。
@@ -597,7 +605,7 @@ export function useGameLogic(opts = {}) {
     game.value.on('turn', (seat, lp) => {
       currentPlayer.value = seat
       lastPlay.value = lp
-      if (seat !== me) {
+      if (seat !== getMe()) {
         hintCards.value = []
         mainActionsRef.value?.setShowing(false)
       } else {
@@ -628,7 +636,7 @@ export function useGameLogic(opts = {}) {
       } else if (newCount > 0 && newCount <= 10) {
         audio.sfxCountdownTick()
       }
-      if (seat === me) {
+      if (seat === getMe()) {
         const remove = new Set(cards.map(c => cardKey(c)))
         myHand.value = myHand.value.filter(c => !remove.has(cardKey(c)))
         selected.value = new Array(myHand.value.length).fill(false)
@@ -882,9 +890,9 @@ function onAutoFindBest() {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         phase.value = 'playing'
         initGame({ isP2P: true, seed: pendingSeed })
-        setTimeout(() => {
+        addTimer(setTimeout(() => {
           net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value, newRound: true } })
-        }, 500)
+        }, 500))
       }
       // P2P 非 host:什么都不做(等 host 广播 DEAL)
       // phase 保持 'finished',UI 仍是结算页,提示"等待房主开下一局"
@@ -926,7 +934,8 @@ function onAutoFindBest() {
     isRestartAfterA.value = false  // 消费掉,重置标志
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
-    startDealAnimation()
+    // ★ Phase3 UI 修复:发牌动画由 game 的 'dealt' 事件统一触发(见 initGame 监听),
+    //   这里再调 startDealAnimation() 会造成重开一局时动画被触发两次。
   }
   function onRestartMatch() {
     const newSeed = _newRestartSeed()
@@ -1253,28 +1262,30 @@ function onAutoFindBest() {
     const cur = game.value.getState().currentPlayer
     // ★ GD-RC-001 修复:网络 host 端自动出牌判定
     if (cur === seat && isNetworkHost.value) {
-      const st = game.value.getState()
-      if (st.phase === 'playing') {
-        setTimeout(() => {
-          const hand = st.hands[seat]
-          if (hand && hand.length > 0) {
-            const ctx = {
-              isTeammateLast: st.lastPlay && ((st.lastPlay.who + 2) % 4 === seat),
-              mySeatIndex: seat,
-              teammateSeatIndex: (seat + 2) % 4,
-            }
-            import_AI().then(AI => {
-              const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
-              // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
-              if (r.type === 'play') {
-                commitPlay(seat, r.cards, 'ai')
-              } else {
-                commitPass(seat, 'ai')
-              }
-            })
+      // ★ Phase3 UI 修复:500ms 后再读 state,避免 setTimeout 外读取的 st 过期
+      //   (期间可能已有其他玩家出牌/过牌,currentPlayer / hand / lastPlay 都已变)。
+      addTimer(setTimeout(() => {
+        if (!game.value) return
+        const st = game.value.getState()
+        if (st.phase !== 'playing' || st.currentPlayer !== seat) return
+        const hand = st.hands[seat]
+        if (hand && hand.length > 0) {
+          const ctx = {
+            isTeammateLast: st.lastPlay && ((st.lastPlay.who + 2) % 4 === seat),
+            mySeatIndex: seat,
+            teammateSeatIndex: (seat + 2) % 4,
           }
-        }, 500)
-      }
+          import_AI().then(AI => {
+            const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
+            // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
+            if (r.type === 'play') {
+              commitPlay(seat, r.cards, 'ai')
+            } else {
+              commitPass(seat, 'ai')
+            }
+          })
+        }
+      }, 500))
     }
   }
 
@@ -1342,7 +1353,7 @@ function onAutoFindBest() {
         // ★ GD-RC-005 修复:reconnect snapshot 定向发送给新连接 seat 而非广播
         const onConnectSnapshot = ({ seat: connSeat }) => {
           if (!game.value) return
-          setTimeout(() => {
+          addTimer(setTimeout(() => {
             if (!game.value) return
             const st = game.value.getState()
             // 定向:用 sendTo + targetSeat 标记接收方,接收端判断 target 决定是否应用
@@ -1352,16 +1363,16 @@ function onAutoFindBest() {
                 payload: { targetSeat: connSeat, snapshot: st },
               })
             } catch (e) { /* fallback to broadcast if sendTo not available */ }
-          }, 200)
+          }, 200))
         }
         onNet('connect', onConnectSnapshot)
       }
       if (isNetworkHost.value) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         initGame({ isP2P: true, seed: pendingSeed })
-        setTimeout(() => {
+        addTimer(setTimeout(() => {
           net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value } })
-        }, 500)
+        }, 500))
       }
     } else {
       initGame()
@@ -1378,6 +1389,11 @@ function onAutoFindBest() {
       try { disposers.pop()() } catch (e) {}
     }
     try { document.removeEventListener('keydown', onKeyDown) } catch (e) {}
+    // ★ Phase3 UI 修复:批量清理所有 setTimeout timer,防止组件卸载后闭包仍执行。
+    while (timers.length) {
+      const id = timers.pop()
+      try { clearTimeout(id) } catch (e) {}
+    }
     if (nickToastTimer) clearTimeout(nickToastTimer)
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
   })

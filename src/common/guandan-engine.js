@@ -381,14 +381,54 @@ function canFormWithGhosts(targetType, targetLength, targetMainRank, concreteCar
   // ghostCount=1 → 15 种,ghostCount=2 → 120 种非递减组合(鬼牌无序),可控
   const allRanks = generateGhostAssignments(targetType, targetMainRank, targetLength, levelRank)
   const combos = combosWithReplacement(allRanks, ghostCount)
+  // 同花顺需要鬼牌与 concrete 同花色;其它牌型花色不影响识别
+  const ghostSuit = targetType === TYPE.STRAIGHT_FLUSH
+    ? (concreteCards.length > 0 ? concreteCards[0].suit : 1)
+    : 1
   for (const ranks of combos) {
-    const virtual = concreteCards.concat(ranks.map(rank => ({ suit: 9, rank })))
+    const virtual = concreteCards.concat(ranks.map(rank => ({ suit: ghostSuit, rank })))
     const r = recognize(virtual)
     if (r.type === targetType && r.length === targetLength && r.mainRank === targetMainRank) {
       return true
     }
   }
   return false
+}
+
+/**
+ * 把含鬼牌(红桃级牌)的出牌具象化为可识别的 concrete 牌
+ *
+ * @param {Card[]} cards 玩家实际选择的牌(可含红桃级牌)
+ * @param {number} levelRank 当前级牌 rank
+ * @param {Object|null} targetPlay 当前桌面牌 {type, mainRank, length};首家传 null
+ * @returns {{cards: Card[], rec: Object}|null} 具象化后的牌组 + 识别结果;无法具象化返回 null
+ *
+ * 设计:
+ *   - 无鬼牌时直接 recognize
+ *   - 有鬼牌时枚举鬼牌代表的 rank,找出一个合法且能压过 targetPlay 的解释
+ *   - 鬼牌数量 ≤2 时组合数可控(15/225), brute-force 足够
+ */
+function materializeGhosts(cards, levelRank, targetPlay = null) {
+  const { concrete, ghosts } = splitGhosts(cards, levelRank)
+  if (ghosts.length === 0) {
+    const rec = recognize(cards)
+    return rec.type === TYPE.INVALID ? null : { cards, rec }
+  }
+  if (ghosts.length > 2) return null
+
+  const allRanks = generateGhostAssignments(null, null, null, levelRank)
+  const combos = combosWithReplacement(allRanks, ghosts.length)
+  // 若 concrete 全部同花色,鬼牌也使用该花色(支持同花顺);否则默认红桃
+  const concreteSuits = new Set(concrete.filter(c => c.suit >= 0).map(c => c.suit))
+  const ghostSuit = concreteSuits.size === 1 ? [...concreteSuits][0] : 1
+  for (const ranks of combos) {
+    const concreteCards = concrete.concat(ranks.map(rank => ({ suit: ghostSuit, rank })))
+    const rec = recognize(concreteCards)
+    if (rec.type === TYPE.INVALID) continue
+    if (!targetPlay) return { cards: concreteCards, rec }
+    if (canBeat(rec, targetPlay)) return { cards: concreteCards, rec }
+  }
+  return null
 }
 
 /**
@@ -596,12 +636,15 @@ function tributeInfo(ranks, teams, levelUp, levelRank) {
   const secondTeam = teams.findIndex(t => t.includes(second))
 
   // 严格规则:打 A 时,头游队没过 A → 不升级不贡
-  // 当前 levelRank === 14 (A) 且头游队 !== 头游玩家所在队(理论上永远 ===,但作防御)
-  if (levelRank === 14 /* A */) {
-    // 头游队 = headTeam,该队拿了头游 → 算"过了 A"
-    // 这里简化:headTeam 存在 → 算过了
-    // 如果严格判 "头游玩家 == 上局第一玩家",需要 extra 参数,简化不加
-    // 旧版本永远进贡,新版至少处理了 length check + 明确分支
+  // 简化判定:打 A(levelRank===14) 且本局没有升级(levelUp===0) → 未过 A,不进贡
+  if (levelRank === 14 /* A */ && levelUp === 0) {
+    return {
+      needTribute: false,
+      from: [],
+      to: [],
+      doubleTribute: false,
+      pairFromTo: [],
+    }
   }
 
   if (headTeam === secondTeam) {
@@ -639,7 +682,7 @@ export {
   // 工具
   countByRank,
   // 识别
-  recognize, canBeat, splitGhosts, canFormWithGhosts,
+  recognize, canBeat, splitGhosts, canFormWithGhosts, materializeGhosts,
   // 展示层
   groupHandByRank,
   // 升级

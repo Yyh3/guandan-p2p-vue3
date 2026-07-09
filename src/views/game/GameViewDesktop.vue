@@ -212,7 +212,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 
 import HudTop from '@/components/HudTop.vue'
@@ -231,6 +231,7 @@ import '@/styles/tokens.css'
 import { useGameLogic } from './useGameLogic.js'
 
 const router = useRouter()
+const route = useRoute()
 
 // v2.4 task 2:本组件是 desktop 布局,从父组件 GameView.vue 接 props:
 //   - selfSeat (Number 0-3):自己的座位(联机时由父组件传)
@@ -267,44 +268,47 @@ onMounted(() => {
       mqLandscape.addListener(updateLandscape)
     }
   }
-  // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 host:lost — host 崩溃/断电
-  //   业务事件(网络层 _DISCONNECT payload.seat=-1 自动 emit)。
-  // ★ v0.4.20 V0420:真正"第二发现通道" — joiner 端 host:lost 时先尝试
-  //   smartReconnectToPeers(用 localStorage 缓存的 peer hostAddress 找新 host),
-  //   找到就直接 joinRoom 自动重新进房;找不到才跳首页。
-  //   这覆盖了 v0.4.17 host 主动退出场景(v0.4.19 已经处理)+ v0.4.20
-  //   host 崩溃场景(无 close 广播,只能靠缓存的 peer hostAddress 猜)。
-  // ★ v0.4.21 对抗性审查 V0420-3 修复:之前用 net.on('host:lost', 匿名) + onUnmounted
-  //   net.off('host:lost') 不传 fn,会清掉所有 host:lost 监听器(包括其它模块订阅)。
-  //   修法:命名函数 + 保存 handler 引用,卸载用精确 off(event, handler)。
-  const onHostLost = async () => {
-    // 先尝试 smart reconnect(优先用 v0.4.20 第二发现通道)
-    try {
-      // 从 selfInfo 拿 self(joinRoom 需要 nickname + avatar)
-      const self = (() => {
-        try { return net.getSelfInfo && net.getSelfInfo() } catch (e) { return null }
-      })()
-      if (self && typeof net.smartReconnectToPeers === 'function') {
-        // 从 URL 拿 roomNo
-        const routeRoomNo = String(route.query.roomNo || '')
-        if (routeRoomNo) {
-          const r = await net.smartReconnectToPeers(routeRoomNo, { self })
-          if (r && r.ok) {
-            // 找到新 host,joinRoom 已成功,GameView 继续用旧 route 即可(网络层重新连接)
-            console.info('[V0420] smartReconnectToPeers 找到新 host:', r.hostAddress)
-            return  // 不跳首页
-          }
-          console.warn('[V0420] smartReconnectToPeers 失败:', r)
-        }
-      }
-    } catch (e) {
-      console.warn('[V0420] smartReconnectToPeers 异常:', e?.message || e)
-    }
-    // smart reconnect 失败 → 跳首页(v0.4.17 旧行为)
-    router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
-  }
+  // Phase3 UI 修复:注册 host:lost 监听(命名函数定义在 onMounted 外,确保卸载可清理)
   net.on('host:lost', onHostLost)
 })
+
+// ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 host:lost — host 崩溃/断电
+//   业务事件(网络层 _DISCONNECT payload.seat=-1 自动 emit)。
+// ★ v0.4.20 V0420:真正"第二发现通道" — joiner 端 host:lost 时先尝试
+//   smartReconnectToPeers(用 localStorage 缓存的 peer hostAddress 找新 host),
+//   找到就直接 joinRoom 自动重新进房;找不到才跳首页。
+//   这覆盖了 v0.4.17 host 主动退出场景(v0.4.19 已经处理)+ v0.4.20
+//   host 崩溃场景(无 close 广播,只能靠缓存的 peer hostAddress 猜)。
+// ★ v0.4.21 对抗性审查 V0420-3 修复 + Phase3 UI 修复:
+//   onHostLost 必须定义在 onMounted 外部,onUnmounted 才能拿到引用精确 off;
+//   之前 const onHostLost 在 onMounted 内部,卸载时访问不到导致 listener 泄漏。
+//   同时补充 import useRoute,否则 route 未定义。
+const onHostLost = async () => {
+  // 先尝试 smart reconnect(优先用 v0.4.20 第二发现通道)
+  try {
+    // 从 selfInfo 拿 self(joinRoom 需要 nickname + avatar)
+    const self = (() => {
+      try { return net.getSelfInfo && net.getSelfInfo() } catch (e) { return null }
+    })()
+    if (self && typeof net.smartReconnectToPeers === 'function') {
+      // 从 URL 拿 roomNo
+      const routeRoomNo = String(route.query.roomNo || '')
+      if (routeRoomNo) {
+        const r = await net.smartReconnectToPeers(routeRoomNo, { self })
+        if (r && r.ok) {
+          // 找到新 host,joinRoom 已成功,GameView 继续用旧 route 即可(网络层重新连接)
+          console.info('[V0420] smartReconnectToPeers 找到新 host:', r.hostAddress)
+          return  // 不跳首页
+        }
+        console.warn('[V0420] smartReconnectToPeers 失败:', r)
+      }
+    }
+  } catch (e) {
+    console.warn('[V0420] smartReconnectToPeers 异常:', e?.message || e)
+  }
+  // smart reconnect 失败 → 跳首页(v0.4.17 旧行为)
+  router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
+}
 onUnmounted(() => {
   if (mqLandscape) {
     if (mqLandscape.removeEventListener) {

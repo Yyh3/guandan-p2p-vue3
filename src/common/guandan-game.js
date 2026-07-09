@@ -189,15 +189,11 @@ function createGame(opts) {
       if (idx < 0) return { ok: false, error: '牌不在手牌中' }
       hand.splice(idx, 1)
     }
-    // 验证牌型
-    const rec = E.recognize(cards)
-    if (rec.type === E.TYPE.INVALID) return { ok: false, error: '非法牌型' }
-    // 验证能压
-    if (state.lastPlay && !E.canBeat(rec, state.lastPlay)) {
-      return { ok: false, error: '压不过当前桌面牌' }
-    }
+    // 验证牌型(含鬼牌具象化)
+    const materialized = E.materializeGhosts(cards, state.levelRank, state.lastPlay)
+    if (!materialized) return { ok: false, error: '非法牌型或无法压过当前桌面牌' }
     // ★ v3.8 P1:抽离出 applyPlay 让 P2P 同步复用
-    applyPlay(seat, cards, hand, rec)
+    applyPlay(seat, cards, hand, materialized.rec)
     return { ok: true }
   }
 
@@ -228,7 +224,11 @@ function applyPlay(seat, cards, hand, rec) {
         return
       }
     }
-    if (!rec) rec = E.recognize(cards)
+    if (!rec) {
+      // P2P 同步路径:host 广播的 cards 可能含鬼牌,joiner 端需要具象化后再识别
+      const materialized = E.materializeGhosts(cards, state.levelRank, state.lastPlay)
+      rec = materialized ? materialized.rec : E.recognize(cards)
+    }
     // 注:applyPlay 是 host 广播同步的内部 API,host 已校验 seat 不应再校验,
     //   否则 P0-6 safety 兜底测试无法构造"4 全 finished"场景
     //   finishedOrder 检查只在 playerPlay(用户 API)做
@@ -278,7 +278,7 @@ function applyPlay(seat, cards, hand, rec) {
     state.passCount++
     state.trickHistory.push({ seat, pass: true })
     emit('pass', { seat })
-    const activePlayers = 4 - state.finishedOrder.length
+    const activePlayers = 4 - state.finishedOrder.length - state.abandonedSeats.length
     if (state.passCount >= activePlayers - 1) {
       const leader = state.lastPlay.who
       state.leaderPlayer = leader
@@ -417,12 +417,13 @@ function applyPlay(seat, cards, hand, rec) {
     const levelUp = E.calcLevelUp(ranks, teams)
     // v3.x P2-27 修复(E-6):tributeInfo 接受 levelUp 参数,严格"双下不贡"规则下
     //   levelUp=0(实际 2v2 不可达)会返回 needTribute:false。让字段有真正判断意义。
-    const tribute = E.tributeInfo(ranks, teams, levelUp)
+    const tribute = E.tributeInfo(ranks, teams, levelUp, state.levelRank)
     // ★ v0.4.9:记录升级前的 levelRank,用于判定"过 A"重开
     //   严格规则:打 A(previousLevelRank=14)且本轮胜方继续升级(levelUp>0)→ 本轮过 A
     //   - previousLevelRank=14 + levelUp=0 → 本轮没升级,继续打 A
     //   - previousLevelRank=15(2) 升到 14(A) → 只是下一局打 A,不算过 A
     const previousLevelRank = state.levelRank
+    state.previousLevelRank = previousLevelRank
     const isRestartAfterA = previousLevelRank === 14 && levelUp > 0
     state.levelUp = levelUp
     state.tribute = tribute
@@ -455,6 +456,10 @@ function applyPlay(seat, cards, hand, rec) {
 
   // ============ 下一局(发新牌) ============
   function nextRound() {
+    // ★ 过 A 后下一局:清空上一局遗留标志,避免 UI 继续显示"重开一局"
+    state.isRestartAfterA = false
+    state.previousLevelRank = null
+    state.levelUp = 0
     deal()
   }
 
@@ -677,6 +682,10 @@ function applyPlay(seat, cards, hand, rec) {
       const newHostHand = state.hands[newHostSeat].slice()
       state.hands[0] = newHostHand
       state.hands[newHostSeat] = []
+      // ★ 新 host 原座位已无人接管,标记弃赛,避免 nextTurn 落到空座位
+      if (!state.abandonedSeats.includes(newHostSeat)) {
+        state.abandonedSeats.push(newHostSeat)
+      }
 
       // ★ v0.4.14 对抗性审查 (V0412-02) 防御性清理:即使历史原因 abandonedSeats
       //   里残留 0(老 host 端收到了旧版本广播的 snapshot 带着 [0]),也要在这里

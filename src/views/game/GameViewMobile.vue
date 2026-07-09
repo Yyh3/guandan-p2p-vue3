@@ -159,6 +159,33 @@
       <span v-else-if="phase === 'finished'">本局结束</span>
     </div>
 
+    <!-- ===== 6.5 结算遮罩 (mobile 版) ===== -->
+    <div v-if="phase === 'finished'" class="result-mask-mobile" @click.self="onPrimaryResultAction">
+      <div class="result-card-mobile">
+        <h2 class="result-title-mobile">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
+        <p class="result-meta-mobile" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
+        <p class="result-meta-mobile" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局</p>
+        <div class="result-list-mobile">
+          <div
+            v-for="(seat, i) in finishedOrder"
+            :key="i"
+            class="result-row-mobile"
+            :class="rankColor(i)"
+          >
+            <span class="result-rank-mobile">{{ ['头游','二游','三游','末游'][i] }}</span>
+            <span class="result-name-mobile">{{ playerName(seat) }}</span>
+            <span class="result-team-mobile">{{ i < 2 ? '🏆 胜方' : '💀 负方' }}</span>
+          </div>
+        </div>
+        <div class="result-actions-mobile">
+          <button class="r-btn-mobile ghost" @click="$emit('menu')">退出</button>
+          <button class="r-btn-mobile primary" @click="onPrimaryResultAction">
+            {{ isRestartAfterA ? '重开一局' : '下一局' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== 7. 手牌 28% (按 rank 分组竖叠,9 列 56px 宽) ===== -->
     <div class="hand-area" :class="{ disabled: !myTurn || isDealing, 'is-urgent': urgent && myTurn }">
       <div class="hand-inner">
@@ -310,12 +337,13 @@ const mainActionsRef = ref(null)
 
 const {
   // state
-  round, levelLabel, multiplier,
+  round, levelLabel, nextLevelLabel, levelUp, multiplier,
   players, myHand, selectedColKeys, tableCards, lastPlay,
-  phase, currentPlayer, turnTimeLeft,
+  phase, currentPlayer, turnTimeLeft, finishedOrder,
   isDealing, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
+  isRestartAfterA,
   // computed
   myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
   seatData, handColumns, selectedCount,
@@ -325,6 +353,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
+  onPrimaryResultAction, onRestartMatch,
   onIcon, showMenu,
 } = useGameLogic({
   mainActionsRef,
@@ -1329,5 +1358,84 @@ button {
   top: 60px;
   font-size: 11px;
   padding: 6px 14px;
+}
+
+/* ===== 结算遮罩 (mobile) ===== */
+.result-mask-mobile {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(6px);
+  padding: 16px;
+}
+.result-card-mobile {
+  width: 100%;
+  max-width: 340px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,244,255,0.94));
+  border: 1px solid rgba(255,255,255,0.55);
+  border-radius: 18px;
+  padding: 20px 18px 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  color: #1a1a2e;
+}
+.result-title-mobile {
+  margin: 0 0 6px;
+  font-size: 22px;
+  text-align: center;
+  background: linear-gradient(90deg, #2b2b52, #4a4a8a);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.result-meta-mobile {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: 13px;
+  color: #555;
+}
+.result-list-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.result-row-mobile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.04);
+  font-size: 14px;
+}
+.result-row-mobile.rank-0 { background: linear-gradient(90deg, rgba(255,215,0,0.18), rgba(255,215,0,0.05)); }
+.result-row-mobile.rank-1 { background: rgba(212,175,55,0.12); }
+.result-row-mobile.rank-2 { background: rgba(120,120,150,0.12); }
+.result-row-mobile.rank-3 { background: rgba(180,80,80,0.12); }
+.result-rank-mobile { font-weight: 800; min-width: 38px; }
+.result-name-mobile { flex: 1; text-align: center; }
+.result-team-mobile { font-size: 12px; }
+.result-actions-mobile {
+  display: flex;
+  gap: 10px;
+}
+.r-btn-mobile {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.r-btn-mobile.primary {
+  background: linear-gradient(180deg, #f7d06f, #d4a827);
+  color: #2a1f08;
+  box-shadow: 0 4px 12px rgba(212,160,39,0.35);
+}
+.r-btn-mobile.ghost {
+  background: rgba(0,0,0,0.06);
+  color: #444;
+  border: 1px solid rgba(0,0,0,0.12);
 }
 </style>

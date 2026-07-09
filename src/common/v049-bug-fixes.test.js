@@ -180,21 +180,38 @@ console.log('\n=== 5. V049-05: playMp3Sfx 失败返回 false / failedSlots 追�
   const fs = await import('fs')
   const src = fs.readFileSync('src/common/audio.js', 'utf-8')
   // 5.1 playMp3Sfx 同步检查 el.error
-  const playMp3Fn = src.match(/function playMp3Sfx\(trackName\) \{([\s\S]*?)\n\}\n/)
+  // 用 balance brace 方式抽函数体,避免非贪婪正则在内部 } 处提前截断
+  function extractFunction(src, name) {
+    const startRe = new RegExp('function\\s+' + name + '\\s*\\(')
+    const start = src.search(startRe)
+    if (start === -1) return null
+    let i = src.indexOf('{', start)
+    if (i === -1) return null
+    let depth = 1
+    i++
+    while (i < src.length && depth > 0) {
+      if (src[i] === '{') depth++
+      else if (src[i] === '}') depth--
+      i++
+    }
+    return src.slice(start, i)
+  }
+  const playMp3Fn = extractFunction(src, 'playMp3Sfx')
+  assert('playMp3Sfx 函数体存在', !!playMp3Fn)
   assert('playMp3Sfx 检查 el.error 返 false',
-    !!playMp3Fn && /if\s*\(\s*el\.error\s*\)\s*return\s*false/.test(playMp3Fn[1])
+    !!playMp3Fn && /if\s*\(\s*el\.error\s*\)\s*return\s*false/.test(playMp3Fn)
   )
   // 5.2 failedSlots 字段定义
   assert('playMp3Sfx 内 entry.failedSlots Set 创建/写入',
-    !!playMp3Fn && /entry\.failedSlots/.test(playMp3Fn[1])
+    !!playMp3Fn && /entry\.failedSlots/.test(playMp3Fn)
   )
   // 5.3 _shouldUseMp3 函数存在
-  const shouldFn = src.match(/function _shouldUseMp3\(trackName\) \{([\s\S]*?)\n\}/)
+  const shouldFn = extractFunction(src, '_shouldUseMp3')
   assert('_shouldUseMp3 函数存在', !!shouldFn)
   // 5.4 playSfxForType 调用 _shouldUseMp3
-  const playSfxFn = src.match(/function playSfxForType\(type, count\) \{([\s\S]*?)\n\}\n/)
+  const playSfxFn = extractFunction(src, 'playSfxForType')
   assert('playSfxForType 调用 _shouldUseMp3 检查',
-    !!playSfxFn && /_shouldUseMp3\(type\)/.test(playSfxFn[1])
+    !!playSfxFn && /_shouldUseMp3\(type\)/.test(playSfxFn)
   )
 
   // 5.5 行为验证:Node 环境无 Audio,playSfxForType 走 synth 路径(不抛错)

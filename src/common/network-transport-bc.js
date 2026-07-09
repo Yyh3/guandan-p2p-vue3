@@ -18,6 +18,7 @@ const BC_NAME_PREFIX = 'guandan-p2p-'
 
 export class BroadcastChannelTransport {
   constructor() {
+    this.type = 'bc'
     this._channel = null
     this._listeners = []
     this._roomId = ''

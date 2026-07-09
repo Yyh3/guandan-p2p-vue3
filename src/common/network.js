@@ -211,11 +211,12 @@ let _promotedHostSeat = null
 //     2. 优先 canHost=true 候选(WS server / AndroidWs native / BC)
 //     3. 同等条件下 UUID 字典序最小(确定性,所有 joiner 算出同一个结果)
 //   返回:number (seat 1/2/3) 或 null(没有候选)
-function selectNextHostCandidate() {
+function selectNextHostCandidate(excludedSeats = []) {
   // 收集候选:[seat, uuid, canHost]
+  const excluded = new Set(excludedSeats)
   const candidates = []
   for (let seat = 1; seat <= 3; seat++) {
-    if (state_finishedOrAbandoned(seat)) continue
+    if (excluded.has(seat)) continue
     const info = peers.get(seat)
     if (!info || !info.uuid) continue
     candidates.push({ seat, uuid: info.uuid, canHost: info.canHost === true })
@@ -229,27 +230,19 @@ function selectNextHostCandidate() {
   return pool[0].seat
 }
 
-// 辅助:seat 是否已出完牌/弃赛(简单版本,详细逻辑在 game 层)
-//   实际上 finishedOrder / abandonedSeats 是 game 层 state,不在 network.js
-//   这里只做 seat 是否有 info 的判断
-function state_finishedOrAbandoned(seat) {
-  // 简化:peers Map 里有 info 就当候选(不去查 game state)
-  return false
-}
-
 // v0.4.19:本端 transport 是否有"作为新 host 起 server"的能力
 //   - BC:共享 channel,本身就是 host 模式,canHost=true
 //   - AndroidWs:用 Capacitor WsServer plugin,canHost=true
 //   - WS:在 Node 环境有 ws server 能力(浏览器 ws 无),通过 typeof process 检测
 function canHostAsNewHost() {
   if (!transport) return false
-  const name = transport.constructor.name
-  if (name === 'BroadcastChannelTransport') return true
-  if (name === 'AndroidWsTransport') return true
-  if (name === 'WebSocketTransport') {
+  const t = transport.type
+  if (t === 'bc') return true
+  if (t === 'android-ws') return true
+  if (t === 'ws') {
     // 浏览器 ws 无 server 能力;Node ws 有(用 ws npm 包)
     // 检测:typeof process !== 'undefined' && process.versions?.node
-    return (typeof process !== 'undefined' && process.versions && process.versions.node)
+    return !!(typeof process !== 'undefined' && process.versions && process.versions.node)
   }
   return false
 }
@@ -415,7 +408,8 @@ function stopHeartbeatChecker() {
 function _onTransportMessage(msg) {
   if (!msg || !msg.type) return
   // 定向消息过滤(to 字段:仅给某 seat 的消息,其他人忽略)
-  if (msg.to != null && msg.to !== selfSeat) return
+  //   host 不能过滤,因为 host 需要 relay 定向消息给目标 seat。
+  if (msg.to != null && !isHostFlag && msg.to !== selfSeat) return
   emit('message', msg)
   emit('message:' + msg.type, msg.payload, msg.from, msg)
   if (isHostFlag) {
@@ -454,6 +448,8 @@ const RELAY_TYPES = new Set([
   // ★ V049-04 修复:把 MATCH_RESTART 加入 WS relay 白名单
   //   之前遗漏导致 joiner 端发起的 MATCH_RESTART(异常恢复 / 迁移后 host)无法被 host relay 给其它 joiner
   'MATCH_RESTART',
+  // ★ Phase 2 修复:joiner 发起的 swapSeats 需要 host relay 给其它 joiner
+  'SEAT_SWAP_ACK',
 ])
 
 function relayFromClient(msg) {
@@ -467,6 +463,20 @@ function relayFromClient(msg) {
   // 判定:transport._mode === 'self' 且 transport._channel == null (BroadcastChannelTransport 才有 _channel)
   const isWsLikeHost = transport._mode === 'self' && transport._channel == null
   if (!isWsLikeHost) return
+
+  // ★ Phase 2 修复:保留 joiner 指定的定向 to,不要覆盖成广播
+  if (msg.to != null) {
+    if (msg.to <= 0 || msg.to === msg.from || !peers.has(msg.to)) return
+    try {
+      transport.send({
+        ...msg,
+        from: msg.from,
+        ts: Date.now(),
+      })
+    } catch (e) {}
+    return
+  }
+
   for (const [seat] of peers.entries()) {
     if (seat <= 0 || seat === msg.from) continue  // 跳过 host 自己 + 原 sender
     try {
@@ -573,6 +583,13 @@ function _handleHostMessage(msg) {
     if (peers.has(msg.from)) {
       peers.set(msg.from, { ...peers.get(msg.from), ready: msg.payload.ready })
     }
+  } else if (msg.type === 'SEAT_SWAP_ACK') {
+    // ★ Phase 2 修复:host 端应用 joiner 发起的座位交换,再 relay 给其它 joiner
+    if (!msg.payload) return
+    const { a, b } = msg.payload
+    if (typeof a === 'number' && typeof b === 'number' && a !== b && a >= 0 && a <= 3 && b >= 0 && b <= 3) {
+      _applySeatSwapLocal(a, b)
+    }
   } else if (msg.type === 'HEARTBEAT') {
     if (peers.has(msg.from)) {
       // ★ v2.4-p4 BUG-007:被踢 joiner 在 ws 完全关闭前可能还有最后一帧心跳,
@@ -626,7 +643,7 @@ function _handleJoinerMessage(msg) {
     //   KICKED 比 PEER_LEAVE 优先级更高,因为它直达被踢者,不需要根据 seat 字段匹配
     //   注意:KICKED 是定向消息(to=seat),其它 joiner 不会收到
     const payload = msg.payload || {}
-    emit('self:kicked', { reason: payload.reason || 'kicked', ts: payload.ts || Date.now() })
+    _emitSelfKicked(payload.reason, payload.ts)
     // ★ 通知 host 端 transport 关闭(joiner 端 transport 自己 close 会触发 _DISCONNECT)
     //   不在这里主动 close transport,留给 ws.onclose 自然路径,避免与 _DISCONNECT 重复
   } else if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
@@ -675,7 +692,7 @@ function _handleJoinerMessage(msg) {
     if (kicked && seat === selfSeat) {
       // ★ v2.4-p4 BUG-007:兼容 KICKED 协议,携带 ts 字段(joiner 端可能在 KICKED
       //   之前收到 PEER_LEAVE 时也跳页,所以 self:kicked 必须有完整 payload)
-      emit('self:kicked', { reason: msg.payload?.reason || 'kicked', ts: msg.payload?.ts || Date.now() })
+      _emitSelfKicked(msg.payload?.reason, msg.payload?.ts)
     }
     // ★ v2.1 P3:host 迁移标记 — joiner 收到 PEER_LEAVE { seat: 0, migrate: true }
     //   如果自己是被选中的新 host(newHostSeat) → 升级
@@ -693,7 +710,12 @@ function _handleJoinerMessage(msg) {
         isHostFlag = true
         emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: true })
       } else if (newHostSeat != null) {
-        // 旁观者:从 PEER_LEAVE 拿 snapshot,无需等 NEW_HOST 后手广播
+        // 旁观者:同步 peers Map,把新 host 升到 seat 0
+        if (peers.has(newHostSeat)) {
+          const newHostInfo = peers.get(newHostSeat)
+          peers.delete(newHostSeat)
+          peers.set(0, newHostInfo)
+        }
         emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
       }
     }
@@ -777,7 +799,7 @@ function _handleJoinerMessage(msg) {
     const announceHostSeat = msg.payload?.newHostSeat
     if (typeof newHostAddress !== 'string') return
     // BC 模式:不需要 transport rebuild,但需要把新 hostSeat 同步到 peers Map
-    if (transport && transport.constructor.name === 'BroadcastChannelTransport') {
+    if (transport && transport.type === 'bc') {
       // joiner 端:把 announceHostSeat 的 peer 信息搬到 seat 0
       if (announceHostSeat && announceHostSeat !== 0 && peers.has(announceHostSeat)) {
         const newHostInfo = peers.get(announceHostSeat)
@@ -834,7 +856,10 @@ function startAsHost(self) {
   //   canHost:本端 transport 是否有 server 能力(WS Node / AndroidWs / BC = true,浏览器 ws = false)
   //   hostAddress:WS server bind 后的 IP:port(BC = null)
   //   这两个字段让其他 joiner 收到 peer:join 时能知道"我能升级吗 + 怎么连我"
-  selfInfo = { ...self, uuid: ensureUuid(), canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
+  // ★ Phase 2 修复:transport 创建前 canHostAsNewHost/getSelfHostAddress 无法返回有效值,
+  //   先用占位值,等 transport open 后再刷新。
+  const uuid = ensureUuid()
+  selfInfo = { ...self, uuid, canHost: false, hostAddress: null }
   isHostFlag = true
   selfSeat = 0
   peers.set(0, { ...selfInfo })
@@ -849,10 +874,18 @@ function startAsHost(self) {
   // ★ BUG-005 修复:BC transport 需要 roomId 构造独立 channel name (`guandan-p2p-<roomId>`),
   //   否则所有 host 都用 'default' channel → 多个 host 串号 / joiner 串房
   //   WS / AndroidWs transport 不需要 roomId(走 ws host:port 直连,不走 BC channel name)
-  const openPromise = (transport instanceof BroadcastChannelTransport)
+  const openPromise = (transport.type === 'bc')
     ? transport.open('self', roomId || 'default')
     : transport.open('self')
-  openPromise.catch((err) => {
+  openPromise.then(() => {
+    if (!transport) return
+    selfInfo = { ...self, uuid, canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
+    // 只在 seat 0 仍是自己(或空)时刷新,避免覆盖 swapSeats 等后续操作已变更的 seat 0
+    const current0 = peers.get(0)
+    if (!current0 || current0.uuid === uuid) {
+      peers.set(0, { ...selfInfo })
+    }
+  }).catch((err) => {
     emit('error', err?.message || 'Transport open failed')
   })
   startHeartbeatChecker()
@@ -870,24 +903,26 @@ function startAsHost(self) {
  */
 function joinRoom(hostRoomId, self, opts) {
   // ★ v0.4.19 V0419-02:selfInfo 加 canHost + hostAddress 字段(同上 startAsHost)
-  selfInfo = { ...self, uuid: ensureUuid(), canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
+  // ★ Phase 2 修复:transport 创建后再刷新 canHost/hostAddress,避免初始为 false/null。
+  const uuid = ensureUuid()
+  selfInfo = { ...self, uuid, canHost: false, hostAddress: null }
   isHostFlag = false
   selfSeat = -1
-  // 兼容签名: hostRoomId 含 ':' 时解析为 ws host:port 形式 (Android Capacitor 路径)
-  // 不含 ':' 或 ':' 后面没合法端口时 → 当 BC 房间号 (浏览器路径)
+  // 兼容签名: hostRoomId 含 ':' 或 '[' 时解析为 ws host:port 形式 (Android Capacitor / IPv6 路径)
+  // 不含 ':' 或解析失败时 → 当 BC 房间号 (浏览器路径)
   let parsedHostIp = (opts && opts.hostIp) || null
   let parsedHostPort = (opts && opts.hostPort) || null
   let isWsMode = false
   if (parsedHostIp && parsedHostPort) {
     isWsMode = true
-  } else if (typeof hostRoomId === 'string' && hostRoomId.indexOf(':') >= 0) {
-    const idx = hostRoomId.lastIndexOf(':')
-    const candidateIp = hostRoomId.slice(0, idx)
-    const candidatePort = parseInt(hostRoomId.slice(idx + 1), 10)
-    if (candidateIp && !Number.isNaN(candidatePort) && candidatePort > 0 && candidatePort < 65536) {
-      parsedHostIp = candidateIp
-      parsedHostPort = candidatePort
+  } else if (typeof hostRoomId === 'string' && (hostRoomId.indexOf(':') >= 0 || hostRoomId.startsWith('['))) {
+    try {
+      const parsed = parseHostAddress(hostRoomId)
+      parsedHostIp = parsed.hostIp
+      parsedHostPort = parsed.hostPort
       isWsMode = true
+    } catch (e) {
+      // 解析失败 → 回退到 BC 房间号
     }
   }
   roomId = isWsMode ? 'ws' : hostRoomId
@@ -906,13 +941,15 @@ function joinRoom(hostRoomId, self, opts) {
   let openPromise
   if (isWsMode) {
     openPromise = transport.open('client', parsedHostIp, parsedHostPort)
-  } else if (transport instanceof BroadcastChannelTransport) {
+  } else if (transport.type === 'bc') {
     openPromise = transport.open('client', roomId || 'default')
   } else {
     openPromise = transport.open('client', null, null)
   }
   openPromise.then(() => {
     if (!transport) return
+    // transport 就绪后刷新 selfInfo,再发 JOIN
+    selfInfo = { ...self, uuid, canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
     // 立即发 JOIN。joiner 端 selfSeat=-1,host 会按 uuid 复用或分配新 seat
     sendMessage({ type: 'JOIN', payload: selfInfo })
     // 启动心跳发送
@@ -1145,6 +1182,7 @@ function close(opts = {}) {
   lastHeartbeat.clear()
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
   _kickedSeats.clear()
+  _selfKickedEmitted = false
   // ★ v3.x P2-29:清理 host 迁移去重标记,避免下次开房时新 joiner 误让位给旧标记
   _promotedHostSeat = null
   // ★ v3.x P2-25 修复(N-4):清空事件总线 listeners,避免旧组件订阅的 handler 残留到下次开房
@@ -1258,6 +1296,13 @@ function _applySeatSwapLocal(a, b) {
  * @type {Set<number>}
  */
 const _kickedSeats = new Set()
+let _selfKickedEmitted = false
+
+function _emitSelfKicked(reason, ts) {
+  if (_selfKickedEmitted) return
+  _selfKickedEmitted = true
+  emit('self:kicked', { reason: reason || 'kicked', ts: ts || Date.now() })
+}
 
 /**
  * Host 统一踢人接口 —— 网络层权威 (BUG-007 修复)
@@ -1448,7 +1493,7 @@ async function rebuildAsHost() {
     return { ok: false, error: 'transport 不存在' }
   }
   // BC 模式不需要 rebuild(同 channel)
-  if (transport.constructor.name === 'BroadcastChannelTransport') {
+  if (transport.type === 'bc') {
     return { ok: true, skipped: 'bc' }
   }
   // ★ v0.4.17 对抗性审查 (V0416-02):WS / AndroidWs 拓扑关键修复
@@ -1573,8 +1618,13 @@ function requestPromoteToHost(snapshot) {
   //     - 如果算法选本端(selfSeat === candidate):本地 self-loop 升级 + emit host:migrated
   //     - 如果算法选别的 joiner:本地模拟"收到新 host 是 candidate"消息,本端旁观让位
   //   所有 joiner 用同一算法 + 同一 peers Map 视图 → 确定性选出同一个 host
+  const excluded = []
+  if (snapshot) {
+    if (Array.isArray(snapshot.finishedOrder)) excluded.push(...snapshot.finishedOrder)
+    if (Array.isArray(snapshot.abandonedSeats)) excluded.push(...snapshot.abandonedSeats)
+  }
   const candidate = (typeof selectNextHostCandidate === 'function')
-    ? selectNextHostCandidate()
+    ? selectNextHostCandidate(excluded)
     : null
   if (candidate != null && candidate !== selfSeat) {
     // 旁观分支:不升级自己,模拟"收到别人升级"消息,本地让位
@@ -1734,6 +1784,12 @@ function _tickHeartbeatChecker() {
   if (!heartbeatCheckTimer) return false
   const now = Date.now()
   for (const [seat, ts] of lastHeartbeat.entries()) {
+    // ★ Phase 2 修复:被踢 seat 已在 kickPlayer 中清理,如果 lastHeartbeat 还有残留则跳过,
+    //   避免重复 emit peer:leave / ai:takeover。
+    if (_kickedSeats.has(seat)) {
+      lastHeartbeat.delete(seat)
+      continue
+    }
     if (now - ts > HEARTBEAT_TIMEOUT_MS) {
       lastHeartbeat.delete(seat)
       const info = peers.get(seat)
@@ -1766,7 +1822,7 @@ function __installFakeTimers(opts) {
 function _getTransport() { return transport }
 function _getTransportType() {
   if (!transport) return null
-  return transport.constructor.name
+  return transport.type
 }
 
 export {

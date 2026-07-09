@@ -527,5 +527,64 @@ console.log('\n=== 30. Hard 难度:decide(hand, currentPlay, levelRank, ctx, dif
   assert('★ hard decide(跟单张 7) → pass(不出 4 炸)', rHard.type === 'pass')
 }
 
+console.log('\n=== 31. Phase 1 修复行为回归 ===')
+  {
+    const AI = await import('./guandan-ai.js')
+    // 31.1 chooseLead 优先出成组牌(对子)
+    {
+      const hand = [c(5, 0), c(5, 2), c(7, 1), c(9, 3)]
+      const r = AI.chooseLead(hand, 2)
+      assert('chooseLead 有对子时不出单张', r.cards.length === 2)
+      assert('chooseLead 出最小对子 5', r.cards.every(c => c.rank === 5))
+    }
+    // 31.2 findMinBeat 尊重 ghostCount=0(不用鬼牌)
+    {
+      // 只有鬼牌能压时,ghostCount=0 应返回 null
+      const hand = [{ suit: 1, rank: 2 }]
+      const target = { type: E.TYPE.SINGLE, mainRank: 14, length: 1 }
+      const withGhost = AI.findMinBeat(hand, target, 1, 2)
+      const noGhost = AI.findMinBeat(hand, target, 0, 2)
+      assert('ghostCount=1 可用鬼牌跟单张 A', withGhost && withGhost.length === 1)
+      assert('ghostCount=0 禁用鬼牌时无法跟', noGhost === null)
+    }
+    // 31.3 王炸不可压王炸
+    {
+      const hand = [c(16, -1), c(16, -1), c(17, -1), c(17, -1)]
+      const target = { type: E.TYPE.KINGS_BOMB, mainRank: 17, length: 4 }
+      const r = AI.findMinBeat(hand, target, 0, 2)
+      assert('王炸对王炸不能压', r === null)
+    }
+    // 31.4 A 高顺子可被找出
+    {
+      const hand = [c(10, 0), c(11, 1), c(12, 0), c(13, 2), c(14, 1)]
+      const target = { type: E.TYPE.STRAIGHT, mainRank: 9, length: 5 }
+      const r = AI.findMinBeat(hand, target, 0, 2)
+      assert('A 高顺子(10-J-Q-K-A)能压 9 高顺', r && r.length === 5)
+    }
+    // 31.5 三张可用 2 实牌 + 1 鬼
+    {
+      const hand = [c(8, 0), c(8, 2), { suit: 1, rank: 2 }]
+      const target = { type: E.TYPE.THREE, mainRank: 5, length: 3 }
+      const r = AI.findMinBeat(hand, target, 1, 2)
+      assert('2 实牌 + 1 鬼可压三张', r && r.length === 3)
+    }
+    // 31.6 autoPlayGrouped 用鬼牌填补顺子中间缺张
+    {
+      const hand = [c(3, 0), c(4, 0), c(5, 0), c(7, 0), c(8, 0), { suit: 1, rank: 2 }]
+      const r = AI.autoPlayGrouped(hand, null, 2)
+      assert('autoPlayGrouped 用鬼补顺子中间缺张(长度>=5)', r.cards.length >= 5)
+      const concrete = r.cards.filter(c => !(c.suit === 1 && c.rank === 2))
+      const ghostCount = r.cards.length - concrete.length
+      let canForm = false
+      for (let main = 3; main <= 14; main++) {
+        if (E.canFormWithGhosts(E.TYPE.STRAIGHT, r.cards.length, main, concrete, ghostCount, 2)) {
+          canForm = true
+          break
+        }
+      }
+      assert('补齐后可具象化为合法顺子', canForm)
+    }
+  }
+
 console.log(`\n========== AI 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)
 process.exit(fail > 0 ? 1 : 0)

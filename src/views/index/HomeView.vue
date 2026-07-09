@@ -74,7 +74,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
@@ -87,6 +87,7 @@ const showNickEditor = ref(false)
 
 // ★ v2.1 P1 host 主动踢人:被踢的 joiner 跳到 /?force_disconnected=1 → 首页弹提示
 const kickedToast = ref('')
+let kickedToastTimer = null
 
 // 4 个主按钮(按 spec §2.1):开始游戏 / 加入房间 / AI 对战 / 游戏规则
 // tone 决定按钮的微调色调(都是金色玻璃基底,只是底色 hint 不同)
@@ -136,10 +137,15 @@ onMounted(() => {
       : '连接已断开,已返回首页'
     kickedToast.value = msg
     // 5 秒后自动消失,或点击 × 立刻消失
-    setTimeout(() => { kickedToast.value = '' }, 5000)
+    if (kickedToastTimer) clearTimeout(kickedToastTimer)
+    kickedToastTimer = setTimeout(() => { kickedToast.value = '' }, 5000)
     // 清理 URL,避免刷新再次触发
     router.replace({ path: '/', query: {} })
   }
+})
+
+onUnmounted(() => {
+  if (kickedToastTimer) clearTimeout(kickedToastTimer)
 })
 
 function onEditNickname() { showNickEditor.value = true }

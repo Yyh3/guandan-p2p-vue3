@@ -32,7 +32,7 @@ function check(name, cond) {
 console.log('\n=== 1. V0419-01: selectNextHostCandidate 确定性选举(UUID 字典序 + canHost) ===')
 {
   // 1.1 函数存在(line 146, V0419-01 新加)
-  const newSelectMatch = networkSrc.match(/^function selectNextHostCandidate\(\)\s*\{[\s\S]*?^\}/m)
+  const newSelectMatch = networkSrc.match(/^function selectNextHostCandidate\([^)]*\)\s*\{[\s\S]*?^\}/m)
   check('selectNextHostCandidate (V0419-01 新版) 函数存在', !!newSelectMatch)
   if (newSelectMatch) {
     const body = newSelectMatch[0]
@@ -90,12 +90,12 @@ console.log('\n=== 2. V0419-02: selfInfo 加 canHost + hostAddress 字段 ===')
   check('canHostAsNewHost 函数存在', !!canHostFnMatch)
   if (canHostFnMatch) {
     const body = canHostFnMatch[0]
-    check('canHostAsNewHost 含 BroadcastChannelTransport 检测',
-      /BroadcastChannelTransport/.test(body))
-    check('canHostAsNewHost 含 AndroidWsTransport 检测',
-      /AndroidWsTransport/.test(body))
-    check('canHostAsNewHost 含 WebSocketTransport + process.versions.node 检测',
-      /WebSocketTransport/.test(body) && /process\.versions/.test(body))
+    check('canHostAsNewHost 用稳定 type 检测 bc',
+      /===\s*['"]bc['"]/.test(body))
+    check('canHostAsNewHost 用稳定 type 检测 android-ws',
+      /===\s*['"]android-ws['"]/.test(body))
+    check('canHostAsNewHost 用稳定 type 检测 ws + process.versions.node',
+      /===\s*['"]ws['"]/.test(body) && /process\.versions/.test(body))
   }
 
   // 2.4 getSelfHostAddress 函数存在 + 内部逻辑

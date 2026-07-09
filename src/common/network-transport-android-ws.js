@@ -37,6 +37,7 @@ export class AndroidWsTransport {
    * @param {string} [opts.path='/'] —— ws path
    */
   constructor(opts = {}) {
+    this.type = 'android-ws'
     this._port = opts.port != null ? opts.port : DEFAULT_PORT
     this._host = opts.host || '0.0.0.0'
     this._path = opts.path || '/'
@@ -157,7 +158,8 @@ export class AndroidWsTransport {
   send(msg) {
     const data = JSON.stringify(msg)
     if (!this._ready) {
-      this._outbox.push(data)
+      // v3.x P2-24 修复(N-6):outbox 存 {data, msg},flush 时保留 msg.to 做定向路由
+      this._outbox.push({ data, msg })
       return true
     }
     if (this._mode === 'self') {
@@ -190,10 +192,12 @@ export class AndroidWsTransport {
     if (!this._ready) return
     const pending = this._outbox
     this._outbox = []
-    for (const data of pending) {
+    for (const item of pending) {
+      const data = item?.data
+      const msg = item?.msg
       if (this._mode === 'self') {
-        // 异步 flush 时没有完整 msg 对象了,统一广播
-        WsServer.broadcast({ message: data }).catch(() => {})
+        // 复用 _sendHost,保留 msg.to 定向路由
+        this._sendHost(data, msg).catch(() => {})
       } else if (this._mode === 'client') {
         if (this._ws && this._ws.readyState === 1) {
           try { this._ws.send(data) } catch (e) { /* swallow */ }

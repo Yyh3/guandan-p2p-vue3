@@ -40,32 +40,22 @@ const route = useRoute()
 //   - 横屏 + height ≤ 500px(小屏如 iPhone SE)→ mobile
 //   - 其他(含手机横屏 iPad)→ desktop
 // 这样手机横屏直接套用 1667 行 desktop 布局,免去"请使用竖屏"硬遮罩。
+// ★ Phase3 UI 修复:isMobile 在组件挂载时只判定一次,不再监听 viewport 变化。
+//   原因:游戏中反复切换横竖屏会导致 <component :is> 重新挂载 GameViewDesktop /
+//   GameViewMobile,useGameLogic 生命周期重新执行,游戏状态丢失。
+//   进入对局页时的设备形态即决定本次渲染用 desktop 或 mobile 布局。
 const isMobile = ref(false)
-let mqPortrait = null
-let mqNarrow = null
-let mqShort = null
-const update = () => {
-  const portrait = mqPortrait ? mqPortrait.matches : true
-  const narrow = mqNarrow ? mqNarrow.matches : false
-  const shortH = mqShort ? mqShort.matches : false
-  isMobile.value = (portrait && narrow) || (!portrait && shortH)
+
+function _computeIsMobile() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  const portrait = window.matchMedia('(orientation: portrait)').matches
+  const narrow = window.matchMedia('(max-width: 768px)').matches
+  const shortH = window.matchMedia('(max-height: 500px)').matches
+  return (portrait && narrow) || (!portrait && shortH)
 }
 
 onMounted(() => {
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    mqPortrait = window.matchMedia('(orientation: portrait)')
-    mqNarrow = window.matchMedia('(max-width: 768px)')
-    mqShort = window.matchMedia('(max-height: 500px)')
-    update()
-    mqPortrait.addEventListener('change', update)
-    mqNarrow.addEventListener('change', update)
-    mqShort.addEventListener('change', update)
-  }
-})
-onUnmounted(() => {
-  if (mqPortrait) mqPortrait.removeEventListener('change', update)
-  if (mqNarrow) mqNarrow.removeEventListener('change', update)
-  if (mqShort) mqShort.removeEventListener('change', update)
+  isMobile.value = _computeIsMobile()
 })
 
 // ===== 2. 路由 query 解析 =====

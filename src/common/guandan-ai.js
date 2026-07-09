@@ -48,6 +48,13 @@ const TYPE_VALUE = {
  */
 function findMinBeat(hand, target, ghostCount, levelRank) {
   if (!target || target.type === TYPE.INVALID) return null
+  // 王炸不可压王炸
+  if (target.type === TYPE.KINGS_BOMB) return null
+
+  // 拆分鬼牌,尊重调用方指定的可用鬼牌数(如 hard 模式想先找"非鬼"方案)
+  const { concrete, ghosts: allGhosts } = E.splitGhosts(hand, levelRank)
+  const ghostAvail = Math.min(allGhosts.length, ghostCount)
+  const ghosts = allGhosts.slice(0, ghostAvail)
 
   // 优先:王炸(只用一次,直接返回所有王)
   //   v3.x P2-28 修复(A-4'):原 `hand.some(c => c.rank === 17) && hand.some(c => c.rank === 17)`
@@ -55,10 +62,6 @@ function findMinBeat(hand, target, ghostCount, levelRank) {
   if (hand.filter(c => c.rank >= 16).length === 4) {
     return hand.filter(c => c.rank >= 16)
   }
-
-  // 拆分鬼牌
-  const { concrete, ghosts } = E.splitGhosts(hand, levelRank)
-  const ghostAvail = ghosts.length
 
   // 同花顺/王炸 通常在炸弹里覆盖,这里单独处理同花顺
   if (target.type === TYPE.STRAIGHT_FLUSH || target.type === TYPE.KINGS_BOMB) {
@@ -149,6 +152,14 @@ function findMinSameType(concrete, ghosts, target, levelRank) {
           return concrete.filter(c => c.rank === r).slice(0, 3)
         }
       }
+      if (ghostAvail >= 1) {
+        // 1 鬼 + 2 张同 rank
+        for (const r of ranks) {
+          if (r > target.mainRank && cnt[r] >= 2) {
+            return [...concrete.filter(c => c.rank === r).slice(0, 2), ghosts[0]]
+          }
+        }
+      }
       if (ghostAvail >= 2) {
         // 2 鬼 + 1 张同 rank
         for (const r of ranks) {
@@ -219,7 +230,7 @@ function findMinStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
   const ghostSet = new Set(ghosts)
   // 不能含 2/王(levelRank 也不影响 2)
-  for (let start = Math.max(3, targetMain - length + 2); start + length - 1 <= 13; start++) {
+  for (let start = Math.max(3, targetMain - length + 2); start + length - 1 <= 14; start++) {
     let need = length
     const picked = []
     let ghostIdx = 0
@@ -251,7 +262,7 @@ function findMinPairStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
   const pairCount = length / 2
   const ghostSet = new Set(ghosts)
-  for (let start = Math.max(3, targetMain - pairCount + 2); start + pairCount - 1 <= 13; start++) {
+  for (let start = Math.max(3, targetMain - pairCount + 2); start + pairCount - 1 <= 14; start++) {
     let need = pairCount
     const picked = []
     let ghostIdx = 0
@@ -283,7 +294,7 @@ function findMinThreeStraight(cards, ghosts, length, targetMain, levelRank) {
   const cnt = E.countByRank(cards)
   const groupCount = length / 3
   const ghostSet = new Set(ghosts)
-  for (let start = Math.max(3, targetMain - groupCount + 2); start + groupCount - 1 <= 13; start++) {
+  for (let start = Math.max(3, targetMain - groupCount + 2); start + groupCount - 1 <= 14; start++) {
     let need = groupCount
     const picked = []
     let ghostIdx = 0
@@ -291,6 +302,11 @@ function findMinThreeStraight(cards, ghosts, length, targetMain, levelRank) {
       const have = cnt[r] || 0
       if (have >= 3) {
         picked.push(...cards.filter(c => c.rank === r).slice(0, 3))
+        need--
+      } else if (ghostIdx < ghosts.length && have >= 2) {
+        // 1 鬼 + 2 张凑三(优先,省鬼牌)
+        picked.push(...cards.filter(c => c.rank === r).slice(0, 2), ghosts[ghostIdx])
+        ghostIdx++
         need--
       } else if (ghostIdx + 1 < ghosts.length && have >= 1) {
         // 2 鬼 + 1 张凑三
@@ -413,26 +429,14 @@ function chooseLead(cards, levelRank) {
   const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
   const cnt = E.countByRank(concrete)
 
-  // 1. 最小单张(有 concrete 时先走)
-  if (concrete.length > 0) {
-    const sortedConcrete = E.sortHand(concrete)
-    const smallest = sortedConcrete[sortedConcrete.length - 1]
-    return { type: 'play', cards: [smallest] }
-  }
-
-  // 全是鬼牌
-  if (concrete.length === 0 && ghosts.length > 0) {
-    return { type: 'play', cards: [ghosts[0]] }
-  }
-
-  // 2. 最小对子(cnt===2 的 rank,优先出 rank 小的)
+  // 1. 最小对子(cnt===2 的 rank,优先出 rank 小的)
   const pairRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 2 && r <= 14).sort((a, b) => a - b)
   if (pairRanks.length > 0) {
     const r = pairRanks[0]
     return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 2) }
   }
 
-  // 3. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
+  // 2. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
   const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 3 && r <= 14).sort((a, b) => a - b)
   if (tripleRanks.length > 0) {
     const r = tripleRanks[0]
@@ -446,7 +450,7 @@ function chooseLead(cards, levelRank) {
     return { type: 'play', cards: tripleCards }
   }
 
-  // 4. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
+  // 3. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
   //    同张数取 rank 最小(避免扔大王炸出 8 炸)
   if (concrete.length >= 4) {
     const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 4 && r <= 15).sort((a, b) => a - b)
@@ -456,20 +460,27 @@ function chooseLead(cards, levelRank) {
     }
   }
 
-  // 5. 最小顺子(5 张) — 找连续的 5 张
-  if (concrete.length >= 5) {
+  // 4. 最小顺子(5 张) — 找连续的 5 张
+  if (concrete.length + ghosts.length >= 5) {
     const straight = findMinStraight(concrete, ghosts, 5, 0, levelRank)
     if (straight && straight.length === 5) {
       return { type: 'play', cards: straight }
     }
   }
 
-  // fallback:最小单张(原行为兜底)
+  // 5. 最小单张(走小牌)
   if (concrete.length > 0) {
     const sortedConcrete = E.sortHand(concrete)
-    return { type: 'play', cards: [sortedConcrete[sortedConcrete.length - 1]] }
+    const smallest = sortedConcrete[sortedConcrete.length - 1]
+    return { type: 'play', cards: [smallest] }
   }
-  return { type: 'play', cards: ghosts.length > 0 ? [ghosts[0]] : [cards[0]] }
+
+  // 全是鬼牌
+  if (ghosts.length > 0) {
+    return { type: 'play', cards: [ghosts[0]] }
+  }
+
+  return { type: 'play', cards: [cards[0]] }
 }
 
 /**
@@ -594,14 +605,15 @@ function findMinBeatHard(hand, currentPlay, ghostCount, levelRank) {
     })()
     // 非炸弹/王炸的对手牌型 → hard 不出 4 张炸(留作关键时刻)
     if (isBomb && currentPlay.type !== TYPE.BOMB_4 && currentPlay.type !== TYPE.BOMB_5
-        && currentPlay.type !== TYPE.JOKER_BOMB) {
+        && currentPlay.type !== TYPE.KINGS_BOMB) {
       return null
     }
   }
 
   // 2. 鬼牌保护:跟牌用了鬼牌 + 手牌 ≤ 6 张 + 还能用其他牌 → 找非鬼方案
   if (hand.length <= 6 && ghosts.length > 0) {
-    const beatHasGhost = beat.some(c => c.suit === -1)  // joker suit === -1
+    const ghostSet = new Set(ghosts)
+    const beatHasGhost = beat.some(c => ghostSet.has(c))  // 识别真正的逢人配鬼牌
     if (beatHasGhost) {
       // 尝试 findMinBeat 不带鬼牌(传 ghostCount=0)
       const beatNoGhost = findMinBeat(hand, currentPlay, 0, levelRank)
@@ -860,37 +872,40 @@ function findBestSteelPlate(cards, ghostAvail, ghosts) {
 }
 
 /**
- * 找最大顺子(5+ 张单张连续)
+ * 找最大顺子(5+ 张单张连续),允许用鬼牌填补中间缺张
  */
 function findBestStraight(cards, ghostAvail, ghosts) {
   if (cards.length + ghostAvail < 5) return null
   const cnt = E.countByRank(cards)
-  const ranks = Object.keys(cnt).map(Number).filter(r => r <= 14).sort((a, b) => a - b)
-  // 找最长的连续段
-  let bestStart = -1, bestLen = 0
-  let curStart = ranks[0] || 0, curLen = ranks.length > 0 ? 1 : 0
-  for (let i = 1; i < ranks.length; i++) {
-    if (ranks[i] === ranks[i - 1] + 1) {
-      curLen++
-    } else {
-      if (curLen > bestLen) { bestLen = curLen; bestStart = curStart }
-      curStart = ranks[i]
-      curLen = 1
+  const allRanks = Object.keys(cnt).map(Number).filter(r => r >= 3 && r <= 14).sort((a, b) => a - b)
+  let best = null
+  // 枚举所有[start,end]区间,用鬼牌补缺失的 rank,优先取最长,同长度取最大主 rank
+  for (let start = 3; start <= 14; start++) {
+    for (let end = start + 4; end <= 14; end++) {
+      const len = end - start + 1
+      let missing = 0
+      const picked = []
+      let ghostPool = ghosts.slice()
+      for (let r = start; r <= end; r++) {
+        const have = cards.filter(c => c.rank === r)
+        if (have.length > 0) {
+          picked.push(have[0])
+        } else if (ghostPool.length > 0) {
+          picked.push(ghostPool.shift())
+          missing++
+        } else {
+          missing = Infinity
+          break
+        }
+      }
+      if (missing <= ghostAvail && missing !== Infinity) {
+        if (!best || len > best.len || (len === best.len && end > best.end)) {
+          best = { start, end, len, picked }
+        }
+      }
     }
   }
-  if (curLen > bestLen) { bestLen = curLen; bestStart = curStart }
-  if (bestLen >= 5) {
-    const picked = []
-    let ghostPool = ghosts.slice()
-    for (let r = bestStart; r < bestStart + bestLen; r++) {
-      const have = cards.filter(c => c.rank === r)
-      if (have.length > 0) picked.push(have[0])
-      else if (ghostPool.length > 0) picked.push(ghostPool.shift())
-      else return null
-    }
-    return picked
-  }
-  return null
+  return best ? best.picked : null
 }
 
 /**

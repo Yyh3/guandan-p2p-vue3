@@ -335,6 +335,86 @@ console.log('\n=== 14. P0-1:canFormWithGhosts 不再崩,返回正确结果 ===')
   assert('canFormWithGhosts 不抛 TypeError', !crashed)
 }
 
+console.log('\n=== 14b. 鬼牌具象化 materializeGhosts ===')
+{
+  const lr = 15 // 打 2,红桃 2 是鬼牌
+  // 无鬼牌:正常识别
+  const m1 = E.materializeGhosts([{ suit: 0, rank: 7 }], lr, null)
+  eq('无鬼牌 materialize 识别单张 7', m1.rec.type, E.TYPE.SINGLE)
+  eq('无鬼牌 materialize mainRank=7', m1.rec.mainRank, 7)
+
+  // 1 张鬼当单张 7 领出
+  const m2 = E.materializeGhosts([{ suit: 1, rank: 15 }], lr, null)
+  eq('1 张鬼可具象化为单张', !!m2, true)
+  eq('鬼牌单张具象化后是合法 SINGLE', m2.rec.type, E.TYPE.SINGLE)
+
+  // 1 张鬼 + 1 张 8 凑对 8,压过对 7
+  const m3 = E.materializeGhosts(
+    [{ suit: 1, rank: 15 }, { suit: 0, rank: 8 }],
+    lr,
+    { type: E.TYPE.PAIR, mainRank: 7, length: 2 }
+  )
+  eq('鬼+8 能压对 7', !!m3, true)
+  eq('鬼+8 具象化为 PAIR', m3.rec.type, E.TYPE.PAIR)
+  eq('鬼+8 mainRank=8', m3.rec.mainRank, 8)
+
+  // 鬼+8 压不过对 9
+  const m4 = E.materializeGhosts(
+    [{ suit: 1, rank: 15 }, { suit: 0, rank: 8 }],
+    lr,
+    { type: E.TYPE.PAIR, mainRank: 9, length: 2 }
+  )
+  eq('鬼+8 不能压对 9', m4, null)
+
+  // 2 张鬼 + 1 张 9 凑三张 9
+  const m5 = E.materializeGhosts(
+    [{ suit: 1, rank: 15 }, { suit: 1, rank: 15 }, { suit: 0, rank: 9 }],
+    lr,
+    null
+  )
+  eq('2 鬼+9 可凑三张', !!m5, true)
+  eq('2 鬼+9 具象化为 THREE', m5.rec.type, E.TYPE.THREE)
+  eq('2 鬼+9 mainRank=9', m5.rec.mainRank, 9)
+
+  // 同花顺具象化:4 张黑桃 + 1 张鬼(应补成黑桃 K)
+  const m6 = E.materializeGhosts(
+    [
+      { suit: 0, rank: 9 }, { suit: 0, rank: 10 }, { suit: 0, rank: 11 },
+      { suit: 0, rank: 12 }, { suit: 1, rank: 15 },
+    ],
+    lr,
+    null
+  )
+  eq('4 黑桃+鬼 可凑同花顺', !!m6, true)
+  eq('4 黑桃+鬼 具象化为 STRAIGHT_FLUSH', m6.rec.type, E.TYPE.STRAIGHT_FLUSH)
+  eq('4 黑桃+鬼 mainRank=12(Q) 或更大(取决于枚举顺序)', m6.rec.mainRank >= 12, true)
+  eq('4 黑桃+鬼 具象化后全黑桃', m6.cards.every(c => c.suit === 0 || c.suit === -1), true)
+
+  // >2 张鬼不支持
+  const m7 = E.materializeGhosts(
+    [{ suit: 1, rank: 15 }, { suit: 2, rank: 15 }, { suit: 3, rank: 15 }, { suit: 0, rank: 7 }],
+    lr,
+    null
+  )
+  eq('3 张鬼 materialize 返回 null', m7, null)
+}
+
+console.log('\n=== 14c. canFormWithGhosts 同花顺花色修复 ===')
+{
+  const lr = 15
+  // 4 张黑桃 + 1 鬼,目标黑桃同花顺 9-10-J-Q-K(mainRank=13)
+  const ok = E.canFormWithGhosts(
+    E.TYPE.STRAIGHT_FLUSH, 5, 13,
+    [
+      { suit: 0, rank: 9 }, { suit: 0, rank: 10 }, { suit: 0, rank: 11 },
+      { suit: 0, rank: 12 },
+    ],
+    1,
+    lr
+  )
+  eq('4 黑桃+鬼 可凑成 9-10-J-Q-K 黑桃同花顺', ok, true)
+}
+
 console.log('\n=== 15. P3-1 + P3-2:常量正确性回归 ===')
 {
   // v3.x 修复:原注释写反(大王=16,小王=15),实际是 大王=17,小王=16
