@@ -64,34 +64,42 @@ console.log('\n=== 1. BUG-V0420-1 修复:smartReconnectToPeers 精确 off(不传
   }
 
   // 1.3 onConnect / onError 函数定义存在(被 off 引用说明它们是 named function)
+  //   P1-06 重构后:handler 引用提升到 Promise 外,支持 cleanup() 统一清理。
   check('smartReconnectToPeers 内部有 onConnect 函数定义',
-    /const onConnect\s*=\s*\(\)\s*=>/.test(networkSrc) || /function onConnect\s*\(\)/.test(networkSrc))
+    /let onConnect|\bonConnect\s*=\s*\(\)\s*=>/.test(networkSrc) || /function onConnect\s*\(\)/.test(networkSrc))
   check('smartReconnectToPeers 内部有 onError 函数定义',
-    /const onError\s*=\s*\(\)\s*=>/.test(networkSrc) || /function onError\s*\(\)/.test(networkSrc))
+    /let onError|\bonError\s*=\s*\(\)\s*=>/.test(networkSrc) || /function onError\s*\(\)/.test(networkSrc))
 }
 
 // ============== 2. BUG-V0420-2 修复验证:setTimeout clearTimeout + timer=null ==============
 console.log('\n=== 2. BUG-V0420-2 修复:setTimeout clearTimeout 避免泄漏 ===')
 {
-  // 2.1 onConnect 内 clearTimeout(timer)
-  check('onConnect 内有 clearTimeout(timer) + timer=null',
-    /onConnect\s*=\s*\(\)\s*=>\s*\{[\s\S]*?clearTimeout\(timer\)[\s\S]*?timer\s*=\s*null/.test(networkSrc))
-
-  // 2.2 onError 内 clearTimeout(timer)
-  check('onError 内有 clearTimeout(timer) + timer=null',
-    /onError\s*=\s*\(\)\s*=>\s*\{[\s\S]*?clearTimeout\(timer\)[\s\S]*?timer\s*=\s*null/.test(networkSrc))
-
-  // 2.3 setTimeout 回调里也 clearTimeout(timer)(虽然已经 resolved 但显式清理更稳)
-  //   检查:setTimeout callback 内部把 timer 设为 null
-  check('setTimeout callback 内 timer=null(避免后续 timer 引用泄漏)',
-    /setTimeout\(\(\)\s*=>\s*\{[\s\S]*?timer\s*=\s*null/.test(networkSrc))
-
-  // 2.4 catch 路径也 clearTimeout
+  // 2.1/2.2/2.3 P1-06 重构后 cleanup() 统一清理 timer + listeners
   const smartReconnectBlock = networkSrc.match(/async function smartReconnectToPeers[\s\S]*?^\}/m)
+  const cleanupBlock = smartReconnectBlock ? smartReconnectBlock[0].match(/const cleanup\s*=\s*\(\)\s*=>\s*\{[\s\S]*?\n\s{4,}\}/) : null
+  check('smartReconnectToPeers 有 cleanup() 统一清理 timer/listeners',
+    !!cleanupBlock)
+  if (cleanupBlock) {
+    check('cleanup() 内 clearTimeout(timer) + timer=null',
+      /clearTimeout\(timer\)[\s\S]*?timer\s*=\s*null/.test(cleanupBlock[0]))
+    check('cleanup() 内 off(connect, onConnect)',
+      /off\(['"]connect['"],\s*onConnect\)/.test(cleanupBlock[0]))
+    check('cleanup() 内 off(error, onError)',
+      /off\(['"]error['"],\s*onError\)/.test(cleanupBlock[0]))
+  }
+  // setTimeout / onConnect / onError / catch 都调 cleanup()
+  check('onConnect 内调用 cleanup()',
+    /onConnect\s*=\s*\(\)\s*=>\s*\{[\s\S]*?cleanup\(\)/.test(networkSrc))
+  check('onError 内调用 cleanup()',
+    /onError\s*=\s*\(\)\s*=>\s*\{[\s\S]*?cleanup\(\)/.test(networkSrc))
+  check('setTimeout callback 内调用 cleanup()',
+    /setTimeout\(\(\)\s*=>\s*\{[\s\S]*?cleanup\(\)/.test(networkSrc))
+
+  // 2.4 catch 路径也 cleanup
   if (smartReconnectBlock) {
     const body = smartReconnectBlock[0]
-    check('joinRoom 抛错 catch 路径也 clearTimeout(timer)',
-      /catch\s*\(e\)\s*\{[\s\S]*?clearTimeout\(timer\)[\s\S]*?timer\s*=\s*null/.test(body))
+    check('joinRoom 抛错 catch 路径也 cleanup()',
+      /catch\s*\(e\)\s*\{[\s\S]*?cleanup\(\)/.test(body))
   }
 }
 

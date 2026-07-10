@@ -68,7 +68,7 @@ console.log('\n=== 5.1 host 迁移端到端状态测试(4 端 + game) ===')
     !st2Check.abandonedSeats?.includes(0))
   assert('★ 旧 host seat 0 不在 finishedOrder(可继续出牌)', !st2Check.finishedOrder.includes(0))
   // ★ 关键断言:新 host 可以继续出牌
-  game.getState().currentPlayer = 0  // 强制让新 host 行动
+  game._state.currentPlayer = 0  // 强制让新 host 行动
   const firstCard = st2Check.hands[0][0]
   const playRes = game.playerPlay(0, [firstCard])
   assert('★ ★ 新 host(seat 0)migrateHost 后能 playerPlay', playRes && playRes.ok === true)
@@ -132,7 +132,7 @@ console.log('\n=== 5.3 PASS 幂等测试(当前 seat 1 回合,连续投 2 次 se
   const game = createGame({ players: [{}, {}, {}, {}], seed: 4 })
   game.deal()
   // 强制设 currentPlayer = 1(seat 1 应行动)
-  game.getState().currentPlayer = 1
+  game._state.currentPlayer = 1
   // 模拟 seat 1 出牌(让 lastPlay 存在)
   const c1 = game.getState().hands[1][0]
   game.playerPlay(1, [c1])
@@ -174,7 +174,7 @@ console.log('\n=== 5.3.2 useGameLogic 校验后 PASS 不重复(passCount 不递�
   // 不直接调 applyPass,先检查 currentPlayer
   const game = createGame({ players: [{}, {}, {}, {}], seed: 5 })
   game.deal()
-  game.getState().currentPlayer = 1
+  game._state.currentPlayer = 1
   const c1 = game.getState().hands[1][0]
   game.playerPlay(1, [c1])
   const st0 = game.getState()
@@ -183,7 +183,7 @@ console.log('\n=== 5.3.2 useGameLogic 校验后 PASS 不重复(passCount 不递�
   function simulatedOnP2PPass(payload) {
     if (!payload || !game) return
     if (payload.seat === selfSeat) return
-    const st = game.getState()
+    const st = game._state
     if (st.phase !== 'playing') return
     if (st.currentPlayer !== payload.seat) return
     if (!st.lastPlay) return
@@ -212,8 +212,8 @@ console.log('\n=== 5.4 nullable snapshot 测试(tribute/ghost 清空) ===')
   // 设置旧 tribute / ghost
   const game = createGame({ players: [{}, {}, {}, {}], seed: 6 })
   // 旧值
-  game.getState().tribute = { from: [3], to: [0], needTribute: true, doubleTribute: false, pairFromTo: [[3, 0]] }
-  game.getState().ghost = { rank: 14, suit: 1 }
+  game._state.tribute = { from: [3], to: [0], needTribute: true, doubleTribute: false, pairFromTo: [[3, 0]] }
+  game._state.ghost = { rank: 14, suit: 1 }
   // 验证初始旧值
   assert('设置旧 tribute 成功', game.getState().tribute != null)
   assert('设置旧 ghost 成功', game.getState().ghost != null)
@@ -242,7 +242,7 @@ console.log('\n=== 5.4 nullable snapshot 测试(tribute/ghost 清空) ===')
 console.log('\n=== 5.4.2 applyRoundEndFromPayload 也支持 tribute:null 清空 ===')
 {
   const game = createGame({ players: [{}, {}, {}, {}], seed: 7 })
-  game.getState().tribute = { from: [3], to: [0] }
+  game._state.tribute = { from: [3], to: [0] }
   // 应用 payload 但不传 tribute 字段(用 'in' 判断)
   game.applyRoundEndFromPayload({
     ranks: [0, 2, 1, 3],
@@ -360,7 +360,7 @@ console.log('\n=== 5.6 BUG-RC3-003 修复:迁移后新 host(seat 0)能继续出�
   }
   game.applySnapshot(snapshotBefore)
   game.migrateHost(0, 2)
-  const st = game.getState()
+  const st = game._state
   // 验证:seat 0 是新 host,他有手牌,currentPlayer 是 0
   assert('迁移后 currentPlayer === 0(新 host 回合)', st.currentPlayer === 0)
   assert('迁移后 hands[0].length > 0(新 host 有手牌)', st.hands[0].length > 0)
@@ -372,7 +372,7 @@ console.log('\n=== 5.6 BUG-RC3-003 修复:迁移后新 host(seat 0)能继续出�
   assert('★ 迁移后新 host playerPlay(0, [card]) 返回 ok:true',
     result && result.ok === true)
   assert('★ 迁移后新 host 出牌成功:currentPlayer 推进到下一位',
-    game.getState().currentPlayer === 1)  // seat 1 是下一位
+    game._state.currentPlayer === 1)  // seat 1 是下一位
   // ★ v0.4.14 修复:旧 host seat 0 NOT in abandonedSeats(避免 nextTurn 跳过新 host),
   //   只 NOT in finishedOrder。事实清空用 hands[0] = [] 表示。
   assert('★ v0.4.14:旧 host 0 NOT in abandonedSeats(避免 nextTurn 跳过新 host)',
@@ -417,8 +417,8 @@ console.log('\n=== 8. match:restart 事件 + restartMatch P2P 集成 ===')
   const g = createGame({ players: [{}, {}, {}, {}], seed: 100, difficulty: 'medium' })
   g.deal()
   // 模拟打完一局
-  g.getState().levelRank = 14
-  g.getState().finishedOrder = [0, 2, 1, 3]
+  g._state.levelRank = 14
+  g._state.finishedOrder = [0, 2, 1, 3]
   g.applyRoundEnd()
   let matchRestartEvent = null
   g.on('matchRestart', (p) => { matchRestartEvent = p })
@@ -428,7 +428,7 @@ console.log('\n=== 8. match:restart 事件 + restartMatch P2P 集成 ===')
   assert('★ restartMatch emit matchRestart 事件', matchRestartEvent !== null)
   assert('★ matchRestart payload.levelRank=15', matchRestartEvent && matchRestartEvent.levelRank === 15)
   // restartMatch 状态完整
-  const st = g.getState()
+  const st = g._state
   assert('★ restartMatch 后 levelRank=15', st.levelRank === 15)
   assert('★ restartMatch 后 hands[0] 已发牌(27 张)', st.hands[0].length === 27)
   assert('★ restartMatch 后 finishedOrder 清空', st.finishedOrder.length === 0)

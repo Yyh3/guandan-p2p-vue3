@@ -215,7 +215,8 @@ export class WebSocketTransport {
 
     // ★ 用 noServer 模式:ws server 不自起 http server,我们显式管理。
     //   path 匹配交给 wss.shouldHandle(同 ws 库默认行为)。
-    this._wss = new WebSocketServer({ noServer: true, path: this._path })
+    // ★ P1-19:限制 WS payload 大小,防止恶意/异常大消息拖垮 server
+    this._wss = new WebSocketServer({ noServer: true, path: this._path, maxPayload: 256 * 1024 })
     this._wss.on('connection', (ws) => {
       ws._seat = -1
       ws._isAlive = true
@@ -223,6 +224,10 @@ export class WebSocketTransport {
       ws.on('message', (data) => {
         try {
           const msg = JSON.parse(data.toString())
+          // ★ P0-02:server 端必须按 socket 绑定的 seat 覆盖客户端伪造的 msg.from
+          const boundSeat = this._clients.get(ws)?.seat ?? ws._seat ?? -1
+          if (boundSeat < 0 && msg.type !== 'JOIN') return
+          msg.from = boundSeat
           this._lastSenderWs = ws
           this._emit(msg)
         } catch (e) {

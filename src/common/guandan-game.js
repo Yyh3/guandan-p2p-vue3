@@ -29,6 +29,10 @@ function createGame(opts) {
   let aiPlayers = initialAI.slice()
   // ★ v3.8 P1:AI 出的牌要广播给其他 tab(由 GameView 注入)
   let aiBroadcast = null
+  // ★ P1-13:AI timer 是模块级变量,不应出现在可序列化 state 中
+  let aiTimer = null
+  // ★ P1-14/P2-07:game 生命周期 destroyed 标记
+  let destroyed = false
   // ★ v0.4.9:AI 难度等级 'medium'(默认,原行为) | 'hard'(防守 + 炸弹保留)
   //   存到 state 里随 snapshot 同步,所有端共享
   if (difficulty !== 'medium' && difficulty !== 'hard') {
@@ -106,7 +110,12 @@ function createGame(opts) {
     }
   }
 
-  function getState() { return state }
+  function getState() {
+    if (typeof structuredClone === 'function') {
+      try { return structuredClone(state) } catch (e) { /* fallback:可能含 Vue proxy / 不可 clone 对象 */ }
+    }
+    return JSON.parse(JSON.stringify(state))
+  }
 
   /**
    * ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):返回完整 + 深拷贝的 state 快照。
@@ -132,13 +141,31 @@ function createGame(opts) {
    * @returns {object} 深拷贝的 state(字段全集)
    */
   function getSnapshot() {
-    return JSON.parse(JSON.stringify(state))
+    // ★ P1-13:白名单克隆,只暴露必要字段,避免把内部临时变量/函数带入快照
+    const keys = [
+      'hands', 'tableCards', 'lastPlay', 'currentPlayer', 'firstPlayer', 'leaderPlayer',
+      'trickHistory', 'finishedOrder', 'abandonedSeats', 'passCount', 'tribute', 'ghost',
+      'levelUp', 'levelRank', 'teamLevels', 'round', 'phase',
+      'isRestartAfterA', 'previousLevelRank', 'lastAppliedRoundId', 'difficulty',
+    ]
+    const snap = {}
+    const clone = (v) => {
+      if (typeof structuredClone === 'function') {
+        try { return structuredClone(v) } catch (e) { /* fallback */ }
+      }
+      return JSON.parse(JSON.stringify(v))
+    }
+    for (const k of keys) snap[k] = clone(state[k])
+    snap.schemaVersion = 2
+    if ('matchId' in state) snap.matchId = state.matchId
+    return snap
   }
 
   // ============ 发牌 ============
   // ★ v3.8 P1 修复:4-tab 联机用 host 广播的 seed 发同一手牌
   // 不传 seed → 走引擎的随机(单机模式兼容)
   function deal(forcedSeed) {
+    const alive = ensureAlive(); if (alive) return alive
     const useSeed = forcedSeed != null ? forcedSeed : seed
     const result = useSeed == null ? E.deal() : E.deal(useSeed)
     state.hands = result.hands
@@ -171,6 +198,7 @@ function createGame(opts) {
 
   // ============ 出牌 ============
   function playerPlay(seat, cards) {
+    const alive = ensureAlive(); if (alive) return alive
     // v3.x P3-11 修复:playerPlay 之前接受 'trick_end' 阶段,但 playerPass 不接受 — 不一致。
     //   严格说,trick_end 是结算间隔阶段,玩家不能再出牌。统一为只接受 'playing'。
     if (state.phase !== 'playing') {
@@ -203,6 +231,7 @@ function createGame(opts) {
    * 也跳过 scheduleAI(联机 4 人都是真人,没 AI)
    */
 function applyPlay(seat, cards, hand, rec) {
+    const alive = ensureAlive(); if (alive) return alive
     // ★ v0.4.13 对抗性审查 (P1-4):防御性 — 重复 applyPlay(WS 重传 / 多次 broadcast)
     //   会让 hand 已空时 splice(-1, 1) 静默删末尾那张牌(silent bug)。
     //   修法:cards 任何一张不在 hand 里 → 直接 return,跳过这次 apply。
@@ -257,6 +286,7 @@ function applyPlay(seat, cards, hand, rec) {
   }
 
   function playerPass(seat) {
+    const alive = ensureAlive(); if (alive) return alive
     if (state.phase !== 'playing') return { ok: false, error: '非出牌阶段' }
     if (seat !== state.currentPlayer) return { ok: false, error: '不是你的回合' }
     if (!state.lastPlay) return { ok: false, error: '首家不能 pass' }
@@ -275,6 +305,7 @@ function applyPlay(seat, cards, hand, rec) {
    *   2 人活跃 → 需要 1 次 pass(残局)
    */
   function applyPass(seat) {
+    const alive = ensureAlive(); if (alive) return alive
     state.passCount++
     state.trickHistory.push({ seat, pass: true })
     emit('pass', { seat })
@@ -312,6 +343,7 @@ function applyPlay(seat, cards, hand, rec) {
   }
 
   function nextTurn(isFirstPlayer) {
+    const alive = ensureAlive(); if (alive) return alive
     let next = (state.currentPlayer + 1) % 4
     // 跳过已出完牌 + 弃赛的
     // v3.x P0-6 修复:加 safety 计数器,极端竞态下 4 人都进 finishedOrder
@@ -340,9 +372,10 @@ function applyPlay(seat, cards, hand, rec) {
     const seat = state.currentPlayer
     if (!aiPlayers.includes(seat)) return
     // v3.x P2-21 修复:之前 setTimeout ID 没存,状态变化时无法取消,可能触发过期回调
-    if (state._aiTimer) clearTimeout(state._aiTimer)
-    state._aiTimer = setTimeout(() => {
-      state._aiTimer = null
+    // ★ P1-13:aiTimer 是模块级变量,不在可序列化 state 中
+    if (aiTimer) clearTimeout(aiTimer)
+    aiTimer = setTimeout(() => {
+      aiTimer = null
       if (state.currentPlayer !== seat) return
       const hand = state.hands[seat]
       const ctx = {
@@ -399,6 +432,7 @@ function applyPlay(seat, cards, hand, rec) {
    *   去重防止重复应用(同一 ROUND_END 被多次重传)。
    */
   function applyRoundEnd() {
+    const alive = ensureAlive(); if (alive) return alive
     // 幂等性:已结算完成(phase=finished) → 直接返回
     //   防御:join 端重复收到 ROUND_END / 上层漏调标志 / 未来新调用方重入
     if (state.phase === 'finished') {
@@ -456,6 +490,7 @@ function applyPlay(seat, cards, hand, rec) {
 
   // ============ 下一局(发新牌) ============
   function nextRound() {
+    const alive = ensureAlive(); if (alive) return alive
     // ★ 过 A 后下一局:清空上一局遗留标志,避免 UI 继续显示"重开一局"
     state.isRestartAfterA = false
     state.previousLevelRank = null
@@ -477,16 +512,22 @@ function applyPlay(seat, cards, hand, rec) {
    *   - destroy() 后 _aiTimer 被 clear,handlers 清空,aiPlayers 清空
    *   - destroy() 后再调任何方法(pay / pass / deal)是 noop,不会 crash
    */
+  function ensureAlive() {
+    if (destroyed) return { ok: false, error: 'game_destroyed' }
+  }
+
   function destroy() {
-    if (state._aiTimer) {
-      try { clearTimeout(state._aiTimer) } catch (e) {}
-      state._aiTimer = null
+    // ★ P1-13:aiTimer 是模块级变量
+    if (aiTimer) {
+      try { clearTimeout(aiTimer) } catch (e) {}
+      aiTimer = null
     }
     // 清 handlers Map(防止旧 listener 在 emit 时被调用,虽然 destroy 后不再 emit)
     for (const k of Object.keys(handlers)) delete handlers[k]
     // 清 aiPlayers(避免旧 AI 配置残留)
     aiPlayers = []
     // 标记已 destroyed
+    destroyed = true
     state._destroyed = true
   }
 
@@ -500,6 +541,7 @@ function applyPlay(seat, cards, hand, rec) {
   //   - emit('matchRestart') 让 UI 弹"重开一局"提示
   //   保留:座位分配、玩家信息(room 范围)
   function restartMatch({ levelRank: newLevelRank = 15, seed: forcedSeed } = {}) {
+    const alive = ensureAlive(); if (alive) return alive
     state.levelRank = newLevelRank
     state.teamLevels = [newLevelRank, newLevelRank]
     state.round = 1
@@ -533,6 +575,8 @@ function applyPlay(seat, cards, hand, rec) {
   return {
     on, off, emit,
     getState,
+    // ★ 测试/诊断用:返回内部 state 的可变引用(仅测试使用,生产代码不要写)
+    _state: state,
     // ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):完整 + 深拷贝的 state 快照
     //   用于 host 迁移 / 重连 / 网络同步。getState() 仍保留兼容 UI 计算 / debug。
     getSnapshot,
@@ -545,9 +589,13 @@ function applyPlay(seat, cards, hand, rec) {
     applyPlay, applyPass, applyRoundEnd,
     // ★ 静态审查 v0.4.5 N-3 闭环:加 applySnapshot 别名(去掉下划线,跟报告建议一致),
     //   原 _applySnapshot 保留(向后兼容旧调用)。语义:接 joiner 端 snapshot 后灌回 state。
-    applySnapshot(snap) { return this._applySnapshot(snap) },
+    applySnapshot(snap) {
+      const alive = ensureAlive(); if (alive) return alive
+      return this._applySnapshot(snap)
+    },
     // ★ GD-RC-003:权威结算 — 接 host 发的完整 payload,不去读本地 state 重新算
     applyRoundEndFromPayload(p) {
+      const alive = ensureAlive(); if (alive) return alive
       if (!p) return
       const rid = p.roundId
       // 同一 roundId 已应用过则跳过(去重)
@@ -651,6 +699,7 @@ function applyPlay(seat, cards, hand, rec) {
      * @returns {boolean} true=成功,false=参数不合法
      */
     migrateHost(oldHostSeat, newHostSeat) {
+      const alive = ensureAlive(); if (alive) return alive
       if (oldHostSeat !== 0) return false
       if (![1, 2, 3].includes(newHostSeat)) return false
       if (oldHostSeat === newHostSeat) return false

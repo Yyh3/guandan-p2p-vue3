@@ -47,8 +47,16 @@ export function useGameLogic(opts = {}) {
   // ★ Phase3 UI 修复:统一 timer 生命周期管理
   //   所有 setTimeout 注册到 timers,卸载时批量清理,避免组件已卸载后旧闭包仍访问 refs
   //   或导致 Vue warn / 内存泄漏。单个 timer 重复 clearTimeout 是安全的。
-  const timers = []
-  function addTimer(id) { timers.push(id); return id }
+  // ★ P2-06:timers 改为 Set,addTimer 在超时触发后自动删除 id,防止无界增长。
+  const timers = new Set()
+  function addTimer(callback, delay, ...args) {
+    const id = setTimeout(() => {
+      timers.delete(id)
+      callback(...args)
+    }, delay)
+    timers.add(id)
+    return id
+  }
 
   // ★ GD-RC-001 修复:"网络 host 身份"独立变量,不与 selfSeat 绑定。
   //   之前大量代码用 `selfSeat === 0` 判定"是否是 host/权威端",但 host 换队友后
@@ -108,7 +116,7 @@ export function useGameLogic(opts = {}) {
   function showNickToastBrief() {
     showNickToast.value = true
     if (nickToastTimer) clearTimeout(nickToastTimer)
-    nickToastTimer = addTimer(setTimeout(() => { showNickToast.value = false }, 2000))
+    nickToastTimer = addTimer(() => { showNickToast.value = false }, 2000)
   }
   function onNickEditRequest() {
     showNickToastBrief()
@@ -121,8 +129,11 @@ export function useGameLogic(opts = {}) {
   function onChatSelect({ phrase }) {
     chatPhraseToast.value = phrase
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
-    chatPhraseTimer = addTimer(setTimeout(() => { chatPhraseToast.value = '' }, 2000))
+    chatPhraseTimer = addTimer(() => { chatPhraseToast.value = '' }, 2000)
   }
+
+  // ★ P2-01:selfSeat 有效性校验
+  function isValidSeat(seat) { return Number.isInteger(seat) && seat >= 0 && seat < 4 }
 
   // v2.1 P3:host 迁移提示
   const hostMigrationToast = ref(null)
@@ -136,9 +147,9 @@ export function useGameLogic(opts = {}) {
       hostMigrationToast.value = { text: `${name} 已成为新房主`, isMyself: false }
     }
     if (hostMigToastTimer) clearTimeout(hostMigToastTimer)
-    hostMigToastTimer = addTimer(setTimeout(() => {
+    hostMigToastTimer = addTimer(() => {
       hostMigrationToast.value = null
-    }, isMyself ? 5000 : 3000))
+    }, isMyself ? 5000 : 3000)
     hostMigrationBadge.value = true
   }
   // ★ BUG-RC2-003 修复:抽 refreshUiFromGameState() 公共函数
@@ -164,6 +175,12 @@ export function useGameLogic(opts = {}) {
     if (typeof st.isRestartAfterA === 'boolean') {
       isRestartAfterA.value = st.isRestartAfterA
     }
+    // ★ P1-17:refreshUiFromGameState 统一重算 lastCardCounts
+    lastCardCounts.value = st.hands.map((hand, seat) => {
+      if (st.finishedOrder?.includes(seat)) return 0
+      if (st.abandonedSeats?.includes(seat)) return 0
+      return Array.isArray(hand) ? hand.length : 0
+    })
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
       selected.value = new Array(myHand.value.length).fill(false)
@@ -478,13 +495,13 @@ export function useGameLogic(opts = {}) {
     // 8 秒后强制 isDealing=false 并进 playing,玩家至少能玩,而不是永远卡 loading。
     // 27 张牌 × 55ms stagger + 380ms flight + 80ms 余量 ≈ 1.95s,8s 是真机慢网/真 WebView 的安全冗余。
     if (dealTimeoutId) clearTimeout(dealTimeoutId)
-    dealTimeoutId = addTimer(setTimeout(() => {
+    dealTimeoutId = addTimer(() => {
       if (isDealing.value) {
         isDealing.value = false
         finishDeal()
       }
       dealTimeoutId = null
-    }, 8000))
+    }, 8000)
 
     nextTick(() => {
       const container = document.querySelector('.page')
@@ -533,9 +550,9 @@ export function useGameLogic(opts = {}) {
       id, kind, text,
       style: { left: pos.left, top: pos.top },
     })
-    addTimer(setTimeout(() => {
+    addTimer(() => {
       floatingPasses.value = floatingPasses.value.filter(f => f.id !== id)
-    }, 1200))
+    }, 1200)
   }
 
   // ===== 炸弹/王炸特效 =====
@@ -544,8 +561,8 @@ export function useGameLogic(opts = {}) {
     if (!fx) return
     bombFx.value = fx
     isShaking.value = true
-    addTimer(setTimeout(() => { bombFx.value = null }, 1500))
-    addTimer(setTimeout(() => { isShaking.value = false }, 800))
+    addTimer(() => { bombFx.value = null }, 1500)
+    addTimer(() => { isShaking.value = false }, 800)
   }
 
   // ===== 游戏初始化 =====
@@ -554,7 +571,8 @@ export function useGameLogic(opts = {}) {
     const seed = opts2.seed
     // ★ Phase3 UI 修复:用 getter 替代常量快照,selfSeat 在 host 迁移后会变,
     //   旧常量 me 在事件监听器里不会更新,导致 turn/play 等事件按旧 seat 处理。
-    const getMe = () => isP2P ? (selfSeat.value || 0) : 0
+    // ★ P2-01:getMe 回退到 0 当 selfSeat 非法,避免 players[-1]
+    const getMe = () => isP2P ? (isValidSeat(selfSeat.value) ? selfSeat.value : 0) : 0
     if (opts2.forcedLevelRank != null) levelRank.value = opts2.forcedLevelRank
     // ★ GD-RC-001 修复:isHost 判定用 net.isHost()(网络 host 身份),不用 selfSeat === 0。
     //   host 换队友后 selfSeat 变成 2,但本机仍是网络 host,isHost 应仍为 true。
@@ -583,7 +601,8 @@ export function useGameLogic(opts = {}) {
     if (isP2P && isNetworkHost && typeof game.value.addAIPlayer === 'function') {
       _fillEmptySeatsWithAI()
     }
-    if (typeof window !== 'undefined') {
+    // ★ P0-01:调试全局变量只在 DEV 模式暴露,生产构建树摇掉该分支
+    if (typeof window !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
       window.__gd_game = game.value
       window.__gd_selfSeat = selfSeat.value
       window.__gd_net = net
@@ -614,15 +633,16 @@ export function useGameLogic(opts = {}) {
       }
       startTimer()
     })
-    game.value.on('play', ({ seat, cards }) => {
+    game.value.on('play', ({ seat, cards, type }) => {
+      // ★ P1-18:直接用 game 层已经识别好的 type,避免重复 recognize
+      const playType = type || (() => { try { return E.recognize(cards)?.type } catch { return null } })()
       if (cards && cards.length > 0) {
         try {
-          const r = E.recognize(cards)
-          audio.playSfxForType(r?.type, cards.length)
-          if (r?.type === 'JOKER_BOMB' || (typeof r?.type === 'string' && r.type.startsWith('BOMB'))) {
-            showBombFx(r.type)
-          } else if (r?.type === 'STRAIGHT_FLUSH') {
-            showBombFx(r.type)
+          audio.playSfxForType(playType, cards.length)
+          if (playType === 'JOKER_BOMB' || (typeof playType === 'string' && playType.startsWith('BOMB'))) {
+            showBombFx(playType)
+          } else if (playType === 'STRAIGHT_FLUSH') {
+            showBombFx(playType)
           }
         } catch (e) { audio.playSfxForType('SINGLE', 1) }
       }
@@ -890,9 +910,9 @@ function onAutoFindBest() {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         phase.value = 'playing'
         initGame({ isP2P: true, seed: pendingSeed })
-        addTimer(setTimeout(() => {
+        addTimer(() => {
           net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value, newRound: true } })
-        }, 500))
+        }, 500)
       }
       // P2P 非 host:什么都不做(等 host 广播 DEAL)
       // phase 保持 'finished',UI 仍是结算页,提示"等待房主开下一局"
@@ -1046,28 +1066,30 @@ function onAutoFindBest() {
     }
     return false
   }
-  function onP2PPlay(payload) {
+  function onP2PPlay(payload, from, msg) {
     if (!payload || !game.value) return
+    // ★ P0-02:authority/sender 校验 — 只能由 currentPlayer 自己发,且 phase=playing
+    const st = game.value.getState()
+    if (from !== payload.seat) return
+    if (st.phase !== 'playing') return
+    if (st.currentPlayer !== payload.seat) return
     // ★ 去重:host 重发同一 PLAY payload.ts (毫秒时间戳) 跳过
     if (_dedupPlayId(payload.ts)) return
     try {
-      const st = game.value.getState()
-      if (st.currentPlayer === payload.seat) {
-        game.value.applyPlay(payload.seat, payload.cards)
-      }
+      game.value.applyPlay(payload.seat, payload.cards)
     } catch (e) { console.warn('applyPlay err', e) }
   }
-  function onP2PPass(payload) {
+  function onP2PPass(payload, from, msg) {
     if (!payload || !game.value) return
+    // ★ P0-02:authority/sender 校验
+    if (from !== payload.seat) return
+    const st = game.value.getState()
+    if (st.phase !== 'playing') return
+    if (st.currentPlayer !== payload.seat) return
+    if (!st.lastPlay) return
+    // 跳过本机自己(本地已通过 game 事件同步,不再走网络回放)
     if (payload.seat === selfSeat.value) return
-    // ★ BUG-RC2-004 修复:onP2PPass 加 currentPlayer 校验(与 onP2PPlay 对齐)。
-    //   之前只跳过本机 seat,直接 applyPass,迟到/重复/乱序/来自错误 seat 的 PASS
-    //   会直接推进 passCount,可能提前结束一墩。
     try {
-      const st = game.value.getState()
-      if (st.phase !== 'playing') return
-      if (st.currentPlayer !== payload.seat) return
-      if (!st.lastPlay) return
       game.value.applyPass(payload.seat)
     } catch (e) { console.warn('applyPass err', e) }
   }
@@ -1116,8 +1138,10 @@ function onAutoFindBest() {
 
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false
-  function onP2PRoundEnd(payload) {
+  function onP2PRoundEnd(payload, from) {
     if (!payload || !game.value) return
+    // ★ P0-02:ROUND_END 只能由 host(seat 0) 发出
+    if (from !== 0) return
     // roundId 去重:host 重传同一 ROUND_END 时跳过外层 UI 同步
     if (payload.roundId != null && _lastAppliedRoundEndId === payload.roundId) {
       return
@@ -1159,8 +1183,10 @@ function onAutoFindBest() {
   // ★ GD-RC-005 修复:snapshot 接收端用 targetSeat 判定(原 seat: 0 语义混乱)
   //   host 定向 sendTo(connSeat, { type: 'STATE_SNAPSHOT', targetSeat, snapshot })
   //   joiner 收到后判断 targetSeat === selfSeat 才应用,避免非目标 joiner 也被覆盖
-  function onP2PStateSnapshot(payload) {
+  function onP2PStateSnapshot(payload, from) {
     if (!payload || !game.value || !payload.snapshot) return
+    // ★ P0-02:STATE_SNAPSHOT 只能由 host(seat 0) 发出
+    if (from !== 0) return
     // 旧版本(无 targetSeat 字段)是 broadcast,所有非发送方都应用;新版本定向
     // 旧字段 payload.seat 仍兼容:payload.seat 是发送方 seat,跳过自己
     if (payload.targetSeat != null) {
@@ -1249,8 +1275,11 @@ function onAutoFindBest() {
     }
   }
 
-  function onP2PAITakeover(payload) {
+  function onP2PAITakeover(payload, from) {
     if (!payload || !game.value) return
+    // ★ P0-02:网络 AI_TAKEOVER 消息只能由 host(seat 0) 发出;
+    //   本地 'ai:takeover' 事件不携带 from,允许通过。
+    if (typeof from === 'number' && from !== 0) return
     const seat = payload.seat
     if (typeof seat !== 'number') return
     if (game.value.addAIPlayer) game.value.addAIPlayer(seat)
@@ -1264,7 +1293,7 @@ function onAutoFindBest() {
     if (cur === seat && isNetworkHost.value) {
       // ★ Phase3 UI 修复:500ms 后再读 state,避免 setTimeout 外读取的 st 过期
       //   (期间可能已有其他玩家出牌/过牌,currentPlayer / hand / lastPlay 都已变)。
-      addTimer(setTimeout(() => {
+      addTimer(() => {
         if (!game.value) return
         const st = game.value.getState()
         if (st.phase !== 'playing' || st.currentPlayer !== seat) return
@@ -1285,7 +1314,7 @@ function onAutoFindBest() {
             }
           })
         }
-      }, 500))
+      }, 500)
     }
   }
 
@@ -1310,8 +1339,13 @@ function onAutoFindBest() {
   // ===== 生命周期 =====
   onMounted(() => {
     selfSeat.value = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
-    players.value[selfSeat.value].name = storage.getNickname() || '我'
-    players.value[selfSeat.value].avatar = storage.getAvatar() || '🀄'
+    // ★ P2-01:selfSeat 非法时进入等待同步,避免 players[-1]
+    if (!isValidSeat(selfSeat.value)) {
+      phase.value = 'waiting_sync'
+    } else {
+      players.value[selfSeat.value].name = storage.getNickname() || '我'
+      players.value[selfSeat.value].avatar = storage.getAvatar() || '🀄'
+    }
     applyNetworkPlayers()
     applySettingsToAudio()
     onNet('message:NICK_UPDATE', onRemoteNickUpdate)
@@ -1353,7 +1387,7 @@ function onAutoFindBest() {
         // ★ GD-RC-005 修复:reconnect snapshot 定向发送给新连接 seat 而非广播
         const onConnectSnapshot = ({ seat: connSeat }) => {
           if (!game.value) return
-          addTimer(setTimeout(() => {
+          addTimer(() => {
             if (!game.value) return
             const st = game.value.getState()
             // 定向:用 sendTo + targetSeat 标记接收方,接收端判断 target 决定是否应用
@@ -1363,16 +1397,16 @@ function onAutoFindBest() {
                 payload: { targetSeat: connSeat, snapshot: st },
               })
             } catch (e) { /* fallback to broadcast if sendTo not available */ }
-          }, 200))
+          }, 200)
         }
         onNet('connect', onConnectSnapshot)
       }
       if (isNetworkHost.value) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
         initGame({ isP2P: true, seed: pendingSeed })
-        addTimer(setTimeout(() => {
+        addTimer(() => {
           net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value } })
-        }, 500))
+        }, 500)
       }
     } else {
       initGame()
@@ -1390,12 +1424,18 @@ function onAutoFindBest() {
     }
     try { document.removeEventListener('keydown', onKeyDown) } catch (e) {}
     // ★ Phase3 UI 修复:批量清理所有 setTimeout timer,防止组件卸载后闭包仍执行。
-    while (timers.length) {
-      const id = timers.pop()
+    // ★ P2-06:timers 是 Set,遍历清理。
+    for (const id of timers) {
       try { clearTimeout(id) } catch (e) {}
     }
+    timers.clear()
     if (nickToastTimer) clearTimeout(nickToastTimer)
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
+    // ★ P1-14/P2-07:组件卸载时销毁 game 实例,防止旧 scheduleAI / listener 泄漏
+    if (game.value && typeof game.value.destroy === 'function') {
+      try { game.value.destroy() } catch (e) {}
+    }
+    game.value = null
   })
 
   // ===== 导出(组件层需要的全部 reactive / computed / methods) =====
@@ -1413,7 +1453,7 @@ function onAutoFindBest() {
     myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
     seatData, handColumns, selectedCount,
     // methods
-    showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated,
+    showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
     playerName, formatCoins, cardKey, handCardKey, isHinted, isLevel, rankColor,
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, onClear,
     selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
@@ -1421,8 +1461,8 @@ function onAutoFindBest() {
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
     _fillEmptySeatsWithAI,
-    // ★ Phase4 测试:暴露 AI takeover 入口供回归测试
-    onP2PAITakeover,
+    // ★ Phase4 测试:暴露 P2P handler 入口供回归测试
+    onP2PPlay, onP2PPass, onP2PRoundEnd, onP2PStateSnapshot, onP2PAITakeover,
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
     // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
     commitPlay, commitPass,

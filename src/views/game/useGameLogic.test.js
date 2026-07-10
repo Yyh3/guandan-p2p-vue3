@@ -72,7 +72,7 @@ console.log('\n=== 1. useGameLogic API 导出完整性 ===')
   check('导出 onRestartMatch', typeof logic.onRestartMatch === 'function')
   check('导出 selfSeat(ref)', typeof logic.selfSeat !== 'undefined' && typeof logic.selfSeat.value === 'number')
   check('导出 game(ref)', typeof logic.game !== 'undefined')
-  check('导出 __timers(测试用)', Array.isArray(logic.__timers))
+  check('导出 __timers(测试用)', logic.__timers instanceof Set)
 }
 
 // ===== 2. initGame + finishDeal 能正常发牌 =====
@@ -173,19 +173,19 @@ console.log('\n=== 5. 单机模式 onRestartMatch 进入新一轮 ===')
 console.log('\n=== 6. timer 统一清理:组件卸载前批量清 setTimeout ===')
 {
   const logic = useGameLogic({ mainActionsRef: ref(null) })
-  const before = logic.__timers.length
+  const before = logic.__timers.size
   logic.showNickToastBrief()
   logic.onChatSelect({ phrase: 'test' })
   logic.__showBombFx('BOMB_4')
-  const after = logic.__timers.length
+  const after = logic.__timers.size
   check('toast/特效函数向 timers 注册 timeout', after > before)
 
   // 模拟卸载时批量清理(不抛错,且 timers 清空)
-  while (logic.__timers.length) {
-    const id = logic.__timers.pop()
+  for (const id of logic.__timers) {
     try { clearTimeout(id) } catch (e) {}
   }
-  check('timers 可清空', logic.__timers.length === 0)
+  logic.__timers.clear()
+  check('timers 可清空', logic.__timers.size === 0)
 }
 
 // ===== 7. AI takeover 在 setTimeout 内读取最新 state(不抛错) =====
@@ -211,6 +211,59 @@ console.log('\n=== 7. AI takeover 在延迟内读取最新 state ===')
   check('AI takeover 异步读取 state 不抛错', true)
 
   net.isHost = origIsHost
+}
+
+// ===== 8. Batch 1:调试全局变量只在 DEV 暴露 =====
+console.log('\n=== 8. Batch 1:window.__gd_game 只在 DEV 暴露 ===')
+{
+  const logic = useGameLogic({ mainActionsRef: ref(null) })
+  logic.selfSeat.value = 0
+  logic.initGame()
+  await sleep(50)
+  // Node 测试环境 import.meta.env 未定义,应不暴露
+  check('非 DEV 环境不暴露 window.__gd_game', typeof global.window.__gd_game === 'undefined')
+}
+
+// ===== 9. Batch 1:onP2PPlay 拒绝错误发送方 =====
+console.log('\n=== 9. Batch 1:onP2PPlay sender authority ===')
+{
+  const logic = useGameLogic({ mainActionsRef: ref(null) })
+  logic.selfSeat.value = 0
+  logic.initGame({ isP2P: true })
+  await sleep(50)
+  const g = logic.game.value
+  // 强制让 currentPlayer=0 且 phase=playing
+  g._state.currentPlayer = 0
+  g._state.phase = 'playing'
+  const card = g._state.hands[0][0]
+  const beforeLen = g._state.hands[0].length
+  // 正确发送方:from === seat === currentPlayer
+  logic.onP2PPlay({ seat: 0, cards: [card], ts: 1 }, 0, {})
+  check('正确 sender 的 PLAY 被应用(hand -1)', g._state.hands[0].length === beforeLen - 1)
+  // 错误发送方:from !== seat
+  const card2 = g._state.hands[0][0]
+  const len2 = g._state.hands[0].length
+  logic.onP2PPlay({ seat: 0, cards: [card2], ts: 2 }, 99, {})
+  check('错误 sender(from !== seat)的 PLAY 被拒绝', g._state.hands[0].length === len2)
+}
+
+// ===== 10. Batch 1:refreshUiFromGameState 重算 lastCardCounts =====
+console.log('\n=== 10. Batch 1:refreshUiFromGameState 重算 lastCardCounts ===')
+{
+  const logic = useGameLogic({ mainActionsRef: ref(null) })
+  logic.selfSeat.value = 0
+  logic.initGame({ isP2P: true })
+  await sleep(50)
+  logic.refreshUiFromGameState()
+  check('初始 lastCardCounts = [27,27,27,27]', JSON.stringify(logic.lastCardCounts.value) === JSON.stringify([27, 27, 27, 27]))
+  const g = logic.game.value
+  g._state.hands[0] = g._state.hands[0].slice(0, 10)
+  g._state.hands[2] = []
+  g._state.finishedOrder = [2]
+  g._state.abandonedSeats = [3]
+  logic.refreshUiFromGameState()
+  check('refresh 后 lastCardCounts 反映 hands/finished/abandoned',
+    JSON.stringify(logic.lastCardCounts.value) === JSON.stringify([10, 27, 0, 0]))
 }
 
 console.log(`\n========== useGameLogic 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

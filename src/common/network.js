@@ -993,9 +993,11 @@ function parseHostAddress(hostAddress) {
     const hostIp = trimmed.slice(1, close)
     const rest = trimmed.slice(close + 1)
     if (!rest.startsWith(':')) throw new Error('hostAddress IPv6 缺少端口(":" )')
-    const port = parseInt(rest.slice(1), 10)
-    if (Number.isNaN(port) || port <= 0 || port >= 65536) {
-      throw new Error('hostAddress 端口非法: ' + rest.slice(1))
+    const portStr = rest.slice(1)
+    if (!/^\d+$/.test(portStr)) throw new Error('hostAddress 端口非法: ' + portStr)
+    const port = parseInt(portStr, 10)
+    if (port <= 0 || port >= 65536) {
+      throw new Error('hostAddress 端口非法: ' + portStr)
     }
     return { hostIp, hostPort: port }
   }
@@ -1014,8 +1016,9 @@ function parseHostAddress(hostAddress) {
     // 末尾 ':' — 非法
     throw new Error('hostAddress 端口为空')
   }
+  if (!/^\d+$/.test(portStr)) throw new Error('hostAddress 端口非法: ' + portStr)
   const port = parseInt(portStr, 10)
-  if (Number.isNaN(port) || port <= 0 || port >= 65536) {
+  if (port <= 0 || port >= 65536) {
     throw new Error('hostAddress 端口非法: ' + portStr)
   }
   // 拒绝像 'foo:bar' (端口非数字) 但允许 host 内多 ':' (IPv4 用 :8888,host 部分 ':' 不是合法 IPv4,
@@ -1667,7 +1670,11 @@ function requestPromoteToHost(snapshot) {
   return true
 }
 
-function isConnected() { return !!transport }
+function isConnected() {
+  if (!transport) return false
+  if (typeof transport.isReady !== 'function') return true
+  try { return !!transport.isReady() } catch (e) { return false }
+}
 function getPeers() { return peers }
 function getSelfInfo() { return selfInfo }
 
@@ -1718,25 +1725,32 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
       //   connect 监听器(包含 useGameLogic.onConnectSnapshot),导致新 joiner 拿不到初始快照。
       //   修法:保存 handler 引用,off 传具体 handler;onConnect/onError 里 clearTimeout
       //   避免 setTimeout 泄漏(每次循环泄漏 1 个 → 1 小时反复调用越积越多)。
+      // ★ P1-06:handler 引用必须在 Promise 外声明,否则 off 时 ReferenceError 且监听器泄漏。
+      let onConnect, onError, timer
+      const cleanup = () => {
+        if (timer) { clearTimeout(timer); timer = null }
+        try { off('connect', onConnect) } catch (_) {}
+        try { off('error', onError) } catch (_) {}
+      }
       const ok = await new Promise((resolve) => {
         let resolved = false
-        let timer = null
-        const onConnect = () => {
+        timer = null
+        onConnect = () => {
           if (resolved) return
           resolved = true
-          if (timer) { clearTimeout(timer); timer = null }
+          cleanup()
           resolve(true)
         }
-        const onError = () => {
+        onError = () => {
           if (resolved) return
           resolved = true
-          if (timer) { clearTimeout(timer); timer = null }
+          cleanup()
           resolve(false)
         }
         timer = setTimeout(() => {
           if (resolved) return
           resolved = true
-          timer = null
+          cleanup()
           resolve(false)
         }, timeoutMs)
         try {
@@ -1745,12 +1759,9 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
           // 同步调 joinRoom(open 是异步,transport 内部 emit 'connect'/'error')
           joinRoom(roomNo, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
         } catch (e) {
-          if (!resolved) { resolved = true; if (timer) { clearTimeout(timer); timer = null }; resolve(false) }
+          if (!resolved) { resolved = true; cleanup(); resolve(false) }
         }
       })
-      // 清理 listener — 精确 off 传具体 handler,避免清掉其他模块订阅的监听器
-      try { off('connect', onConnect) } catch (_) {}
-      try { off('error', onError) } catch (_) {}
       if (ok) {
         if (typeof opts.onSuccess === 'function') opts.onSuccess(c.hostAddress)
         return { ok: true, hostAddress: c.hostAddress, tried }

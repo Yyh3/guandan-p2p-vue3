@@ -62,7 +62,7 @@ console.log('\n=== 2. BUG-B: trickEnd 后 emit("turn") + 重新调度 AI ===')
   game.on('trickEnd', () => { trickEndCount++ })
   game.on('turn', () => { turnCount++ })
   // 构造手牌:每人 1 张单牌 + 玩家 0 先出
-  const st = game.getState()
+  const st = game._state
   for (let i = 0; i < 4; i++) {
     st.hands[i] = [{ suit: 0, rank: 3 + i }]
   }
@@ -240,7 +240,7 @@ console.log('\n=== 7. BUG-I: scheduleAI 失败不 broadcast(aiBroadcast 不会�
   game.setAIBroadcast(() => { aiBroadcastCount++ })
   // AI 0 出牌后其他 AI 自动应对
   // 我们直接让 AI 0 出 1 张牌,其他 3 个 pass
-  const st = game.getState()
+  const st = game._state
   st.hands[0] = [{ suit: 0, rank: 5 }]
   st.currentPlayer = 0
   st.leaderPlayer = 0

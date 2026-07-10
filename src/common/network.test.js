@@ -15,6 +15,7 @@
  */
 
 import { WebSocket, WebSocketServer } from 'ws'
+import { parseHostAddress } from './network.js'
 
 let pass = 0, fail = 0
 function assert(name, cond) {
@@ -734,6 +735,44 @@ console.log('\n=== 24. v2.1 精确性:HEARTBEAT_*_MS 常量值 + 关系 ===')
 }
 
 // ============== 汇总 ==============
+// ============== Batch 1 补充测试 ==============
+console.log('\n=== 25. parseHostAddress 严格端口解析 ===')
+{
+  eq('192.168.1.5:8848 解析正确', parseHostAddress('192.168.1.5:8848'), { hostIp: '192.168.1.5', hostPort: 8848 })
+  eq('[::1]:8848 解析正确', parseHostAddress('[::1]:8848'), { hostIp: '::1', hostPort: 8848 })
+  let threw = false
+  try { parseHostAddress('192.168.1.5:8848abc') } catch (e) { threw = true }
+  assert('IPv4 端口带 trailing junk 抛出错误', threw)
+  threw = false
+  try { parseHostAddress('[::1]:8848junk') } catch (e) { threw = true }
+  assert('IPv6 端口带 trailing junk 抛出错误', threw)
+}
+
+console.log('\n=== 26. smartReconnectToPeers 不泄漏 connect/error 监听器 ===')
+{
+  // 动态 import 一个独立实例,避免污染主测试实例
+  const mod = await import('./network.js?tag=batch1-smart&_=' + Math.random())
+  // 注入假 localStorage + 缓存一个候选地址
+  const store = new Map()
+  globalThis.localStorage = {
+    getItem: (k) => store.get(k) || null,
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  }
+  const roomNo = 'batch1-room'
+  mod.cachePeerHostAddress(roomNo, 1, '127.0.0.1:59999', true)
+  const beforeConnect = mod._listenerCount('connect')
+  const beforeError = mod._listenerCount('error')
+  // 启动 smart reconnect,地址必然连不上,会在超时后 resolve(false)
+  const p = mod.smartReconnectToPeers(roomNo, { self: { nickname: 'A', avatar: 'X' }, timeoutMs: 50 })
+  await p
+  const afterConnect = mod._listenerCount('connect')
+  const afterError = mod._listenerCount('error')
+  assert('smartReconnect 前后 connect 监听器数量不变', afterConnect === beforeConnect)
+  assert('smartReconnect 前后 error 监听器数量不变', afterError === beforeError)
+  delete globalThis.localStorage
+}
+
 console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
 // WS server / open handles 可能让 process 不退出,显式退出
 setTimeout(() => process.exit(fail > 0 ? 1 : 0), 50)

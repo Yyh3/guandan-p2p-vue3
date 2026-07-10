@@ -206,7 +206,7 @@ console.log('\n=== 6. host 起 http server:GET /notfound → SPA fallback 到 in
   await settle(50)
 }
 
-console.log('\n=== 7. host 端 WS upgrade 仍能正常工作(不破坏既有) ===')
+console.log('\n=== 7. host 端 WS upgrade 仍能正常工作 + P0-02 覆盖伪造 from ===')
 {
   const t = new WebSocketTransport({ port: 0, host: '127.0.0.1', path: '/' })
   await t.open('self')
@@ -217,14 +217,20 @@ console.log('\n=== 7. host 端 WS upgrade 仍能正常工作(不破坏既有) ==
   const ws = new WebSocket(`ws://127.0.0.1:${port}/`)
   await new Promise((resolve, reject) => {
     ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'PING', payload: { ts: Date.now() }, from: 1, ts: Date.now() }))
-      setTimeout(resolve, 50)
+      // 先走 JOIN 绑定 seat=2,再发 PING(带伪造 from=99)
+      ws.send(JSON.stringify({ type: 'JOIN', payload: { nickname: 'A' }, from: -1 }))
+      setTimeout(() => {
+        t.bindLastSenderSeat(2)
+        ws.send(JSON.stringify({ type: 'PING', payload: { ts: Date.now() }, from: 99, ts: Date.now() }))
+        setTimeout(resolve, 50)
+      }, 20)
     })
     ws.on('error', reject)
   })
   await settle(50)
-  assert('host 收到 1 条消息', got.length === 1)
-  assert('消息 type === PING', got[0]?.type === 'PING')
+  assert('host 收到 JOIN + PING 共 2 条消息', got.length === 2)
+  assert('第二条消息 type === PING', got[1]?.type === 'PING')
+  assert('P0-02:server 用 bound seat 覆盖伪造 from', got[1]?.from === 2)
   ws.close()
   t.close()
   await settle(50)

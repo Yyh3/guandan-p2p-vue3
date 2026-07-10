@@ -148,7 +148,7 @@ console.log('\n=== 4. P1-1: guandan-game.js migrateHost 末尾 emit \'turn\' ===
 console.log('\n=== 5. P1-2: useGameLogic onP2PRoundEnd roundId 去重防止 UI 抖动 ===')
 {
   const src = await fs.readFile('src/views/game/useGameLogic.js', 'utf-8')
-  const fn = src.match(/function onP2PRoundEnd\(payload\)[\s\S]*?^\s\s\}/m)
+  const fn = src.match(/function onP2PRoundEnd\(payload[^)]*\)[\s\S]*?^\s\s\}/m)
   assert('onP2PRoundEnd 函数存在', !!fn)
   if (fn) {
     const body = fn[0]
