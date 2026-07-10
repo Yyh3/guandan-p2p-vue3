@@ -12,6 +12,7 @@ dist/
 
 # 测试/调试临时文件
 /tmp/
+/test-results/
 /playwright-report/
 /playwright/.cache/
 
