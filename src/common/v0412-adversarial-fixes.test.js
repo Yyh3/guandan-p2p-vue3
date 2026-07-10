@@ -167,6 +167,8 @@ console.log('\n=== 6. P1-4: game.applyPlay 防御 cards-not-found + useGameLogic
   // 6.1 行为:applyPlay 在 cards 不全在 hand 里时直接 return,不修改 state
   const game = createGame({ players: [{}, {}, {}, {}], seed: 123, aiPlayers: [] })
   game.deal()
+  // P1-02 修复:applyPlay 必须当前玩家;强制 currentPlayer=0 以便测试
+  game._state.currentPlayer = 0
   const stBefore = game.getState()
   const hand0Before = stBefore.hands[0].slice()
   // 构造一张不在 hand0 的牌(取 hand1 的第一张)

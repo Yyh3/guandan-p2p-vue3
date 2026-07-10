@@ -232,35 +232,38 @@ function createGame(opts) {
    */
 function applyPlay(seat, cards, hand, rec) {
     const alive = ensureAlive(); if (alive) return alive
+    // P1-02 修复:应用层必须校验阶段 / 当前玩家,不能再无条件应用
+    if (state.phase !== 'playing') return { ok: false, error: 'not_playing' }
+    if (seat !== state.currentPlayer) return { ok: false, error: 'not_your_turn' }
+
     // ★ v0.4.13 对抗性审查 (P1-4):防御性 — 重复 applyPlay(WS 重传 / 多次 broadcast)
     //   会让 hand 已空时 splice(-1, 1) 静默删末尾那张牌(silent bug)。
-    //   修法:cards 任何一张不在 hand 里 → 直接 return,跳过这次 apply。
+    //   修法:cards 任何一张不在 state.hands[seat] 里 → 直接 return,跳过这次 apply。
     //   防御场景:joiner 端已经 apply 过同一 PLAY,手牌已删,再 apply 时 hand 里查不到 cards。
-    if (!hand) {
-      // 兼容性调用:外部只传 seat+cards,从 state 取手牌
-      hand = state.hands[seat].slice()
-      let allFound = true
-      for (const card of cards) {
-        const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
-        if (idx < 0) {
-          allFound = false
-          break
-        }
-        hand.splice(idx, 1)
+    const sourceHand = state.hands[seat].slice()
+    let allFound = true
+    for (const card of cards) {
+      const idx = sourceHand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
+      if (idx < 0) {
+        allFound = false
+        break
       }
-      if (!allFound) {
-        // cards 中至少一张不在 hand 里 — 重复 apply 或错误数据,跳过
-        return
-      }
+      sourceHand.splice(idx, 1)
     }
-    if (!rec) {
-      // P2P 同步路径:host 广播的 cards 可能含鬼牌,joiner 端需要具象化后再识别
-      const materialized = E.materializeGhosts(cards, state.levelRank, state.lastPlay)
-      rec = materialized ? materialized.rec : E.recognize(cards)
+    if (!allFound) {
+      // cards 中至少一张不在 hand 里 — 重复 apply 或错误数据,跳过
+      return
     }
-    // 注:applyPlay 是 host 广播同步的内部 API,host 已校验 seat 不应再校验,
-    //   否则 P0-6 safety 兜底测试无法构造"4 全 finished"场景
-    //   finishedOrder 检查只在 playerPlay(用户 API)做
+
+    // P1-02 修复:不信任外部传入的 rec,必须重新走 materializeGhosts 校验
+    const materialized = E.materializeGhosts(cards, state.levelRank, state.lastPlay)
+    if (!materialized || !materialized.rec || materialized.rec.type === E.TYPE.INVALID) {
+      return { ok: false, error: 'illegal_play' }
+    }
+    rec = materialized.rec
+
+    // 使用从 state.hands[seat] 移除 cards 后的手牌(忽略外部传入的 hand)
+    hand = sourceHand
     state.hands[seat] = hand
     state.tableCards = cards
     state.lastPlay = { ...rec, who: seat, cards }
@@ -306,6 +309,10 @@ function applyPlay(seat, cards, hand, rec) {
    */
   function applyPass(seat) {
     const alive = ensureAlive(); if (alive) return alive
+    // P1-02 修复:应用层过牌也必须校验阶段 / 当前玩家 / 是否有领出
+    if (state.phase !== 'playing') return { ok: false, error: 'not_playing' }
+    if (seat !== state.currentPlayer) return { ok: false, error: 'not_your_turn' }
+    if (!state.lastPlay) return { ok: false, error: 'leader_cannot_pass' }
     state.passCount++
     state.trickHistory.push({ seat, pass: true })
     emit('pass', { seat })
@@ -458,24 +465,18 @@ function applyPlay(seat, cards, hand, rec) {
     //   - previousLevelRank=15(2) 升到 14(A) → 只是下一局打 A,不算过 A
     const previousLevelRank = state.levelRank
     state.previousLevelRank = previousLevelRank
-    const isRestartAfterA = previousLevelRank === 14 && levelUp > 0
+    // P1-01 修复:只有胜方队伍升级,败方队伍等级保持不变
+    // 防御:finishedOrder 不足 4 人时无法判定胜方,保持原等级不变
+    const winnerTeam = ranks[0] != null ? ranks[0] % 2 : 0
+    const winnerTeamOldLevel = ranks[0] != null ? state.teamLevels[winnerTeam] : state.levelRank
+    const newLevelRank = E.getLevelRank(winnerTeamOldLevel, levelUp)
+    const nextTeamLevels = state.teamLevels.slice()
+    nextTeamLevels[winnerTeam] = newLevelRank
+    state.teamLevels = nextTeamLevels
+    state.levelRank = newLevelRank
+    const isRestartAfterA = winnerTeamOldLevel === 14 && levelUp > 0
     state.levelUp = levelUp
     state.tribute = tribute
-    // v3.x P2-22 修复(G-5):升级时更新双方 teamLevels(简化:双方同步)
-    //   当前简化策略:不论赢家是哪个队,两队的 levelRank 都被同步升 levelUp 级。
-    //   严格掼蛋规则应是"赢家升、输家不升"(双上时输家甚至可能降级)。
-    //   实施复杂度的代价:需要在 calcLevelUp 阶段追踪输家队的等级变化,影响
-    //   state.levelRank / teamLevels / getLevelRank / 升级提示 / 升 A 不过 / 还原
-    //   等多处逻辑。**当前作用域**:本游戏 P2P 局域网版不实现差异化升级,只用
-    //   简化版(双方同步升),UI 上不显示"对方队"levelRank(只显示本队 levelRank)。
-    //   未来真要做差异化,需新增 teamLevelUp[] 分别计算,再在 applyRoundEnd 里
-    //   按 winnerTeam 升级 winner 队、保持 loser 队不变(可能需要根据 levelUp
-    //   数值做"过 A 不过"等特殊规则)。
-    //   - 未来差异化时:teamLevels[0] = winnerTeam===0 ? upgrade : maybe downgrade
-    //   - 现状约束:teamLevels 字段已加(对外 API 兼容),但内部逻辑仍同步
-    const newLevelRank = E.getLevelRank(state.levelRank, levelUp)
-    state.teamLevels = [newLevelRank, newLevelRank]
-    state.levelRank = newLevelRank
     // ★ v0.4.9:过 A 标志存到 state,getState() 可读 + 后续 restartMatch 消费
     state.isRestartAfterA = isRestartAfterA
     state.round++

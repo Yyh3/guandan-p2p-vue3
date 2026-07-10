@@ -572,7 +572,8 @@ console.log('\n=== 31. Phase 1 修复行为回归 ===')
     {
       const hand = [c(3, 0), c(4, 0), c(5, 0), c(7, 0), c(8, 0), { suit: 1, rank: 2 }]
       const r = AI.autoPlayGrouped(hand, null, 2)
-      assert('autoPlayGrouped 用鬼补顺子中间缺张(长度>=5)', r.cards.length >= 5)
+      // ★ P1-04:严格模式下顺子恰好 5 张
+      assert('autoPlayGrouped 用鬼补顺子(长度=5)', r.cards.length === 5)
       const concrete = r.cards.filter(c => !(c.suit === 1 && c.rank === 2))
       const ghostCount = r.cards.length - concrete.length
       let canForm = false

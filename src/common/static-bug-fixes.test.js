@@ -66,7 +66,9 @@ console.log('\n=== 2. BUG-B: trickEnd 后 emit("turn") + 重新调度 AI ===')
   for (let i = 0; i < 4; i++) {
     st.hands[i] = [{ suit: 0, rank: 3 + i }]
   }
-  st.currentPlayer = 0
+  // P1-02 修复:applyPass 必须 playing 阶段 / seat === currentPlayer;从 seat 1 开始 pass
+  st.phase = 'playing'
+  st.currentPlayer = 1
   st.leaderPlayer = 0
   st.firstPlayer = 0
   st.lastPlay = { who: 0, type: E.TYPE.SINGLE, mainRank: 3, length: 1, cards: [{ suit: 0, rank: 3 }] }
@@ -75,13 +77,12 @@ console.log('\n=== 2. BUG-B: trickEnd 后 emit("turn") + 重新调度 AI ===')
   game.applyPass(1)
   game.applyPass(2)
   game.applyPass(3)
+  // currentPlayer 应该立刻回到 leader 0(AI 调度前)
+  assert('trickEnd 后 currentPlayer 回到 leader 0', game._state.currentPlayer === 0)
   // 等异步 AI(setTimeout)
   await new Promise(r => setTimeout(r, 1500))
   assert('trickEnd 触发 ≥ 1 次', trickEndCount >= 1)
   assert('turn 触发 ≥ 1 次(trickEnd 后 emit)', turnCount >= 1)
-  // currentPlayer 应该回到 leader 0
-  const st2 = game.getState()
-  assert('trickEnd 后 currentPlayer 回到 leader 0', st2.currentPlayer === 0)
 }
 
 // ============== BUG-D:_kickedSeats SYNC 时清理 ==============

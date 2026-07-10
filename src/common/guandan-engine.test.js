@@ -181,12 +181,17 @@ const seq2 = [E.mulberry32(1)(), E.mulberry32(1)(), E.mulberry32(1)()]
 eq('mulberry32 三连值确定', JSON.stringify(seq1), JSON.stringify(seq2))
 
 console.log('\n=== 6. 升级序列 ===')
-eq('2(15) → A(14)', E.getLevelRank(15, 1), 14)
-eq('2(15) → K(13) 升 2', E.getLevelRank(15, 2), 13)
-eq('3(3) → 2(15)', E.getLevelRank(3, 1), 15)
-eq('A(14) 升 1 → K(13)', E.getLevelRank(14, 1), 13)
-eq('A(14) 升 2 → Q(12)', E.getLevelRank(14, 2), 12)
-eq('Q(12) 升 1 → J(11)', E.getLevelRank(12, 1), 11)
+// P0-04 修复:升级顺序改为 2 → 3 → 4 → ... → A
+eq('2(15) → 3(3) 升 1', E.getLevelRank(15, 1), 3)
+eq('2(15) → 4(4) 升 2', E.getLevelRank(15, 2), 4)
+eq('3(3) → 4(4) 升 1', E.getLevelRank(3, 1), 4)
+eq('K(13) → A(14) 升 1', E.getLevelRank(13, 1), 14)
+eq('Q(12) → A(14) 升 2(封顶)', E.getLevelRank(12, 2), 14)
+eq('A(14) → A(14) 升任意(封顶)', E.getLevelRank(14, 10), 14)
+// 边界:非法 currentLevelRank 应抛错
+let threw = false
+try { E.getLevelRank(99, 1) } catch (e) { threw = true }
+assert('非法 currentLevelRank 抛错', threw)
 
 console.log('\n=== 7. 逢人配分离 ===')
 const hand = [
@@ -441,6 +446,55 @@ console.log('\n=== 16. P3-4:王炸简化后仍识别 4 王 ===')
   ]
   const r2 = E.recognize(shuffled)
   eq('4 王乱序 → KINGS_BOMB', r2.type, E.TYPE.KINGS_BOMB)
+}
+
+console.log('\n=== 17. P1-03:四王加额外牌必须非法 ===')
+{
+  const fourJokers = [
+    { suit: -1, rank: 16 }, { suit: -1, rank: 16 },
+    { suit: -1, rank: 17 }, { suit: -1, rank: 17 },
+  ]
+  const extra = { suit: 0, rank: 3 }
+  const r = E.recognize([...fourJokers, extra, { suit: 0, rank: 5 }, { suit: 0, rank: 7 }])
+  eq('4 王 + 3 张额外牌 → INVALID', r.type, E.TYPE.INVALID)
+}
+
+console.log('\n=== 18. P0-05:红桃级牌字面义具象化 ===')
+{
+  // 场景:打 10,单张红桃 10 应字面识别为 SINGLE mainRank=10
+  const lr = 10
+  const redHeart10 = { suit: 1, rank: 10 }
+  const m1 = E.materializeGhosts([redHeart10], lr, null)
+  eq('单张红桃级牌 materialize 成功', !!m1, true)
+  eq('单张红桃级牌字面义为 SINGLE', m1.rec.type, E.TYPE.SINGLE)
+  eq('单张红桃级牌 mainRank=levelRank', m1.rec.mainRank, lr)
+
+  // 两张红桃级牌应字面识别为 PAIR mainRank=levelRank
+  const m2 = E.materializeGhosts([redHeart10, { suit: 1, rank: 10 }], lr, null)
+  eq('一对红桃级牌 materialize 成功', !!m2, true)
+  eq('一对红桃级牌字面义为 PAIR', m2.rec.type, E.TYPE.PAIR)
+  eq('一对红桃级牌 mainRank=levelRank', m2.rec.mainRank, lr)
+}
+
+console.log('\n=== 19. P1-04:严格牌型长度限制 ===')
+{
+  // 顺子只准 5 张
+  const straight6 = [3, 4, 5, 6, 7, 8].map(r => ({ suit: 0, rank: r }))
+  eq('6 张顺子严格模式下非法', E.recognize(straight6).type, E.TYPE.INVALID)
+  const straight5 = [3, 4, 5, 6, 7].map((r, i) => ({ suit: i % 2, rank: r }))
+  eq('5 张顺子合法', E.recognize(straight5).type, E.TYPE.STRAIGHT)
+
+  // 连对只准 6 张(3 对)
+  const pairStraight8 = [3, 3, 4, 4, 5, 5, 6, 6].map((r, i) => ({ suit: i % 2, rank: r }))
+  eq('8 张连对严格模式下非法', E.recognize(pairStraight8).type, E.TYPE.INVALID)
+  const pairStraight6 = [3, 3, 4, 4, 5, 5].map((r, i) => ({ suit: i % 2, rank: r }))
+  eq('6 张连对合法', E.recognize(pairStraight6).type, E.TYPE.PAIR_STRAIGHT)
+
+  // 钢板只准 6 张(2 组三张)
+  const threeStraight9 = [3, 3, 3, 4, 4, 4, 5, 5, 5].map((r, i) => ({ suit: i % 2, rank: r }))
+  eq('9 张钢板严格模式下非法', E.recognize(threeStraight9).type, E.TYPE.INVALID)
+  const threeStraight6 = [3, 3, 3, 4, 4, 4].map((r, i) => ({ suit: i % 2, rank: r }))
+  eq('6 张钢板合法', E.recognize(threeStraight6).type, E.TYPE.THREE_STRAIGHT)
 }
 
 console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========\n`)

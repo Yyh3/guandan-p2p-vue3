@@ -10,13 +10,17 @@
  * 注意"红桃级牌"(逢人配)由调用方在出牌时特殊处理,引擎不做判断
  */
 
+// 严格牌型长度限制开关
+// P1-04:竞技规则下,顺子只准 5 张,连对只准 3 对(6 张),钢板只准 2 组三张(6 张)
+const STRICT_LENGTH_LIMITS = true
+
 // ============ 基础数据 ============
 const SUIT_NAMES = ['♠', '♥', '♣', '♦']
 const RANK_NAMES = ['', '', '', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', '小王', '大王']
-// 升级序列:从打 2(rank=15)到打 A(rank=14),共 13 级
-// 顺序:2(15) → A(14) → K(13) → Q(12) → J(11) → 10(10) → ... → 3(3) → 回到 2(15)
+// 升级序列:从打 2(rank=15)开始,按 2 → 3 → 4 → ... → A 顺序升级,最后回到 2
+// 索引 0=2(15),1=3(3),2=4(4),...,12=A(14)
 // v3.x P3-2 修复:不再 export — 没有任何调用方(getLevelRank 内部用 while 循环,不需要这个数组)
-const LEVEL_SEQUENCE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3]
+const LEVEL_SEQUENCE = [15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
 // ============ 牌组生成 ============
 /**
@@ -167,8 +171,8 @@ function recognize(cards) {
   // 王牌特殊处理
   const jokerCnt = (cnt[16] || 0) + (cnt[17] || 0)
 
-  // 王炸(4王) — v3.x P3-4 简化:整副牌只有 4 张王,jokerCnt===4 蕴含了 len===4
-  if (jokerCnt === 4) {
+  // 王炸(4王) — P1-03 修复:必须是恰好 4 张且全为王(加 len===4 防止 4 王+N 张被误判)
+  if (len === 4 && jokerCnt === 4) {
     return { type: TYPE.KINGS_BOMB, mainRank: 17, length: 4 }
   }
 
@@ -227,7 +231,10 @@ function recognize(cards) {
   }
 
   // 钢板(连续三张,2+组)
-  if (jokerCnt === 0 && counts.length >= 2 && len >= 6 && len % 3 === 0) {
+  // P1-04:严格模式下只准 2 组三张(6 张)
+  const threeStraightMinLen = STRICT_LENGTH_LIMITS ? 6 : 6
+  const threeStraightMaxLen = STRICT_LENGTH_LIMITS ? 6 : 12
+  if (jokerCnt === 0 && counts.length >= 2 && len >= threeStraightMinLen && len <= threeStraightMaxLen && len % 3 === 0) {
     // 每个 rank 出现 3 次,且 rank 连续
     if (counts.every(c => c === 3)) {
       const ranks = Object.keys(cnt).map(Number).sort((a, b) => a - b)
@@ -242,7 +249,10 @@ function recognize(cards) {
   }
 
   // 三连对(3+对)
-  if (jokerCnt === 0 && counts.length >= 3 && len >= 6 && len % 2 === 0) {
+  // P1-04:严格模式下只准 3 对(6 张)
+  const pairStraightMinLen = STRICT_LENGTH_LIMITS ? 6 : 6
+  const pairStraightMaxLen = STRICT_LENGTH_LIMITS ? 6 : 12
+  if (jokerCnt === 0 && counts.length >= 3 && len >= pairStraightMinLen && len <= pairStraightMaxLen && len % 2 === 0) {
     if (counts.every(c => c === 2)) {
       const ranks = Object.keys(cnt).map(Number).sort((a, b) => a - b)
       let ok = true
@@ -256,7 +266,10 @@ function recognize(cards) {
   }
 
   // 顺子(5+张单张连续)
-  if (jokerCnt === 0 && len >= 5) {
+  // P1-04:严格模式下只准 5 张
+  const straightMinLen = STRICT_LENGTH_LIMITS ? 5 : 5
+  const straightMaxLen = STRICT_LENGTH_LIMITS ? 5 : 13
+  if (jokerCnt === 0 && len >= straightMinLen && len <= straightMaxLen) {
     if (counts.length === len) {
       const ranks = Object.keys(cnt).map(Number).sort((a, b) => a - b)
       // 不能含 2、王
@@ -416,6 +429,18 @@ function materializeGhosts(cards, levelRank, targetPlay = null) {
   }
   if (ghosts.length > 2) return null
 
+  // P0-05 修复:先尝试字面义解释 — 红桃级牌本身就是合法的级牌(当普通牌用)
+  // 例如单张红桃级牌应识别为 SINGLE mainRank=levelRank,而不是被具象化成 rank 3
+  const literalRec = recognize(cards)
+  if (literalRec.type !== TYPE.INVALID) {
+    if (!targetPlay) {
+      return { cards: cards.map(c => ({ ...c })), rec: literalRec, usedAsGhost: false }
+    }
+    if (canBeat(literalRec, targetPlay)) {
+      return { cards: cards.map(c => ({ ...c })), rec: literalRec, usedAsGhost: false }
+    }
+  }
+
   const allRanks = generateGhostAssignments(null, null, null, levelRank)
   const combos = combosWithReplacement(allRanks, ghosts.length)
   // 若 concrete 全部同花色,鬼牌也使用该花色(支持同花顺);否则默认红桃
@@ -563,22 +588,19 @@ function calcLevelUp(ranks, teams) {
 
 /**
  * 当前级牌是什么 rank
- * 起始 2 (rank=14),升 1 级 → A (rank=13),再升 → K(12), ...,回到 2
- * 简化:从打 2(15) 升级,序列 15→14→13→...→3→15
+ * 起始打 2 (rank=15),升级顺序:2 → 3 → 4 → ... → A → 回到 2
+ * 序列:2(15),3(3),4(4),5(5),6(6),7(7),8(8),9(9),10(10),J(11),Q(12),K(13),A(14)
  *
  * 严格规则:打 A 时本队获头游才算过 A,否则退回打 K
  * 本函数不实现"过 A"特殊逻辑,仅作线性升级。
  * 调用方需根据业务判断是否过 A。
  */
 function getLevelRank(currentLevelRank, levelUp) {
-  // 等级序:2(15) → A(14) → K(13) → Q(12) → J(11) → 10(10) → 9(9) → ... → 3(3) → 2(15)
-  let r = currentLevelRank
-  for (let i = 0; i < levelUp; i++) {
-    if (r === 15) r = 14 // 2 → A
-    else if (r === 3) r = 15 // 3 → 2(过 A 后)
-    else r = r - 1
-  }
-  return r
+  // P0-04 修复:改为基于 LEVEL_SEQUENCE 的索引推进,正确顺序 2→3→...→A
+  const idx = LEVEL_SEQUENCE.indexOf(currentLevelRank)
+  if (idx < 0) throw new Error(`getLevelRank: currentLevelRank=${currentLevelRank} 不在升级序列中`)
+  const nextIndex = Math.min(idx + levelUp, LEVEL_SEQUENCE.length - 1)
+  return LEVEL_SEQUENCE[nextIndex]
 }
 
 /**

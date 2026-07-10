@@ -16,6 +16,9 @@
 import * as E from './guandan-engine.js'
 const { TYPE } = E
 
+// 是否启用标准掼蛋牌型长度限制：顺子=5、连对=6(3对)、钢板=6(2组)
+const STRICT_LENGTH_LIMITS = true
+
 /**
  * 牌型权值(从大到小排序用)
  */
@@ -863,7 +866,9 @@ function findBestSteelPlate(cards, ghostAvail, ghosts) {
   if (curLen > bestLen) { bestLen = curLen; bestStart = curStart }
   if (bestLen >= 2) {
     const picked = []
-    for (let r = bestStart; r < bestStart + bestLen; r++) {
+    const useLen = STRICT_LENGTH_LIMITS ? 2 : bestLen
+    const startOffset = bestStart + bestLen - useLen
+    for (let r = startOffset; r < startOffset + useLen; r++) {
       picked.push(...cards.filter(c => c.rank === r).slice(0, 3))
     }
     return picked
@@ -881,7 +886,8 @@ function findBestStraight(cards, ghostAvail, ghosts) {
   let best = null
   // 枚举所有[start,end]区间,用鬼牌补缺失的 rank,优先取最长,同长度取最大主 rank
   for (let start = 3; start <= 14; start++) {
-    for (let end = start + 4; end <= 14; end++) {
+    const maxEnd = STRICT_LENGTH_LIMITS ? start + 4 : 14
+    for (let end = start + 4; end <= maxEnd; end++) {
       const len = end - start + 1
       let missing = 0
       const picked = []
@@ -931,7 +937,9 @@ function findBestPairStraight(cards, ghostAvail, ghosts) {
   if (bestLen >= 3) {
     const picked = []
     let ghostPool = ghosts.slice()
-    for (let r = bestStart; r < bestStart + bestLen; r++) {
+    const useLen = STRICT_LENGTH_LIMITS ? 3 : bestLen
+    const startOffset = bestStart + bestLen - useLen
+    for (let r = startOffset; r < startOffset + useLen; r++) {
       const have = cards.filter(c => c.rank === r).slice(0, 2)
       if (have.length === 2) picked.push(...have)
       else if (ghostPool.length > 0) {
