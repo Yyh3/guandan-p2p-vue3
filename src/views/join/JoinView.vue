@@ -1,7 +1,11 @@
 <template>
   <div class="page">
     <div class="bg"></div>
-    <h1 class="title">连热点加入房间</h1>
+    <div class="page-header">
+      <button class="back-btn" @click="router.back()" aria-label="返回">← 返回</button>
+      <h1 class="page-title">加入房间</h1>
+      <span class="header-spacer"></span>
+    </div>
 
     <!-- Capacitor / Android 真机:用 IP 加入 -->
     <div v-if="isNative" class="card">
@@ -36,7 +40,8 @@
       <p class="card-hint">房主开热点后,会显示一个 6 位数字房间号</p>
     </div>
 
-    <div class="card">
+    <!-- 本机模拟说明仅在开发环境显示,避免干扰普通用户 -->
+    <div v-if="isDev" class="card">
       <h2 class="card-title">方式 2:本机模拟(同浏览器多标签)</h2>
       <p class="card-hint">
         浏览器内已用 BroadcastChannel 自动通信,
@@ -74,6 +79,7 @@ import { parseQrScanResult } from '@/common/qr-fallback.js'
 const router = useRouter()
 const route = useRoute()
 const isNative = ref(false)
+const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true
 const hostAddress = ref('')
 const roomNo = ref(route.query.roomNo ? String(route.query.roomNo) : '')
 
@@ -198,6 +204,10 @@ async function closeScanner() {
 }
 .title, .card, .action { position: relative; z-index: 1; }
 .title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 24px; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }
+.page-header { position: relative; z-index: 1; display: flex; align-items: center; margin-bottom: 20px; }
+.back-btn { flex: 0 0 auto; font-size: 15px; color: rgba(255,255,255,0.82); background: transparent; border: none; cursor: pointer; padding: 6px 0; }
+.page-title { flex: 1 1 auto; font-size: 20px; font-weight: 800; color: #fff; text-align: center; }
+.header-spacer { flex: 0 0 auto; width: 56px; }
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
   border: 1px solid rgba(255,255,255,0.18);
@@ -217,7 +227,7 @@ async function closeScanner() {
   border-radius: 8px;
   padding: 10px 14px;
 }
-.input-label { font-size: 15px; color: #fff; width: 80px; }
+.input-label { font-size: 15px; color: #fff; width: 80px; flex-shrink: 0; white-space: nowrap; min-width: fit-content; }
 .input {
   flex: 1; background: transparent; border: none; outline: none;
   color: #fff; font-size: 17px;

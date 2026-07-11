@@ -20,21 +20,45 @@
         <span class="card-layer card-front">A</span>
       </div>
       <h1 class="logo-title">掼蛋</h1>
-      <p class="logo-sub">局域网 · 离线 · 4 人联机</p>
+      <p class="logo-sub">无需服务器，同一热点即可开局</p>
     </header>
 
-    <!-- 中部:4 个玻璃拟态按钮(垂直堆叠,间距 16px,高度 64px,圆角 32px) -->
+    <!-- 中部:主按钮 + 次级按钮 + 文字入口(按 UI 整改分级) -->
     <nav class="actions" aria-label="主菜单">
       <button
-        v-for="btn in mainButtons"
-        :key="btn.id"
-        class="glass-btn"
-        :class="`glass-btn-${btn.tone}`"
-        :data-testid="btn.testid"
-        @click="btn.handler"
+        class="glass-btn glass-btn-primary"
+        data-testid="home-start-btn"
+        @click="() => router.push('/room?role=host')"
       >
-        <span class="glass-btn-icon">{{ btn.icon }}</span>
-        <span class="glass-btn-text">{{ btn.label }}</span>
+        <span class="glass-btn-icon">▶</span>
+        <span class="glass-btn-text">开始游戏</span>
+      </button>
+
+      <div class="actions-row">
+        <button
+          class="glass-btn glass-btn-secondary"
+          data-testid="home-join-btn"
+          @click="() => router.push('/join')"
+        >
+          <span class="glass-btn-icon">📱</span>
+          <span class="glass-btn-text">加入房间</span>
+        </button>
+        <button
+          class="glass-btn glass-btn-secondary"
+          data-testid="home-ai-btn"
+          @click="() => router.push('/ai')"
+        >
+          <span class="glass-btn-icon">🤖</span>
+          <span class="glass-btn-text">AI 对战</span>
+        </button>
+      </div>
+
+      <button
+        class="glass-btn glass-btn-link"
+        data-testid="home-rules-btn"
+        @click="() => router.push('/guide')"
+      >
+        <span class="glass-btn-text">游戏规则</span>
       </button>
     </nav>
 
@@ -88,43 +112,6 @@ const showNickEditor = ref(false)
 // ★ v2.1 P1 host 主动踢人:被踢的 joiner 跳到 /?force_disconnected=1 → 首页弹提示
 const kickedToast = ref('')
 let kickedToastTimer = null
-
-// 4 个主按钮(按 spec §2.1):开始游戏 / 加入房间 / AI 对战 / 游戏规则
-// tone 决定按钮的微调色调(都是金色玻璃基底,只是底色 hint 不同)
-const mainButtons = [
-  {
-    id: 'start',
-    icon: '▶',
-    label: '开始游戏',
-    tone: 'amber',
-    testid: 'home-start-btn',
-    handler: () => router.push('/room?role=host'),
-  },
-  {
-    id: 'join',
-    icon: '📱',
-    label: '加入房间',
-    tone: 'cyan',
-    testid: 'home-join-btn',
-    handler: () => router.push('/join'),
-  },
-  {
-    id: 'ai',
-    icon: '🤖',
-    label: 'AI 对战',
-    tone: 'purple',
-    testid: 'home-ai-btn',
-    handler: () => router.push('/ai'),
-  },
-  {
-    id: 'rules',
-    icon: '📖',
-    label: '游戏规则',
-    tone: 'green',
-    testid: 'home-rules-btn',
-    handler: () => router.push('/guide'),
-  },
-]
 
 onMounted(() => {
   myName.value = storage.getNickname()
@@ -261,23 +248,26 @@ function onSettings() { router.push('/settings') }
 }
 .logo-sub {
   margin: 0;
-  font-size: 13px;
-  color: var(--gold-soft);
-  letter-spacing: 4px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.70);
+  letter-spacing: 1px;
+  line-height: 1.5;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 /* ============================================================
- * 中部:4 个玻璃拟态按钮(垂直堆叠,间距 16px,高度 64px,圆角 32px)
+ * 中部:分级按钮(主 / 次 / 文字)
  * ============================================================ */
 .actions {
   width: 100%;
-  max-width: 360px;
+  max-width: min(460px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
   gap: 16px;
   margin-bottom: 40px;
 }
+.actions-row { display: flex; gap: 12px; }
+.actions-row .glass-btn { flex: 1; }
 .glass-btn {
   position: relative;
   display: flex;
@@ -307,26 +297,52 @@ function onSettings() { router.push('/settings') }
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
-/* 按钮底色 hint(4 种 tone)— 共享金色玻璃基底,微调底色 */
-.glass-btn-amber {
-  background: linear-gradient(135deg,
-    rgba(212, 175, 55, 0.18) 0%,
-    rgba(255, 215, 0, 0.08) 100%);
+/* 按钮层级:主按钮金色实心 / 次按钮半透明描边 / 文字按钮 */
+.glass-btn-primary {
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308;
+  border-color: transparent;
+  box-shadow: 0 8px 24px rgba(233, 173, 63, 0.26);
 }
-.glass-btn-cyan {
-  background: linear-gradient(135deg,
-    rgba(212, 175, 55, 0.18) 0%,
-    rgba(33, 150, 243, 0.10) 100%);
+.glass-btn-primary .glass-btn-icon {
+  background: rgba(58, 35, 8, 0.14);
+  border-color: rgba(58, 35, 8, 0.25);
+  color: #3a2308;
 }
-.glass-btn-purple {
-  background: linear-gradient(135deg,
-    rgba(212, 175, 55, 0.18) 0%,
-    rgba(126, 87, 194, 0.10) 100%);
+.glass-btn-primary:hover {
+  background: linear-gradient(180deg, #fff6c0 0%, #ffdf70 42%, #e09e23 100%);
+  box-shadow: 0 10px 28px rgba(233, 173, 63, 0.35);
 }
-.glass-btn-green {
-  background: linear-gradient(135deg,
-    rgba(212, 175, 55, 0.18) 0%,
-    rgba(67, 160, 71, 0.10) 100%);
+.glass-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.96);
+}
+.glass-btn-secondary .glass-btn-icon {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+}
+.glass-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.glass-btn-link {
+  height: auto;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.70);
+  font-size: 15px;
+  justify-content: center;
+}
+.glass-btn-link .glass-btn-text { text-align: center; }
+.glass-btn-link:hover {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow: none;
+  transform: none;
 }
 .glass-btn-icon {
   flex-shrink: 0;
@@ -349,7 +365,7 @@ function onSettings() { router.push('/settings') }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 /* hover:边框亮度 +30% + 阴影增强 */
-.glass-btn:hover {
+.glass-btn:not(.glass-btn-primary):not(.glass-btn-link):hover {
   border-color: var(--gold-bright);
   background: rgba(255, 255, 255, 0.14);
   box-shadow:
@@ -358,7 +374,7 @@ function onSettings() { router.push('/settings') }
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   transform: translateY(-1px);
 }
-.glass-btn:hover .glass-btn-icon {
+.glass-btn:not(.glass-btn-primary):not(.glass-btn-link):hover .glass-btn-icon {
   border-color: var(--gold-bright);
   box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
 }
@@ -380,7 +396,7 @@ function onSettings() { router.push('/settings') }
  * ============================================================ */
 .bottom-bar {
   width: 100%;
-  max-width: 360px;
+  max-width: min(460px, calc(100vw - 32px));
   display: flex;
   align-items: center;
   justify-content: space-between;

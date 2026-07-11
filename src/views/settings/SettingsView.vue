@@ -9,74 +9,63 @@
       <div class="topbar-spacer"></div>
     </header>
 
-    <!-- 音乐 / 音效 -->
-    <section class="card">
-      <h2 class="card-title">🎵 声音</h2>
-
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">🎶</span>
-          背景音乐
-        </span>
-        <label class="switch">
-          <input type="checkbox" v-model="bgmEnabled" @change="saveAll" />
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="row slider-row" :class="{ disabled: !bgmEnabled }">
-        <span class="row-sub">音量</span>
-        <input
-          type="range" min="0" max="100" step="1"
-          v-model.number="bgmVolume" :disabled="!bgmEnabled" @change="saveAll"
-          class="vol-slider"
-        />
-        <span class="vol-val">{{ bgmVolume }}</span>
+    <!-- 声音 -->
+    <section class="settings-section">
+      <h2 class="section-title">声音</h2>
+      <div class="card">
+        <div class="row">
+          <span class="row-label">背景音乐</span>
+          <label class="switch">
+            <input type="checkbox" v-model="bgmEnabled" @change="saveAll" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="row slider-row" :class="{ disabled: !bgmEnabled }">
+          <span class="row-sub">音量</span>
+          <input type="range" min="0" max="100" step="1" v-model.number="bgmVolume" :disabled="!bgmEnabled" @change="saveAll" class="vol-slider" />
+          <span class="vol-val">{{ bgmVolume }}</span>
+        </div>
       </div>
 
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">🔊</span>
-          出牌音效
-        </span>
-        <label class="switch">
-          <input type="checkbox" v-model="sfxEnabled" @change="saveAll" />
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="row slider-row" :class="{ disabled: !sfxEnabled }">
-        <span class="row-sub">音量</span>
-        <input
-          type="range" min="0" max="100" step="1"
-          v-model.number="sfxVolume" :disabled="!sfxEnabled" @change="saveAll"
-          class="vol-slider"
-        />
-        <span class="vol-val">{{ sfxVolume }}</span>
+      <div class="card">
+        <div class="row">
+          <span class="row-label">出牌音效</span>
+          <label class="switch">
+            <input type="checkbox" v-model="sfxEnabled" @change="saveAll" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="row slider-row" :class="{ disabled: !sfxEnabled }">
+          <span class="row-sub">音量</span>
+          <input type="range" min="0" max="100" step="1" v-model.number="sfxVolume" :disabled="!sfxEnabled" @change="saveAll" class="vol-slider" />
+          <span class="vol-val">{{ sfxVolume }}</span>
+        </div>
       </div>
 
-      <!-- BGM 风格切换 -->
-      <div class="row" :class="{ disabled: !bgmEnabled }">
-        <span class="row-label">
-          <span class="row-icon">🎚️</span>
-          音乐风格
-        </span>
-        <div class="seg-group">
+      <div class="card">
+        <div class="row">
+          <span class="row-label">音乐风格</span>
+        </div>
+        <div class="style-grid" :class="{ disabled: !bgmEnabled }">
           <button
             v-for="opt in bgmStyles"
             :key="opt.id"
-            class="seg-btn"
+            class="style-card"
             :class="{ active: bgmStyle === opt.id, disabled: !bgmEnabled }"
             :disabled="!bgmEnabled"
             @click="setStyle(opt.id)"
-          >{{ opt.label }}</button>
+          >
+            <span class="style-name">{{ opt.label }}</span>
+            <span class="style-play" @click.stop="previewStyle(opt.id)" title="试听">▶</span>
+          </button>
         </div>
       </div>
-      <!-- ★ v0.4.9:音效模式(合成 vs 真实采样) -->
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">🔊</span>
-          音效风格
-        </span>
-        <div class="seg-group">
+
+      <div class="card">
+        <div class="row">
+          <span class="row-label">音效风格</span>
+        </div>
+        <div class="seg-group" :class="{ disabled: !sfxEnabled }">
           <button
             v-for="opt in sfxModes"
             :key="opt.id"
@@ -89,49 +78,21 @@
       </div>
     </section>
 
-    <!-- 视觉(占位) -->
-    <section class="card">
-      <h2 class="card-title">🎨 视觉</h2>
-
-      <div class="row disabled">
-        <span class="row-label">
-          <span class="row-icon">✨</span>
-          动画效果
-        </span>
-        <label class="switch">
-          <input type="checkbox" v-model="animationEnabled" disabled />
-          <span class="slider"></span>
-        </label>
-        <span class="row-tag">即将开放</span>
-      </div>
-
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">🌓</span>
-          主题模式
-        </span>
-        <div class="seg-group">
-          <button
-            v-for="opt in themes"
-            :key="opt.id"
-            class="seg-btn"
-            :class="{ active: theme === opt.id, disabled: true }"
-            disabled
-            @click="setTheme(opt.id)"
-          >{{ opt.label }}</button>
-        </div>
-        <span class="row-tag">即将开放</span>
+    <!-- 视觉 -->
+    <section class="settings-section">
+      <h2 class="section-title">外观</h2>
+      <div class="card placeholder-card">
+        <p class="card-hint">更多视觉主题与动画效果正在制作中</p>
       </div>
     </section>
 
-    <!-- ★ v0.4.9:全局 AI 难度(SettingsView 改 → AIView 默认读这里) -->
-    <section class="card">
-      <h2 class="card-title">🤖 AI 难度</h2>
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">🎯</span>
-          默认 AI 难度
-        </span>
+    <!-- AI 难度 -->
+    <section class="settings-section">
+      <h2 class="section-title">游戏</h2>
+      <div class="card">
+        <div class="row">
+          <span class="row-label">默认 AI 难度</span>
+        </div>
         <div class="seg-group">
           <button
             v-for="opt in aiDifficulties"
@@ -141,53 +102,49 @@
             @click="setAiDifficulty(opt.id)"
           >{{ opt.label }}</button>
         </div>
+        <p class="card-hint">
+          中等 = 规则 + 贪心搜索;困难 = 防守 + 炸弹保留。设置后,<b>单机 AI 模式</b>
+          进入时自动应用,也可在 AI 模式配置页临时覆盖。
+        </p>
       </div>
-      <p class="card-hint">
-        中等 = 规则 + 贪心搜索;困难 = 防守 + 炸弹保留。设置后,<b>单机 AI 模式</b>
-        进入时自动应用,也可在 AI 模式配置页临时覆盖。
-      </p>
     </section>
 
     <!-- 数据 -->
-    <section class="card">
-      <h2 class="card-title">🗂️ 数据</h2>
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">📊</span>
-          当前战绩数
-        </span>
-        <span class="row-value">{{ historyCount }} 条</span>
+    <section class="settings-section">
+      <h2 class="section-title">数据</h2>
+      <div class="card">
+        <div class="row">
+          <span class="row-label">当前战绩数</span>
+          <span class="row-value">{{ historyCount }} 条</span>
+        </div>
+        <div class="row">
+          <span class="row-label">昵称</span>
+          <span class="row-value">{{ nickname }} {{ avatar }}</span>
+        </div>
+        <button class="action-btn warn" @click="onClearHistory">清空全部战绩</button>
+        <p class="card-hint">清空后不可恢复,本机操作不影响对局进行</p>
       </div>
-      <div class="row">
-        <span class="row-label">
-          <span class="row-icon">👤</span>
-          昵称
-        </span>
-        <span class="row-value">{{ nickname }} {{ avatar }}</span>
-      </div>
-      <button class="action-btn warn" @click="onClearHistory">
-        清空全部战绩
-      </button>
-      <p class="card-hint">清空后不可恢复,本机操作不影响对局进行</p>
     </section>
 
-    <!-- 关于 / 致谢 (v0.4.8 N-3) -->
-    <section class="card">
-      <h2 class="card-title">ℹ️ 关于</h2>
-      <p class="card-hint">
-        掼蛋 P2P 局域网版 v{{ appVersion }}<br>
-        离线 4 人掼蛋,无网/无流量/无服务器
-      </p>
-  <p class="card-hint">
-    🎵 背景音乐:BGM by Kevin MacLeod (incompetech.com),Licensed under
-    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
-  </p>
-  <p class="card-hint">
-    🔊 音效占位(f sine + white noise),用户可换真实采样。
-    <a href="https://opengameart.org/" target="_blank" rel="noopener">OpenGameArt</a> /
-    <a href="https://freesound.org/" target="_blank" rel="noopener">Freesound</a> 找 CC0 扑克音效
-  </p>
-</section>
+    <!-- 关于 -->
+    <section class="settings-section">
+      <h2 class="section-title">关于</h2>
+      <div class="card">
+        <p class="card-hint">
+          掼蛋 P2P 局域网版 v{{ appVersion }}<br>
+          离线 4 人掼蛋,无网/无流量/无服务器
+        </p>
+        <p class="card-hint">
+          背景音乐:BGM by Kevin MacLeod (incompetech.com),Licensed under
+          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+        </p>
+        <p class="card-hint">
+          音效占位(f sine + white noise),用户可换真实采样。
+          <a href="https://opengameart.org/" target="_blank" rel="noopener">OpenGameArt</a> /
+          <a href="https://freesound.org/" target="_blank" rel="noopener">Freesound</a> 找 CC0 扑克音效
+        </p>
+      </div>
+    </section>
 
     <p class="footer">设置仅保存到本机,不同步到云端</p>
   </div>
@@ -215,6 +172,8 @@ const bgmStyle = ref('energetic')
 const sfxMode = ref('synth')
 const animationEnabled = ref(true)
 const theme = ref('dark')
+// ★ UI-P0-01 修复:aiDifficulty ref 未声明导致设置页初始化抛错
+const aiDifficulty = ref('medium')
 const historyCount = ref(0)
 const nickname = ref('')
 const avatar = ref('')
@@ -292,6 +251,13 @@ function setStyle(id) {
   bgmStyle.value = id
   audio.setBgmStyle(id)
   saveAll()
+}
+
+// 试听当前风格(不保存,仅临时播放)
+function previewStyle(id) {
+  if (!bgmEnabled.value) return
+  audio.setBgmStyle(id)
+  if (typeof audio.startBgm === 'function') audio.startBgm()
 }
 
 // ★ v0.4.9:SFX 模式切换
@@ -546,4 +512,59 @@ function onBack() {
   margin-top: 20px;
   letter-spacing: 1.5px;
 }
+
+/* ====== 分组标题与间距 ====== */
+.settings-section { margin-bottom: 28px; }
+.section-title {
+  font-size: 13px; font-weight: 800;
+  color: rgba(255,255,255,0.55);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin: 0 0 10px 4px;
+}
+
+/* ====== 音乐风格卡片网格 ====== */
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.style-grid.disabled { opacity: 0.45; pointer-events: none; }
+.style-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 10px 10px 14px;
+  background: rgba(4, 8, 22, 0.36);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.85);
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.style-card:hover:not(.disabled):not(:disabled) { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.08); }
+.style-card.active {
+  border-color: var(--gold-primary, #d4af37);
+  background: linear-gradient(135deg, rgba(212,175,55,0.18), rgba(255,215,0,0.08));
+  color: var(--gold-bright, #ffd700);
+}
+.style-card.disabled, .style-card:disabled { opacity: 0.4; cursor: not-allowed; }
+.style-name { flex: 1; text-align: left; }
+.style-play {
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.1);
+  border-radius: 50%;
+  font-size: 11px;
+  color: rgba(255,255,255,0.8);
+}
+.style-play:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* ====== 占位卡片 ====== */
+.placeholder-card {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 72px;
+  text-align: center;
+}
+.placeholder-card .card-hint { margin: 0; font-size: 13px; color: rgba(255,255,255,0.55); }
 </style>

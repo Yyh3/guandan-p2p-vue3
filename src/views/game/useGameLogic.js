@@ -77,6 +77,8 @@ export function useGameLogic(opts = {}) {
   const multiplier = ref(1)
   // ★ v0.4.9:AI 难度(从 game.state.difficulty 读,默认 'medium')
   const gameDifficulty = ref(opts.difficulty || 'medium')
+  // ★ UI-P0-03 修复:发牌超时标志,用于 UI 兜底提示
+  const dealTimeout = ref(false)
 
   // 4 个玩家座位(0=下=自己, 1=左, 2=上=队友, 3=右)
   const players = ref([
@@ -478,6 +480,7 @@ export function useGameLogic(opts = {}) {
   let dealTimeoutId = null
   function startDealAnimation() {
     isDealing.value = true
+    dealTimeout.value = false
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
     myHand.value = []
@@ -498,7 +501,11 @@ export function useGameLogic(opts = {}) {
     dealTimeoutId = addTimer(() => {
       if (isDealing.value) {
         isDealing.value = false
+        // 8s 后仍没收到完成,先尝试 finishDeal;若 hand 仍无效再触发超时提示
         finishDeal()
+        if (dealTimeout.value) {
+          console.warn('[deal] 8s timeout and hand still invalid')
+        }
       }
       dealTimeoutId = null
     }, 8000)
@@ -531,12 +538,15 @@ export function useGameLogic(opts = {}) {
     if (!Array.isArray(hand)) {
       console.warn('finishDeal: invalid hand for selfSeat', seat, 'st=', !!st)
       myHand.value = []
-    } else {
-      myHand.value = E.sortHandGrouped(hand.slice())
+      // ★ UI-P0-03 修复:hand 未就绪时不应永久卡在发牌,标记超时让 UI 显示重试
+      dealTimeout.value = true
+      return
     }
+    myHand.value = E.sortHandGrouped(hand.slice())
     selected.value = new Array(myHand.value.length).fill(false)
     selectedColKeys.value = {}
     phase.value = 'playing'
+    dealTimeout.value = false
     startTimer()
   }
 
@@ -1454,6 +1464,7 @@ function onAutoFindBest() {
     seatData, handColumns, selectedCount,
     // methods
     showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
+    retryDeal: () => { dealTimeout.value = false; initGame() },
     playerName, formatCoins, cardKey, handCardKey, isHinted, isLevel, rankColor,
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, onClear,
     selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,

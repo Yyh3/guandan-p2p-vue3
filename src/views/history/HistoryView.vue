@@ -64,9 +64,10 @@
     </div>
 
     <div v-if="history.length === 0" class="empty">
-      <div class="empty-icon">📋</div>
-      <p class="empty-text">还没有战绩</p>
-      <p class="empty-hint">开局后会自动记录</p>
+      <div class="empty-icon">🏆</div>
+      <p class="empty-text">暂无对局记录</p>
+      <p class="empty-hint">完成第一局后，这里会显示胜率、升级趋势和最近战绩。</p>
+      <button class="empty-action" @click="router.push('/')">去开一局</button>
     </div>
 
     <div v-else class="history-list">
@@ -96,7 +97,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
+
+const router = useRouter()
 import HistoryChart from '@/components/HistoryChart.vue'
 import LevelUpTrendChart from '@/components/LevelUpTrendChart.vue'
 import { computeSummary, isMyTeamWin } from '@/common/history.js'
@@ -209,7 +213,18 @@ function onClear() {
 .empty { text-align: center; padding: 60px 0; color: #fff; }
 .empty-icon { font-size: 60px; opacity: 0.5; }
 .empty-text { font-size: 18px; margin-top: 12px; }
-.empty-hint { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+.empty-hint { font-size: 13px; color: rgba(255,255,255,0.55); margin-top: 8px; line-height: 1.5; padding: 0 24px; }
+.empty-action {
+  margin-top: 18px;
+  padding: 12px 28px;
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308;
+  border: none;
+  border-radius: 24px;
+  font-size: 16px; font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(233, 173, 63, 0.26);
+}
 .history-list { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .history-item {
   background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));

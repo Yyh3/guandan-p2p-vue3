@@ -159,6 +159,18 @@
       <span v-else-if="phase === 'finished'">本局结束</span>
     </div>
 
+    <!-- ===== 6.6 发牌超时兜底 (mobile 版) ===== -->
+    <div v-if="dealTimeout" class="deal-timeout-mask" @click.self>
+      <div class="deal-timeout-card">
+        <h3 class="deal-timeout-title">发牌超时</h3>
+        <p class="deal-timeout-hint">请检查房间连接后重试</p>
+        <div class="deal-timeout-actions">
+          <button class="deal-timeout-btn ghost" @click="goHome">返回大厅</button>
+          <button class="deal-timeout-btn primary" @click="retryDeal">重试</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== 6.5 结算遮罩 (mobile 版) ===== -->
     <div v-if="phase === 'finished'" class="result-mask-mobile" @click.self="onPrimaryResultAction">
       <div class="result-card-mobile">
@@ -321,6 +333,10 @@ import CardPlay from '@/components/CardPlay.vue'
 import ChatQuickPanel from '@/components/ChatQuickPanel.vue'
 
 import { useGameLogic } from './useGameLogic.js'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+function goHome() { router.push('/') }
 
 // props: 跟 desktop 一样接 selfSeat / ghostRank / isP2PMode
 const props = defineProps({
@@ -340,7 +356,7 @@ const {
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
   players, myHand, selectedColKeys, tableCards, lastPlay,
   phase, currentPlayer, turnTimeLeft, finishedOrder,
-  isDealing, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
+  isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
   isRestartAfterA,
@@ -354,7 +370,7 @@ const {
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onPrimaryResultAction, onRestartMatch,
-  onIcon, showMenu,
+  onIcon, showMenu, retryDeal,
 } = useGameLogic({
   mainActionsRef,
   selfSeat: props.selfSeat,
@@ -1438,4 +1454,27 @@ button {
   color: #444;
   border: 1px solid rgba(0,0,0,0.12);
 }
+
+/* 发牌超时兜底 */
+.deal-timeout-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 110;
+  backdrop-filter: blur(6px);
+  padding: 16px;
+}
+.deal-timeout-card {
+  width: 100%; max-width: 300px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(240,244,255,0.92));
+  border-radius: 18px; padding: 22px 18px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  color: #1a1a2e; text-align: center;
+}
+.deal-timeout-title { margin: 0 0 6px; font-size: 20px; }
+.deal-timeout-hint { margin: 0 0 18px; font-size: 13px; color: #555; }
+.deal-timeout-actions { display: flex; gap: 10px; }
+.deal-timeout-btn { flex: 1; padding: 12px 0; border: none; border-radius: 24px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.deal-timeout-btn.primary { background: linear-gradient(180deg, #f7d06f, #d4a827); color: #2a1f08; }
+.deal-timeout-btn.ghost { background: rgba(0,0,0,0.06); color: #444; border: 1px solid rgba(0,0,0,0.12); }
 </style>

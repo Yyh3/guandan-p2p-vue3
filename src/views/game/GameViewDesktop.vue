@@ -106,6 +106,18 @@
       @chat="onChat"
     />
 
+    <!-- 发牌超时兜底 (desktop 版) -->
+    <div v-if="dealTimeout" class="deal-timeout-mask" @click.self>
+      <div class="deal-timeout-card">
+        <h3 class="deal-timeout-title">发牌超时</h3>
+        <p class="deal-timeout-hint">请检查房间连接后重试</p>
+        <div class="deal-timeout-actions">
+          <button class="deal-timeout-btn ghost" @click="onBack">返回大厅</button>
+          <button class="deal-timeout-btn primary" @click="retryDeal">重试</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 底部主操作栏 -->
     <div v-if="myTurn && !isDealing" class="action-bar-wrap">
       <!-- v3.6:智能理牌显眼前置按钮(挂到 MainActions 的 smart-sort 插槽) -->
@@ -329,7 +341,7 @@ const {
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
   players, myHand, selectedColKeys, tableCards, lastPlay,
   phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder,
-  isDealing, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
+  isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
   isP2PMode, selfSeat, game,
@@ -343,7 +355,7 @@ const {
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onPrimaryResultAction, onRestartMatch, isRestartAfterA,  // ★ v0.4.9
-  onIcon, initGame,
+  onIcon, initGame, retryDeal,
 } = useGameLogic({
   mainActionsRef,
   selfSeat: props.selfSeat,
@@ -355,6 +367,7 @@ const {
 
 // 路由相关的 UI 跳转(只能组件层做)
 function onBack() { router.push('/') }
+function goHome() { router.push('/') }
 function showMenu() {
   if (!confirm('退出对局?')) return
   // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,把对局让给队友(seat 2)
@@ -1108,4 +1121,27 @@ function onNickEditorConfirmed(p) {
   0%, 100% { opacity: 0.85; }
   50% { opacity: 1; box-shadow: 0 0 12px rgba(255, 165, 0, 0.8); }
 }
+
+/* 发牌超时兜底 */
+.deal-timeout-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(6px);
+  padding: 16px;
+}
+.deal-timeout-card {
+  width: 100%; max-width: 320px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(240,244,255,0.92));
+  border-radius: 18px; padding: 24px 20px 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  color: #1a1a2e; text-align: center;
+}
+.deal-timeout-title { margin: 0 0 6px; font-size: 20px; }
+.deal-timeout-hint { margin: 0 0 18px; font-size: 13px; color: #555; }
+.deal-timeout-actions { display: flex; gap: 10px; }
+.deal-timeout-btn { flex: 1; padding: 12px 0; border: none; border-radius: 24px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.deal-timeout-btn.primary { background: linear-gradient(180deg, #f7d06f, #d4a827); color: #2a1f08; }
+.deal-timeout-btn.ghost { background: rgba(0,0,0,0.06); color: #444; border: 1px solid rgba(0,0,0,0.12); }
 </style>

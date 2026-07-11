@@ -1,5 +1,9 @@
 <template>
   <main class="table-preview" aria-label="手机横屏掼蛋 UI 预览">
+    <div class="portrait-tip" aria-hidden="true">
+      <div class="portrait-icon">↻</div>
+      <p>请旋转手机查看牌桌预览</p>
+    </div>
     <div class="floor" aria-hidden="true"></div>
     <div class="table-rim" aria-hidden="true"></div>
     <div class="table-cloth" aria-hidden="true">
@@ -185,9 +189,10 @@ function cardStyle(group, index) {
   --card-h: calc(var(--card-w) * 1.42);
   --stack-rise: clamp(17px, 4.3vh, 19px);
   position: relative;
-  width: 100vw;
+  width: 100%;
+  max-width: 100vw;
   height: 100vh;
-  min-width: 760px;
+  min-width: 0;
   min-height: 360px;
   overflow: hidden;
   color: #fff;
@@ -196,6 +201,24 @@ function cardStyle(group, index) {
     linear-gradient(180deg, #232947 0%, #181426 58%, #090910 100%);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   user-select: none;
+}
+
+/* 竖屏时只显示旋转提示,不渲染宽牌桌内容 */
+.portrait-tip { display: none; }
+@media (orientation: portrait) {
+  .table-preview > *:not(.portrait-tip) { display: none !important; }
+  .portrait-tip {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: absolute; inset: 0; z-index: 10;
+    background: linear-gradient(180deg, #232947 0%, #181426 58%, #090910 100%);
+    color: rgba(255,255,255,0.9); text-align: center; padding: 24px;
+  }
+  .portrait-icon { font-size: 48px; margin-bottom: 12px; animation: tip-pulse 1.6s ease-in-out infinite; }
+  .portrait-tip p { font-size: 16px; line-height: 1.5; }
+  @keyframes tip-pulse {
+    0%, 100% { opacity: 0.7; transform: rotate(0deg); }
+    50% { opacity: 1; transform: rotate(90deg); }
+  }
 }
 
 button {
