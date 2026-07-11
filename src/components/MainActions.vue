@@ -76,7 +76,8 @@ defineExpose({
 
 .main-actions {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 14px;
   justify-content: center;
   align-items: center;
   z-index: 7;

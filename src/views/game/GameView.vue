@@ -5,6 +5,7 @@
     :ghost-rank="ghostRank"
     :is-p2-p-mode="isP2PMode"
     :difficulty="difficulty"
+    :initial-level-rank="initialLevelRank"
   />
 </template>
 
@@ -83,5 +84,12 @@ const role = computed(() => String(route.query.role || ''))
 const difficulty = computed(() => {
   const v = String(route.query.difficulty || 'medium')
   return (v === 'medium' || v === 'hard') ? v : 'medium'
+})
+// ★ LOGIC-01 修复:AI 页传入 ?levelRank=xxx,透传给逻辑层作为起始级牌
+const initialLevelRank = computed(() => {
+  const v = route.query.levelRank
+  if (v === undefined || v === null) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
 })
 </script>

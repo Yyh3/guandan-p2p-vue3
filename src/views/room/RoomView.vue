@@ -310,19 +310,29 @@ async function initNetwork() {
     }
   })
   onNet('message:READY', (payload, from) => {
+    // ★ LOGIC-14 修复:READY 消息必须来自已知 peer 且 payload 合法
+    if (typeof payload?.ready !== 'boolean') return
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hostSeat && !isHost.value) return
     if (peers.has(from)) {
       peers.set(from, { ...peers.get(from), ready: payload.ready })
       tryStartGame()
     }
   })
-  onNet('message:SYNC', (payload) => {
+  onNet('message:SYNC', (payload, from) => {
+    // ★ LOGIC-14 修复:SYNC 只能由 host 权威发出
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hostSeat) return
     if (payload && payload.peers) {
       peers.clear()
       for (const [s, info] of payload.peers) peers.set(s, info)
       tryStartGame()
     }
   })
-  onNet('message:GAME_START', () => {
+  onNet('message:GAME_START', (payload, from) => {
+    // ★ LOGIC-14 修复:GAME_START 只能由 host 权威发出
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hostSeat) return
     if (!isHost.value) {
       router.push('/game?roomNo=' + roomNo.value + '&role=joiner')
     }

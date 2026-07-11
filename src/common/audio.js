@@ -998,6 +998,22 @@ function sfxUrgentBeep() {
  * @param {string} type - guandan-engine 的 TYPE 常量
  * @param {number} [count] - 牌张数,可选(用于音高递增)
  */
+/**
+ * 炸弹中文语音播报(使用浏览器原生 speechSynthesis,无网络依赖)
+ * @param {string} text - 默认"炸弹",王炸可传"王炸"
+ */
+function speakBomb(text = '炸弹') {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  try {
+    const u = new window.SpeechSynthesisUtterance(text)
+    u.lang = 'zh-CN'
+    u.rate = 1
+    u.pitch = 1
+    u.volume = sfxVol * masterVol
+    window.speechSynthesis.speak(u)
+  } catch (e) { /* ignore */ }
+}
+
 function playSfxForType(type, count) {
   if (!sfxEnabled) return
   if (!type) {
@@ -1008,12 +1024,23 @@ function playSfxForType(type, count) {
   // ★ V049-05 修复:先 _shouldUseMp3 检测 failedSlots(pool 是否全坏),
   //   全坏时直接走 synth fallback,不浪费一次 playMp3Sfx 调用
   if (sfxMode === 'real' && _shouldUseMp3(type)) {
-    if (playMp3Sfx(type)) return  // MP3 播放成功,直接返回
+    if (playMp3Sfx(type)) {
+      // 炸弹/王炸额外播中文语音
+      if (type === 'JOKER_BOMB') speakBomb('王炸')
+      else if (type.startsWith('BOMB')) speakBomb('炸弹')
+      return
+    }
     // MP3 失败(sfxMode='real' 但文件不在/load 失败)→ 降级合成
   }
-  if (!ctx) return  // 合成路径需要 ctx
-  if (type === 'JOKER_BOMB') return sfxJokerBomb()
+  if (!ctx) {
+    // Node / 未解锁:仍尝试语音(测试路径)
+    if (type === 'JOKER_BOMB') speakBomb('王炸')
+    else if (typeof type === 'string' && type.startsWith('BOMB')) speakBomb('炸弹')
+    return
+  }
+  if (type === 'JOKER_BOMB') { speakBomb('王炸'); return sfxJokerBomb() }
   if (typeof type === 'string' && type.startsWith('BOMB')) {
+    speakBomb('炸弹')
     // BOMB_6+ 用 sfxSuperBomb
     if (type.length > 5) {
       const num = parseInt(type.replace('BOMB_', ''), 10)

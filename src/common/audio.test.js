@@ -350,5 +350,29 @@ console.log('\n=== 14. SFX audio pool:多实例轮询 + autoplay unlock retry ==
   else globalThis.window = origWindow
 }
 
+console.log('\n=== 15. 炸弹中文语音播报 ===')
+{
+  const origWindow = globalThis.window
+  const spoken = []
+  globalThis.window = {
+    speechSynthesis: {
+      speak(u) { spoken.push(u.text) }
+    },
+    SpeechSynthesisUtterance: function(text) {
+      this.text = text
+      this.lang = 'zh-CN'
+      this.rate = 1
+      this.pitch = 1
+      this.volume = 1
+    }
+  }
+  audio.setSfxEnabled(true)
+  audio.playSfxForType('BOMB_4')
+  assert('★ BOMB_4 触发语音"炸弹"', spoken.includes('炸弹'))
+  audio.playSfxForType('JOKER_BOMB')
+  assert('★ JOKER_BOMB 触发语音"王炸"', spoken.includes('王炸'))
+  globalThis.window = origWindow
+}
+
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
 if (fail > 0) process.exit(1)

@@ -6,7 +6,15 @@
 
 ## 当前任务记录
 
-- 2026-07-09：RoomView / GameView 大改版（方案 B）完成。RoomView 重构为信息卡 grid、弹窗二维码、角色色座位边框、统一 `app-btn-*` 按钮；同步修复 `room-ui.test.js` / `RoomView.test.js` 断言。GameView 侧重写 `MainActions.vue` / `PlayHintButton.vue` 为三级金色主题按钮，桌面端缩薄木质边框、扩大中央牌桌、手牌选中加金色下划线；移动端将智能理牌浮出为手牌区右上角入口，操作栏改为「不出 / 提示 / 出牌」三级按钮，放大桌面出牌区。`npm test` 45 套件 / 2156 case 全绿，`npm run build` 成功。
+- 2026-07-11：按 `guandan-p2p-vue3-UI修改建议.md` 推进 P0/P1 逻辑修复：
+  - LOGIC-04：`useGameLogic` 发牌超时重试不再本地 `initGame()` fork，P2P host 重发 `DEAL`，joiner 向 host 发 `STATE_REQUEST` 请求权威 snapshot；新增 `currentDealId`、`replaceGame`、`clearDealTimeout` 与 `onStateRequest`。
+  - LOGIC-08：`guandan-game.js` `applyPass` 一墩结束时识别 leader 是否已出完；若 leader inactive，剩余活跃玩家都 pass 后由对家/下一个活跃玩家接风，避免回合交给已出完玩家导致卡局。
+  - LOGIC-14：`network.js` 新增 `hostSeat`/`getHostSeat`，换座时同步更新；`RoomView` 对 `READY`/`SYNC`/`GAME_START` 增加权威来源校验；`useGameLogic` 中 `ROUND_END`/`STATE_SNAPSHOT`/`AI_TAKEOVER`/`MATCH_RESTART` 的 sender 校验改用 `net.getHostSeat()`。
+  - 构建修复：将 `index.html` 内联样式抽到 `src/styles/html.css` 并在 `main.js` 引入，解决 Vite 生产构建 `html-proxy` 模块错误；`GameViewMobile.vue` 移除与 `useGameLogic` 重复的 `showMenu` 声明。
+  - LOGIC-07（host 迁移不搬动座位/手牌）评估后涉及网络层 seat 映射、game `migrateHost` 语义及大量迁移测试改造，本次保留原有行为以保证测试基线，后续作为独立重构任务处理。
+  - `npm test` 全绿（EXIT 0），`npm run build` 成功。
+
+- 2026-07-09：修复 GameView 桌面端组件重叠问题：隐藏自座位面板（手牌已代表自己），降低操作栏到底部 168px 并加大行间距，主操作按钮允许换行，智能理牌胶囊与「清空」按钮不再压住 action 按钮；新增炸弹/王炸中文语音播报，通过 `window.speechSynthesis` 朗读「炸弹」/「王炸」，并补充 `audio.test.js` 语音 case。`npm test` / `npm run build` 双绿。
 - 2026-07-09：Plan C（彻底还清技术债）Phase 1 引擎/AI/game + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强全部完成。修复内容：鬼牌具象化 `materializeGhosts`、同花顺鬼牌 suit、`canFormWithGhosts` suit 修复；`chooseLead` 成组牌优先；`findMinBeat` 尊重 `ghostCount`；王炸对王炸不再误出；顺子/连对/钢板上限支持 A 高；三张 2 实牌+1 鬼；`findMinThreeStraight` 省鬼；`autoPlayGrouped` 鬼牌补顺子中间缺张；`findMinBeatHard` 修正 `TYPE.KINGS_BOMB` 与鬼牌判定；`nextRound`/`applyRoundEnd` 状态重置与 abandonedSeats 覆盖。网络层：transport.type 稳定字段、WebSocketTransport getHostIp、IPv6 URL 括号、reconnect 计数器复位、Android outbox 保留 msg.to、canHost/hostAddress 在 transport open 后刷新、relayFromClient 保留定向 to、SEAT_SWAP_ACK host 处理与 relay、graceful migration 旁观 peers 同步、selectNextHostCandidate 排除 finished/abandoned、_tickHeartbeatChecker 跳过被踢 seat、self:kicked 去重。UI 层：`useGameLogic` selfSeat 用 getter 替代闭包快照；`afterMatchRestartRefresh` 移除重复 `startDealAnimation`；`onP2PAITakeover` 延迟内重新读取 state；`GameViewDesktop` 补 `useRoute` 并把 `onHostLost` 提到 `onMounted` 外；`GameViewMobile` 补结算遮罩；`GameView.vue` isMobile 只判定一次防反复挂载；所有 setTimeout 统一生命周期清理；`HomeView.vue` kickedToast timer 清理。测试补强：新增 `src/common/network-phase2.test.js`（25 case）、`src/views/game/useGameLogic.test.js`（22 case）、`src/common/network-host-migration-consecutive.test.js`（20 case）。当前 `npm test` 45 套件 / 2156 case 全绿，`npm run build` 成功。
 - 2026-07-09：按 `guandan-p2p-vue3-UI修改建议.md` 完成 UI 第一阶段（P0 阻断 + 低风险快速优化）：修复 `SettingsView` 缺失 `aiDifficulty` ref 与未闭合根节点；修复 `JoinView` 标签换行并增加返回按钮、隐藏非 DEV「本机模拟」；修复 `MobileTablePreview` 横向溢出并增加竖屏提示；修复 AI 对局发牌偶发卡死（`finishDeal` 同步重试 + 超时弹窗）；`HomeView` 主按钮层级与宽度调整；`SettingsView` 分组卡片化、音乐风格网格化；`HistoryView` 空状态奖杯 + 引导按钮。`npm test` 与 `npm run build` 双绿。
 - 2026-06-28：当前主目录有 MiniMax 与 Codex 并发工作，用户要求改为 `git worktree` 隔离。Codex 已切到独立目录 `/Users/yangyuanhao/Downloads/guandan-p2p-vue3-codex`，分支 `codex/ui-mobile-joker-card-preview-isolated`，后续 UI 预览只在此目录完成。

@@ -39,6 +39,7 @@ let selfInfo = null
 let isHostFlag = false
 let roomId = ''
 let selfSeat = 0
+let hostSeat = 0
 let transport = null
 const peers = new Map()           // seat -> {nickname, avatar, uuid, ready, ...}
 
@@ -307,6 +308,7 @@ function getRoomId() { return roomId }
 function setRoomId(id) { roomId = id }
 function getSelfSeat() { return selfSeat }
 function setSelfSeat(i) { selfSeat = i }
+function getHostSeat() { return hostSeat }
 function isHost() { return isHostFlag }
 
 function sendMessage(msg) {
@@ -862,6 +864,7 @@ function startAsHost(self) {
   selfInfo = { ...self, uuid, canHost: false, hostAddress: null }
   isHostFlag = true
   selfSeat = 0
+  hostSeat = 0
   peers.set(0, { ...selfInfo })
 
   try {
@@ -908,6 +911,7 @@ function joinRoom(hostRoomId, self, opts) {
   selfInfo = { ...self, uuid, canHost: false, hostAddress: null }
   isHostFlag = false
   selfSeat = -1
+  hostSeat = 0
   // 兼容签名: hostRoomId 含 ':' 或 '[' 时解析为 ws host:port 形式 (Android Capacitor / IPv6 路径)
   // 不含 ':' 或解析失败时 → 当 BC 房间号 (浏览器路径)
   let parsedHostIp = (opts && opts.hostIp) || null
@@ -1181,6 +1185,7 @@ function close(opts = {}) {
   selfInfo = null
   isHostFlag = false
   selfSeat = 0
+  hostSeat = 0
   peers.clear()
   lastHeartbeat.clear()
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
@@ -1253,6 +1258,9 @@ function swapSeats(a, b) {
   // ★ 2) 如果 selfSeat 在 {a, b} 中,切换到另一个 seat
   if (selfSeat === a) selfSeat = b
   else if (selfSeat === b) selfSeat = a
+  // ★ LOGIC-14 修复:同步更新 hostSeat 权威座位
+  if (hostSeat === a) hostSeat = b
+  else if (hostSeat === b) hostSeat = a
   // ★ 3) 广播 SEAT_SWAP_ACK(走 RELAY_TYPES 让 WS host 能转发)
   //   注:SEAT_SWAP_ACK 不在 RELAY_TYPES 里 — 因为它需要由 host 主动发起,
   //   而 host 自己的 swapSeats 调 sendMessage broadcast 即可,joiner 端不需要
@@ -1284,6 +1292,8 @@ function _applySeatSwapLocal(a, b) {
   else peers.delete(a)
   if (selfSeat === a) selfSeat = b
   else if (selfSeat === b) selfSeat = a
+  if (hostSeat === a) hostSeat = b
+  else if (hostSeat === b) hostSeat = a
   emit('peer:seat_swap', { a, b, infoA: infoA || null, infoB: infoB || null })
 }
 
@@ -1839,7 +1849,7 @@ function _getTransportType() {
 export {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007:swapSeats 网络层权威 + kickPlayer 统一踢人协议
   swapSeats, kickPlayer,
@@ -1876,7 +1886,7 @@ export {
 const net = {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007
   swapSeats, kickPlayer,

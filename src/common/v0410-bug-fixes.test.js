@@ -112,8 +112,8 @@ console.log('\n=== 3. V0410-03: MATCH_RESTART 安全门禁 ===')
     !!onP2PMatchRestartMatch
   )
   if (onP2PMatchRestartMatch) {
-    assert('onP2PMatchRestart 含 from !== 0 sender authority 检查',
-      /typeof from === 'number' && from !== 0/.test(onP2PMatchRestartMatch[0])
+    assert('onP2PMatchRestart 含 sender authority 检查(against hostSeat)',
+      /typeof from === 'number' && from !== (?:0|hostSeat)/.test(onP2PMatchRestartMatch[0])
     )
     assert('onP2PMatchRestart 含 phase gate(st.phase === "finished")',
       /st0\.phase\s*!==\s*['"]finished['"]/.test(onP2PMatchRestartMatch[0])

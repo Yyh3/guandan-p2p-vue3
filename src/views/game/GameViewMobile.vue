@@ -165,14 +165,14 @@
         <h3 class="deal-timeout-title">发牌超时</h3>
         <p class="deal-timeout-hint">请检查房间连接后重试</p>
         <div class="deal-timeout-actions">
-          <button class="deal-timeout-btn ghost" @click="goHome">返回大厅</button>
+          <button class="deal-timeout-btn ghost" @click="exitGame">返回大厅</button>
           <button class="deal-timeout-btn primary" @click="retryDeal">重试</button>
         </div>
       </div>
     </div>
 
     <!-- ===== 6.5 结算遮罩 (mobile 版) ===== -->
-    <div v-if="phase === 'finished'" class="result-mask-mobile" @click.self="onPrimaryResultAction">
+    <div v-if="phase === 'finished'" class="result-mask-mobile">
       <div class="result-card-mobile">
         <h2 class="result-title-mobile">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
         <p class="result-meta-mobile" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
@@ -186,11 +186,11 @@
           >
             <span class="result-rank-mobile">{{ ['头游','二游','三游','末游'][i] }}</span>
             <span class="result-name-mobile">{{ playerName(seat) }}</span>
-            <span class="result-team-mobile">{{ i < 2 ? '🏆 胜方' : '💀 负方' }}</span>
+            <span class="result-team-mobile">{{ isWinningSeat(seat) ? '🏆 胜方' : '💀 负方' }}</span>
           </div>
         </div>
         <div class="result-actions-mobile">
-          <button class="r-btn-mobile ghost" @click="$emit('menu')">退出</button>
+          <button class="r-btn-mobile ghost" @click="exitGame">退出</button>
           <button class="r-btn-mobile primary" @click="onPrimaryResultAction">
             {{ isRestartAfterA ? '重开一局' : '下一局' }}
           </button>
@@ -201,7 +201,7 @@
     <!-- ===== 7. 手牌 28% (按 rank 分组竖叠,9 列 56px 宽) ===== -->
     <button
       class="smart-sort-float"
-      :disabled="myHand.length === 0"
+      :disabled="!myTurn || isDealing || phase !== 'playing' || myHand.length === 0"
       @click="onAutoFindBest"
       title="智能理牌 · 自动凑炸弹/顺子/三带二"
     >
@@ -334,9 +334,14 @@ import ChatQuickPanel from '@/components/ChatQuickPanel.vue'
 
 import { useGameLogic } from './useGameLogic.js'
 import { useRouter } from 'vue-router'
+import net from '@/common/network.js'
 
 const router = useRouter()
 function goHome() { router.push('/') }
+function exitGame() {
+  try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
+  router.replace('/')
+}
 
 // props: 跟 desktop 一样接 selfSeat / ghostRank / isP2PMode
 const props = defineProps({
@@ -345,6 +350,8 @@ const props = defineProps({
   isP2PMode: { type: Boolean, default: false },
   // ★ v0.4.9:AI 难度
   difficulty: { type: String, default: 'medium' },
+  // ★ LOGIC-01 修复:AI 页传入的起始级牌
+  initialLevelRank: { type: Number, default: undefined },
 })
 
 // 占位:给 useGameLogic 注入 mainActionsRef(虽然 mobile 不渲染桌面版 MainActions,
@@ -365,12 +372,12 @@ const {
   seatData, handColumns, selectedCount,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
-  playerName, cardKey, isHinted, isLevel, rankColor,
+  playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onPrimaryResultAction, onRestartMatch,
-  onIcon, showMenu, retryDeal,
+  onIcon, retryDeal,
 } = useGameLogic({
   mainActionsRef,
   selfSeat: props.selfSeat,
@@ -378,7 +385,11 @@ const {
   isP2PMode: props.isP2PMode,
   // ★ v0.4.9:透传 AI 难度
   difficulty: props.difficulty,
+  // ★ LOGIC-01 修复:AI 页传入的起始级牌
+  initialLevelRank: props.initialLevelRank,
 })
+
+function showMenu() { exitGame() }
 
 // 名字省略(对手 pill 用,最多 4 字)
 function truncateName(s) {

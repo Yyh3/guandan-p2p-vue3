@@ -77,8 +77,15 @@ export function useGameLogic(opts = {}) {
   const multiplier = ref(1)
   // ★ v0.4.9:AI 难度(从 game.state.difficulty 读,默认 'medium')
   const gameDifficulty = ref(opts.difficulty || 'medium')
+  // ★ LOGIC-01 修复:AI 页传入的起始级牌,若合法则作为默认 levelRank
+  if (opts.initialLevelRank != null && typeof opts.initialLevelRank === 'number') {
+    levelRank.value = opts.initialLevelRank
+    levelLabel.value = RANK_LABEL[levelRank.value] ?? '2'
+  }
   // ★ UI-P0-03 修复:发牌超时标志,用于 UI 兜底提示
   const dealTimeout = ref(false)
+  // ★ LOGIC-04 修复:当前 deal 标识,超时重试时避免本地 fork
+  const currentDealId = ref('')
 
   // 4 个玩家座位(0=下=自己, 1=左, 2=上=队友, 3=右)
   const players = ref([
@@ -196,14 +203,14 @@ export function useGameLogic(opts = {}) {
     const newHostSeat = payload.newHostSeat
     if (newHostSeat == null) return
     showHostMigrationToast({ isMyself, newHostSeat })
-    // ★ BUG-RC2-001 修复:host 迁移必须同时迁移 network / game / UI 三层状态。
-    //   之前 network 层把新 host 改成 seat 0 + isHostFlag=true,
-    //   但 game 层(手牌 / currentPlayer / lastPlay.who / trickHistory)
-    //   仍留在原 seat;UI 层 selfSeat / isNetworkHost / myHand 等没同步。
+    // ★ BUG-RC2-001 + LOGIC-07 修复:host 迁移只改权威,不搬动座位/手牌。
+    //   network 层保持新 host 原 seat 不变,isHostFlag=true;
+    //   game 层只把旧 host seat 标记 abandoned,currentPlayer 等指向新 host;
+    //   UI 层同步 selfSeat / isNetworkHost / myHand。
     //   修法:
     //   1) 同步 selfSeat.value / isNetworkHost.value 到 net 权威值
-    //   2) 调 game.migrateHost(0, newHostSeat) 让手牌 remap
-    //   3) applySnapshot 接 host 端权威完整 state(无 snapshot 时至少也要 migrate)
+    //   2) applySnapshot 接 host 端权威完整 state(seat 映射不变)
+    //   3) 调 game.migrateHost(0, newHostSeat) 把旧 host 标记弃赛、currentPlayer 交给新 host
     //   4) refreshUiFromGameState() 刷 UI refs
     try {
       // 1) 同步 useGameLogic 内部状态
@@ -211,16 +218,12 @@ export function useGameLogic(opts = {}) {
       selfSeat.value = netSelfSeat
       const netIsHost = (() => { try { return !!net.isHost && net.isHost() } catch { return false } })()
       isNetworkHost.value = netIsHost
-      // ★ BUG-RC3-002 修复(2026-06-28):顺序改为「先 applySnapshot 再 migrateHost」。
-      //   payload.snapshot 是 joiner 端在迁移前从 game.getState() 取的(seat 映射 = 旧)。
-      //   旧顺序 migrateHost → applySnapshot 会把刚搬好的 hands[0](新 host) 用
-      //   snapshot.hands[0](旧 host 手牌)覆盖回去,导致新 host 看到错误手牌。
-      // 2) 先 applySnapshot — 把 state 恢复到"迁移前"完整状态(seat 映射 = 旧)
+      // 2) 先 applySnapshot — 把 state 恢复到"迁移前"完整状态(seat 映射 = 不变)
       if (game.value && payload.snapshot) {
         if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
         else if (game.value._applySnapshot) game.value._applySnapshot(payload.snapshot)
       }
-      // 3) 再 migrateHost — 把 hands[newHostSeat] 搬到 hands[0],currentPlayer/abandonedSeats 重映射
+      // 3) 再 migrateHost — 旧 host(seat 0) 标记 abandoned,新 host 保持原 seat
       if (game.value && game.value.migrateHost) {
         game.value.migrateHost(0, newHostSeat)
       }
@@ -387,6 +390,14 @@ export function useGameLogic(opts = {}) {
   function isHinted(c) { return hintCards.value.includes(cardKey(c)) }
   function isLevel(c) { return E.isLevelCard(c, levelRank.value) }
   function rankColor(i) { return ['gold', 'silver', 'bronze', 'last'][i] }
+  // ★ HCI-04 修复:以头游所在队伍为胜方,而不是简单前两名
+  const winningTeam = computed(() => {
+    const headSeat = finishedOrder.value?.[0]
+    return Number.isInteger(headSeat) ? headSeat % 2 : null
+  })
+  function isWinningSeat(seat) {
+    return winningTeam.value !== null && seat % 2 === winningTeam.value
+  }
 
   // v3-2:按 rank 分组竖叠
   const handColumns = computed(() => E.groupHandByRank(myHand.value))
@@ -478,6 +489,12 @@ export function useGameLogic(opts = {}) {
   }
 
   let dealTimeoutId = null
+  function clearDealTimeout() {
+    if (dealTimeoutId) {
+      clearTimeout(dealTimeoutId)
+      dealTimeoutId = null
+    }
+  }
   function startDealAnimation() {
     isDealing.value = true
     dealTimeout.value = false
@@ -579,6 +596,7 @@ export function useGameLogic(opts = {}) {
   function initGame(opts2 = {}) {
     const isP2P = opts2.isP2P === true
     const seed = opts2.seed
+    currentDealId.value = String(seed ?? Date.now())
     // ★ Phase3 UI 修复:用 getter 替代常量快照,selfSeat 在 host 迁移后会变,
     //   旧常量 me 在事件监听器里不会更新,导致 turn/play 等事件按旧 seat 处理。
     // ★ P2-01:getMe 回退到 0 当 selfSeat 非法,避免 players[-1]
@@ -794,32 +812,13 @@ function commitPass(seat, source = 'manual') {
   return r
 }
 
-function onAutoFindBest() {
-    if (!myTurn.value) return
-    const diff = gameDifficulty.value  // ★ v0.4.9:从 game state 取 difficulty 透传给 AI
-    const r = AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
-    if (r?.type === 'play' && Array.isArray(r.cards) && r.cards.length > 0) {
-      const cards = r.cards
-      const remove = new Set(cards.map(c => cardKey(c)))
-      const actual = myHand.value.filter(c => remove.has(cardKey(c)))
-      if (actual.length === cards.length) {
-        // ★ BUG-003:走 commitPlay 统一广播
-        const pr = commitPlay(selfSeat.value, actual, 'auto')
-        if (!pr.ok) alert(pr.error || '出牌失败')
-      } else {
-        alert('无可出的牌型组合')
-      }
-    } else if (lastPlay.value) {
-      // ★ BUG-003:走 commitPass 统一广播
-      commitPass(selfSeat.value, 'auto')
-    } else {
-      const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-      // ★ BUG-003:走 commitPlay 统一广播
-      commitPlay(selfSeat.value, [sorted[0]], 'auto')
-    }
-    hintCards.value = []
-    mainActionsRef.value?.setShowing(false)
-    selectedColKeys.value = {}
+  /**
+   * ★ HCI-05 修复:"智能理牌"只选出推荐牌,不替用户出牌/过牌
+   * 行为改为:用 AI 算当前局面最佳出牌,把对应列高亮选中,等用户点"出牌"确认。
+   */
+  function onAutoFindBest() {
+    if (!myTurn.value || isDealing.value || phase.value !== 'playing' || myHand.value.length === 0) return
+    onHintToggle(true)
   }
 
   function onSuitTab(suit) {
@@ -1043,6 +1042,7 @@ function onAutoFindBest() {
 
   function onP2PDeal(payload, from, msg) {
     if (!payload || payload.seed == null) return
+    currentDealId.value = String(payload.dealId ?? payload.seed ?? Date.now())
     // ★ GD-RC-001 修复:网络 host 跳过(自己发的),用 isNetworkHost 判定
     if (isNetworkHost.value) return
     // ★ v0.4.13 对抗性审查 (P0-3):清理旧 game 实例,避免旧 scheduleAI 的 setTimeout
@@ -1113,10 +1113,10 @@ function onAutoFindBest() {
   function onP2PMatchRestart(payload, from, msg) {
     if (!payload || !game.value) return
     if (!game.value.restartMatch) return
-    // ★ V0410-03 修复:sender authority 检查 — 只有当前权威 host(seat 0)发出的
+    // ★ V0410-03 修复:sender authority 检查 — 只有当前权威 host 发出的
     //   MATCH_RESTART 才被接受,防 joiner 恶意/异常发包强制洗牌
-    //   消息 from 是网络层 emit 时附带的发送方 seat,网络 host 始终在 seat 0
-    if (typeof from === 'number' && from !== 0) return
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (typeof from === 'number' && from !== hostSeat) return
     // ★ V0410-03 修复:phase gate — 只有当前 phase=finished 且 isRestartAfterA=true
     //   才允许执行重开,防正常牌局中途收到旧 MATCH_RESTART 包被误清空
     try {
@@ -1150,8 +1150,9 @@ function onAutoFindBest() {
   let suppressRoundEndBroadcast = false
   function onP2PRoundEnd(payload, from) {
     if (!payload || !game.value) return
-    // ★ P0-02:ROUND_END 只能由 host(seat 0) 发出
-    if (from !== 0) return
+    // ★ P0-02:ROUND_END 只能由 host 权威发出
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hostSeat) return
     // roundId 去重:host 重传同一 ROUND_END 时跳过外层 UI 同步
     if (payload.roundId != null && _lastAppliedRoundEndId === payload.roundId) {
       return
@@ -1195,8 +1196,9 @@ function onAutoFindBest() {
   //   joiner 收到后判断 targetSeat === selfSeat 才应用,避免非目标 joiner 也被覆盖
   function onP2PStateSnapshot(payload, from) {
     if (!payload || !game.value || !payload.snapshot) return
-    // ★ P0-02:STATE_SNAPSHOT 只能由 host(seat 0) 发出
-    if (from !== 0) return
+    // ★ P0-02:STATE_SNAPSHOT 只能由 host 权威发出
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hostSeat) return
     // 旧版本(无 targetSeat 字段)是 broadcast,所有非发送方都应用;新版本定向
     // 旧字段 payload.seat 仍兼容:payload.seat 是发送方 seat,跳过自己
     if (payload.targetSeat != null) {
@@ -1287,9 +1289,10 @@ function onAutoFindBest() {
 
   function onP2PAITakeover(payload, from) {
     if (!payload || !game.value) return
-    // ★ P0-02:网络 AI_TAKEOVER 消息只能由 host(seat 0) 发出;
+    // ★ P0-02:网络 AI_TAKEOVER 消息只能由 host 权威发出;
     //   本地 'ai:takeover' 事件不携带 from,允许通过。
-    if (typeof from === 'number' && from !== 0) return
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (typeof from === 'number' && from !== hostSeat) return
     const seat = payload.seat
     if (typeof seat !== 'number') return
     if (game.value.addAIPlayer) game.value.addAIPlayer(seat)
@@ -1346,6 +1349,25 @@ function onAutoFindBest() {
     }
   }
 
+  // ★ LOGIC-04 修复:host 端响应 joiner 的 STATE_REQUEST,发送权威 snapshot
+  function onStateRequest(payload, from) {
+    if (!isNetworkHost.value) return
+    if (!game.value || !game.value.getState) return
+    if (!payload) return
+    // 可选:校验 dealId 匹配,避免应用旧局快照
+    const reqDealId = payload.dealId
+    if (reqDealId != null && reqDealId !== currentDealId.value) {
+      // dealId 不匹配也发当前快照(可能是新请求到达前已换局)
+    }
+    try {
+      const st = game.value.getState()
+      net.sendTo && net.sendTo(from, {
+        type: 'STATE_SNAPSHOT',
+        payload: { targetSeat: from, snapshot: st },
+      })
+    } catch (e) { console.warn('STATE_REQUEST response failed', e) }
+  }
+
   // ===== 生命周期 =====
   onMounted(() => {
     selfSeat.value = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
@@ -1379,6 +1401,7 @@ function onAutoFindBest() {
       //   onP2PAITakeover(),掉线玩家轮到出牌时 host 不会让 AI 接管 → 牌局卡住
       //   修法:同时监听本地 'ai:takeover' 事件
       onNet('ai:takeover', onP2PAITakeover)
+      onNet('message:STATE_REQUEST', onStateRequest)
       onNet('host:migrated', onHostMigrated)
       // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 'host:lost' — host 崩溃/断电
       //   业务事件(V0416-04 修复:网络层 _DISCONNECT payload.seat=-1 自动 emit),
@@ -1448,6 +1471,47 @@ function onAutoFindBest() {
     game.value = null
   })
 
+  // ★ LOGIC-04 / LOGIC-12 修复:统一替换 game 实例,先清理旧实例
+  function replaceGame(createFn) {
+    clearDealTimeout()
+    if (game.value && typeof game.value.destroy === 'function') {
+      try { game.value.destroy() } catch (e) {}
+    }
+    game.value = createFn()
+  }
+
+  // ★ LOGIC-04 修复:发牌超时重试不再本地 fork
+  function retryDeal() {
+    dealTimeout.value = false
+    if (isP2PMode.value) {
+      if (isNetworkHost.value) {
+        // host:重发当前 DEAL,让 joiner 用同一 seed 重新初始化
+        const st = game.value && game.value.getState ? game.value.getState() : null
+        const seed = st?.seed ?? (currentDealId.value ? Number(currentDealId.value) : null) ?? _newRestartSeed()
+        const dealId = currentDealId.value || String(seed)
+        try {
+          net.broadcast({ type: 'DEAL', payload: { seed, levelRank: levelRank.value, dealId } })
+        } catch (e) { console.warn('host retry DEAL failed', e) }
+      } else {
+        // joiner:向 host 请求权威 state,不本地重新发牌
+        try {
+          net.send({ type: 'STATE_REQUEST', payload: { reason: 'deal_timeout', dealId: currentDealId.value, seat: selfSeat.value } })
+        } catch (e) { console.warn('STATE_REQUEST failed', e) }
+      }
+      return
+    }
+    // 单机 / AI 模式:销毁旧实例后重新发牌
+    replaceGame(() => createGame({
+      seats: 4,
+      levelRank: levelRank.value,
+      aiPlayers,
+      seed: _newRestartSeed(),
+      difficulty: gameDifficulty.value,
+    }))
+    initGame()
+  }
+
+
   // ===== 导出(组件层需要的全部 reactive / computed / methods) =====
   return {
     // state
@@ -1464,8 +1528,9 @@ function onAutoFindBest() {
     seatData, handColumns, selectedCount,
     // methods
     showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
-    retryDeal: () => { dealTimeout.value = false; initGame() },
+    retryDeal,
     playerName, formatCoins, cardKey, handCardKey, isHinted, isLevel, rankColor,
+    isWinningSeat,
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, onClear,
     selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,

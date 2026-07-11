@@ -137,7 +137,7 @@
           <div class="auto-find-pill">
             <button
               class="auto-find-btn"
-              :disabled="isDealing || myHand.length === 0"
+              :disabled="isDealing || !myTurn || phase !== 'playing' || myHand.length === 0"
               @click="onAutoFindBest"
               title="智能理牌 · 自动凑炸弹/顺子/三带二"
             >
@@ -152,7 +152,7 @@
     </div>
 
     <!-- 结算遮罩 -->
-    <div v-if="phase === 'finished'" class="result-mask" @click.self="onPrimaryResultAction">
+    <div v-if="phase === 'finished'" class="result-mask">
       <div class="result-card">
         <h2 class="result-title">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
         <p class="result-meta" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
@@ -166,7 +166,7 @@
           >
             <span class="result-rank">{{ ['头游', '二游', '三游', '末游'][i] }}</span>
             <span class="result-name">{{ playerName(seat) }}</span>
-            <span class="result-team">{{ i < 2 ? '🏆 胜方' : '💀 负方' }}</span>
+            <span class="result-team">{{ isWinningSeat(seat) ? '🏆 胜方' : '💀 负方' }}</span>
           </div>
         </div>
         <div class="result-actions">
@@ -256,6 +256,8 @@ const props = defineProps({
   isP2PMode: { type: Boolean, default: false },
   // ★ v0.4.9:AI 难度
   difficulty: { type: String, default: 'medium' },
+  // ★ LOGIC-01 修复:AI 页传入的起始级牌
+  initialLevelRank: { type: Number, default: undefined },
 })
 
 // v2.4 task 1:纯逻辑抽到 useGameLogic.js composable
@@ -344,13 +346,13 @@ const {
   isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
-  isP2PMode, selfSeat, game,
+  isP2PMode, selfSeat, game, isNetworkHost,
   // computed
   myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
   seatData, handColumns, selectedCount,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
-  playerName, cardKey, isHinted, isLevel, rankColor,
+  playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
@@ -363,19 +365,25 @@ const {
   isP2PMode: props.isP2PMode,
   // ★ v0.4.9:透传 AI 难度(从 URL query 读)
   difficulty: props.difficulty,
+  // ★ LOGIC-01 修复:AI 页传入的起始级牌
+  initialLevelRank: props.initialLevelRank,
 })
 
 // 路由相关的 UI 跳转(只能组件层做)
-function onBack() { router.push('/') }
-function goHome() { router.push('/') }
+function exitGame() {
+  try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
+  router.replace('/')
+}
+function onBack() { exitGame() }
+function goHome() { exitGame() }
 function showMenu() {
   if (!confirm('退出对局?')) return
-  // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,把对局让给队友(seat 2)
+  // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,先把对局让给队友(seat 2)
   //   之前 host 直接关掉 net → joiner 端走兜底(6-8s 心跳超时感知 host 掉线),
   //   现在 host 主动调 requestHostMigration 把当前 game state 传给新 host,
   //   joiner 端实时收到 host:migrated 事件,牌局无缝继续。
-  //   仅当:isP2P 模式 + host(selfSeat=0) + 对局进行中(phase=playing/dealing/trick_end)
-  if (isP2PMode.value && selfSeat.value === 0 && game.value) {
+  //   仅当:isP2P 模式 + 本机是网络 host + 对局进行中
+  if (isP2PMode.value && isNetworkHost.value && game.value) {
     const st = game.value.getState()
     if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
       const snapshot = {
@@ -389,7 +397,7 @@ function showMenu() {
       try { net.requestHostMigration && net.requestHostMigration(2, snapshot) } catch (e) { /* swallow */ }
     }
   }
-  router.push('/')
+  exitGame()
 }
 // NicknameEditor 用 — 仅占位保留挂载点(永远 false,见 template v-if="false")
 function onNickEditorConfirmed(p) {
@@ -897,11 +905,11 @@ function onNickEditorConfirmed(p) {
 /* 底部主操作栏容器 */
 .action-bar-wrap {
   position: fixed;
-  left: 0; right: 0; bottom: 220px;  /* v3-4:从 130 改 220,提到手牌区上方留 16px 间隙,不再盖住手牌 */
+  left: 0; right: 0; bottom: 168px;  /* v4.x:降到手牌区上方,不再跟中央牌桌重叠 */
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
   z-index: 7;
 }
 
@@ -913,6 +921,8 @@ function onNickEditorConfirmed(p) {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
 }
 .auto-find-btn {
   display: flex;
@@ -953,16 +963,9 @@ function onNickEditorConfirmed(p) {
   line-height: 1;
 }
 
-/* v3-5:self 座位面板从中央(bottom 380)改到右下角,让出中央牌桌空间,避免跟椭圆牌桌下半圆视觉重叠 */
-/* v3.6:self 座位右下角 → 右中(避开中央操作栏 / 一键理牌 / 手牌) */
-/* v3.7:user 决策 C — 改回"中下(操作栏上方)居中" */
-/*    操作栏 bottom: 220px,自座位移到操作栏上方 100px 处,bottom: 380 不变,但居中 */
+/* v4.x:桌面端隐藏自座位面板 — 手牌已代表自己,避免跟中央牌桌/操作栏重叠 */
 :deep(.seat-bottom) {
-  bottom: 380px;  /* 操作栏正上方 ~100px,避开 .auto-find-pill / .action-bar / .hand-area */
-  left: 50%;                              /* v3.7:居中显示 */
-  transform: translateX(-50%);            /* v3.7:水平居中补偿 */
-  right: auto;                            /* v3.7:取消右偏移,改居中 */
-  z-index: 8;     /* 提到 hand-area(5) 之上,不被手牌遮 */
+  display: none;
 }
 @media (max-width: 768px) {
   /* v3-5 移动端 self 座位:
@@ -973,6 +976,7 @@ function onNickEditorConfirmed(p) {
    *         会盖掉这里的 scale(0.4),所以必须 animation: none 一并关掉。
    */
   :deep(.seat-bottom) {
+    display: block;
     top: 60px;     /* icon 行(top 12, 36 高)下方,留 12px 间隙 */
     right: 8px;
     bottom: auto;
@@ -986,6 +990,7 @@ function onNickEditorConfirmed(p) {
   gap: 8px;
   justify-content: center;
   padding: 0 16px;
+  margin-top: -4px;
 }
 .sub-btn {
   background: var(--mask-dark);
