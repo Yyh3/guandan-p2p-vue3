@@ -595,46 +595,52 @@ function applyPlay(seat, cards, hand, rec) {
       return this._applySnapshot(snap)
     },
     // ★ GD-RC-003:权威结算 — 接 host 发的完整 payload,不去读本地 state 重新算
+    // ★ P0-07 修复:先完整校验 payload,校验通过后再原子提交并记录去重 ID,
+    //   防止畸形 ROUND_END 先占用 lastAppliedRoundId 导致后续正确结算被跳过。
     applyRoundEndFromPayload(p) {
       const alive = ensureAlive(); if (alive) return alive
-      if (!p) return
+      if (!p || typeof p !== 'object') return { ok: false, error: 'invalid_payload' }
       const rid = p.roundId
-      // 同一 roundId 已应用过则跳过(去重)
-      if (rid != null) {
-        if (state.lastAppliedRoundId === rid) return
-        state.lastAppliedRoundId = rid
+
+      // 1) 完整校验 payload(校验阶段不动 state)
+      if (!Array.isArray(p.ranks) || p.ranks.length !== 4) {
+        return { ok: false, error: 'invalid_ranks' }
       }
-      if (Array.isArray(p.ranks) && p.ranks.length === 4) {
-        // 末位补齐(防御)
-        const ranks = p.ranks.slice()
-        state.finishedOrder = ranks
+      const ranksSet = new Set(p.ranks)
+      if (ranksSet.size !== 4 || ![...ranksSet].every(s => s >= 0 && s <= 3)) {
+        return { ok: false, error: 'invalid_ranks' }
       }
-      if (typeof p.levelUp === 'number') state.levelUp = p.levelUp
-      if (typeof p.newLevelRank === 'number') state.levelRank = p.newLevelRank
-      // ★ BUG-RC2-005 修复:nullable 字段用 'in' 判断,支持清空到 null
-      //   旧版 if (p.tribute) 在 tribute=null 时不更新,残留上一局的 tribute 对象
+      if (typeof p.levelUp !== 'number') return { ok: false, error: 'invalid_levelUp' }
+      if (typeof p.newLevelRank !== 'number') return { ok: false, error: 'invalid_newLevelRank' }
+      if ('round' in p && typeof p.round !== 'number') return { ok: false, error: 'invalid_round' }
+      if (Array.isArray(p.teamLevels) && (p.teamLevels.length !== 2 || !p.teamLevels.every(t => typeof t === 'number'))) {
+        return { ok: false, error: 'invalid_teamLevels' }
+      }
+
+      // 2) 去重检查(在校验之后,避免畸形包污染去重 ID)
+      if (rid != null && state.lastAppliedRoundId === rid) {
+        return { ok: true, duplicate: true }
+      }
+
+      // 3) 原子提交
+      state.finishedOrder = p.ranks.slice()
+      state.levelUp = p.levelUp
+      state.levelRank = p.newLevelRank
       if ('tribute' in p) state.tribute = p.tribute
-      if (Array.isArray(p.teamLevels) && p.teamLevels.length === 2) {
-        state.teamLevels = p.teamLevels.slice()
-      }
-      state.phase = 'finished'
-      // round 不在此处自增(round++ 在 host 端的 applyRoundEnd 走),权威语义:
-      // host 端本地 round 已经走完一轮并 round++,joiner 端只接收结果
+      if (Array.isArray(p.teamLevels)) state.teamLevels = p.teamLevels.slice()
       if (typeof p.round === 'number') state.round = p.round
-      // ★ v0.4.9:isRestartAfterA — host 权威计算(joiner 不重复推断)
-      //   payload.isRestartAfterA 缺失时:回退到 host 已经写在 state.levelUp /
-      //   levelRank 上的值(快照已经应用过),但更稳的判断是
-      //   previousLevelRank + levelUp 都在 payload 里(都要在 p 里)
+      state.phase = 'finished'
+
       const isRestart = typeof p.isRestartAfterA === 'boolean'
         ? p.isRestartAfterA
         : (typeof p.previousLevelRank === 'number' && typeof p.levelUp === 'number'
             && p.previousLevelRank === 14 && p.levelUp > 0)
-      // ★ V0410-02 修复:写回 state.isRestartAfterA + state.previousLevelRank
-      //   旧版只 emit roundEnd,state 没写 → refreshUiFromGameState 读 st.isRestartAfterA
-      //   还是旧值(false) → UI / snapshot / host 迁移后过 A 状态会回退。
-      //   现在写回 state 保证后续 getState() / snapshot / refresh 都拿到权威值。
       state.isRestartAfterA = isRestart
       state.previousLevelRank = (typeof p.previousLevelRank === 'number') ? p.previousLevelRank : null
+
+      // 4) 提交成功后再记录去重 ID
+      if (rid != null) state.lastAppliedRoundId = rid
+
       emit('roundEnd', {
         ranks: state.finishedOrder.slice(),
         levelUp: state.levelUp,
@@ -643,8 +649,9 @@ function applyPlay(seat, cards, hand, rec) {
         newLevelRank: state.levelRank,
         teamLevels: state.teamLevels.slice(),
         roundId: rid,
-        isRestartAfterA: isRestart,  // ★ v0.4.9
+        isRestartAfterA: isRestart,
       })
+      return { ok: true }
     },
     // ★ v3.8 P1:运行时把某 seat 加入 AI 列表(断线接管)
     addAIPlayer(seat) {
@@ -798,61 +805,105 @@ state.trickHistory = state.trickHistory.map(h => {
     // ★ v3.8 P1:断线重连用,joiner 收到 host 的 STATE_SNAPSHOT 后灌回 state
     // _ 开头为内部 API,使用方:GameView 的 onP2PStateSnapshot
     // v3.x P2-26 修复:加关键字段 sanity check,畸形数据(99 / 空 hands)不再裸赋值
+    // ★ P0-06 修复:snapshot 必须先完整校验并生成临时对象,最后一次性原子提交,
+    //   任何字段非法都不能留下"应用一半"的损坏状态。
     _applySnapshot(snap) {
-      if (!snap) return
+      if (!snap || typeof snap !== 'object') return
       const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
       const validPhase = ['idle', 'dealing', 'playing', 'trick_end', 'finished']
-      if (snap.hands) {
-        if (!Array.isArray(snap.hands) || snap.hands.length !== 4) return  // 畸形 hands 拒收
-        state.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
+
+      // 先把所有要应用的字段校验并克隆到 next,最后一次性 Object.assign(state, next)
+      const next = {}
+
+      if ('hands' in snap) {
+        if (!Array.isArray(snap.hands) || snap.hands.length !== 4) return
+        next.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
       }
-      if (snap.tableCards) state.tableCards = snap.tableCards.slice()
-      if ('lastPlay' in snap) state.lastPlay = snap.lastPlay
-      if (isValidSeat(snap.currentPlayer)) state.currentPlayer = snap.currentPlayer
-      if (isValidSeat(snap.firstPlayer)) state.firstPlayer = snap.firstPlayer
-      if (isValidSeat(snap.leaderPlayer)) state.leaderPlayer = snap.leaderPlayer
-      if (snap.trickHistory) state.trickHistory = snap.trickHistory.slice()
-      // ★ v0.4.9:difficulty 字段同步(默认值 'medium' 兜底)
-      if ('difficulty' in snap && (snap.difficulty === 'medium' || snap.difficulty === 'hard')) {
-        state.difficulty = snap.difficulty
+      if ('tableCards' in snap) {
+        if (!Array.isArray(snap.tableCards)) return
+        next.tableCards = snap.tableCards.slice()
       }
-      if (snap.finishedOrder) {
-        // finishedOrder 必须是 0..3 的子集
-        const ok = Array.isArray(snap.finishedOrder) && snap.finishedOrder.every(s => isValidSeat(s))
-        if (ok) state.finishedOrder = snap.finishedOrder.slice()
+      if ('lastPlay' in snap) next.lastPlay = snap.lastPlay
+
+      if ('currentPlayer' in snap) {
+        if (!isValidSeat(snap.currentPlayer)) return
+        next.currentPlayer = snap.currentPlayer
       }
-      // v3.x P2-30 修复(2):snapshot 应用 abandonedSeats(支持 P2P 同步 host 迁移)
-      if (Array.isArray(snap.abandonedSeats) && snap.abandonedSeats.every(s => isValidSeat(s))) {
-        state.abandonedSeats = snap.abandonedSeats.slice()
+      if ('firstPlayer' in snap) {
+        if (!isValidSeat(snap.firstPlayer)) return
+        next.firstPlayer = snap.firstPlayer
       }
-      if (typeof snap.passCount === 'number') state.passCount = snap.passCount
-      // ★ BUG-RC2-005 修复:nullable 字段用 'in' 判断,支持清空到 null
-      //   旧版 if (snap.tribute) / if (snap.ghost) 在字段为 null 时不更新,
-      //   残留旧值;新规则:snapshot 含字段就应用(含 null 表示清空)
-      if ('tribute' in snap) state.tribute = snap.tribute
-      if ('ghost' in snap) state.ghost = snap.ghost
-      if (typeof snap.levelUp === 'number') state.levelUp = snap.levelUp
-      if (typeof snap.levelRank === 'number') state.levelRank = snap.levelRank
-    if (Array.isArray(snap.teamLevels) && snap.teamLevels.length === 2) {
-      const tl = snap.teamLevels
-      if (tl.every(t => typeof t === 'number')) state.teamLevels = tl.slice()
-    }
-      if (typeof snap.round === 'number') state.round = snap.round
-      if (snap.phase && validPhase.includes(snap.phase)) state.phase = snap.phase
-      // ★ v0.4.14 对抗性审查 (V0412-04):补齐 _applySnapshot 缺字段
-      //   旧版只 apply 了基础字段,isRestartAfterA / previousLevelRank /
-      //   lastAppliedRoundId 没处理 → snapshot 同步时丢掉过 A 标志、上一局级牌、
-      //   ROUND_END 去重 id,refreshUiFromGameState 拿到旧值,UI 退回"下一局"文案
-      if (typeof snap.isRestartAfterA === 'boolean') state.isRestartAfterA = snap.isRestartAfterA
-      if (typeof snap.previousLevelRank === 'number') state.previousLevelRank = snap.previousLevelRank
-      // lastAppliedRoundId 是 string 或 null(从未应用过),用 'in' 判字段存在
-      // ★ v0.4.15 边缘防御:仅挡 undefined(防 manual snap.lastAppliedRoundId = undefined
-      //   污染 state),保留 null 清空语义(JSON.parse 序列化会自动丢 undefined 字段,
-      //   但显式赋值 undefined 仍可能触发)。
+      if ('leaderPlayer' in snap) {
+        if (!isValidSeat(snap.leaderPlayer)) return
+        next.leaderPlayer = snap.leaderPlayer
+      }
+      if ('trickHistory' in snap) {
+        if (!Array.isArray(snap.trickHistory)) return
+        next.trickHistory = snap.trickHistory.slice()
+      }
+      if ('difficulty' in snap) {
+        if (!['easy', 'medium', 'hard'].includes(snap.difficulty)) return
+        next.difficulty = snap.difficulty
+      }
+      if ('finishedOrder' in snap) {
+        if (!Array.isArray(snap.finishedOrder) ||
+            !snap.finishedOrder.every(s => isValidSeat(s))) return
+        next.finishedOrder = snap.finishedOrder.slice()
+      }
+      if ('abandonedSeats' in snap) {
+        if (!Array.isArray(snap.abandonedSeats) ||
+            !snap.abandonedSeats.every(s => isValidSeat(s))) return
+        next.abandonedSeats = snap.abandonedSeats.slice()
+      }
+
+      // 计算应用后的 finished/abandoned,检查二者不重叠且 currentPlayer 不在其中
+      const finalFinished = next.finishedOrder ?? state.finishedOrder
+      const finalAbandoned = next.abandonedSeats ?? state.abandonedSeats
+      if (finalFinished.some(s => finalAbandoned.includes(s))) return
+      const finalCurrentPlayer = ('currentPlayer' in next) ? next.currentPlayer : state.currentPlayer
+      if (finalFinished.includes(finalCurrentPlayer) || finalAbandoned.includes(finalCurrentPlayer)) return
+
+      if ('passCount' in snap) {
+        if (typeof snap.passCount !== 'number' || snap.passCount < 0 || snap.passCount > 3) return
+        next.passCount = snap.passCount
+      }
+      if ('round' in snap) {
+        if (typeof snap.round !== 'number' || snap.round < 1) return
+        next.round = snap.round
+      }
+      if ('phase' in snap) {
+        if (!validPhase.includes(snap.phase)) return
+        next.phase = snap.phase
+      }
+      if ('levelUp' in snap) {
+        if (typeof snap.levelUp !== 'number') return
+        next.levelUp = snap.levelUp
+      }
+      if ('levelRank' in snap) {
+        if (typeof snap.levelRank !== 'number') return
+        next.levelRank = snap.levelRank
+      }
+      if ('teamLevels' in snap) {
+        if (!Array.isArray(snap.teamLevels) || snap.teamLevels.length !== 2 ||
+            !snap.teamLevels.every(t => typeof t === 'number')) return
+        next.teamLevels = snap.teamLevels.slice()
+      }
+      if ('tribute' in snap) next.tribute = snap.tribute
+      if ('ghost' in snap) next.ghost = snap.ghost
+      if ('isRestartAfterA' in snap) {
+        if (typeof snap.isRestartAfterA !== 'boolean') return
+        next.isRestartAfterA = snap.isRestartAfterA
+      }
+      if ('previousLevelRank' in snap) {
+        if (snap.previousLevelRank !== null && typeof snap.previousLevelRank !== 'number') return
+        next.previousLevelRank = snap.previousLevelRank
+      }
       if ('lastAppliedRoundId' in snap && snap.lastAppliedRoundId !== undefined) {
-        state.lastAppliedRoundId = snap.lastAppliedRoundId
+        next.lastAppliedRoundId = snap.lastAppliedRoundId
       }
-      // 同步发 turn 事件让 UI 重新渲染
+
+      // 原子提交:所有字段一次性写回 state
+      Object.assign(state, next)
       emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
     },
   }

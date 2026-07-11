@@ -16,6 +16,7 @@
 - 2026-06-28 反馈：背景顶部不能露出完整桌面上沿；桌面椭圆需整体上移到屏幕外，只保留下半个牌桌弧线和侧边暗角。
 - 2026-06-28：用户要求将项目每个页面 UI 统一美化为类似参考图的主题和颜色；本次只做视觉层与演示页，不改真实掼蛋规则 / 联机状态机。新增全局 `src/styles/app-theme.css`，所有路由统一引入蓝紫半牌桌背景、玻璃面板、金色主按钮方向。
 - 2026-06-28：新增静态演示路由 `/#/ui-preview/restart-after-a`，用于展示“完成对局过 A 后显示「重开一局」按钮”的目标 UI；真实逻辑交给 MiniMax 根据 `docs/restart-after-a-flow.md` 接入。
+- 2026-07-09：修复 v0421 对抗性审查 P0-06（`_applySnapshot` 原子提交）并补 P0-07 回归测试，新增 `src/common/v0422-adversarial-fixes.test.js`，`npm test` / `npm run build` 双绿。
 
 ## 项目说明
 
