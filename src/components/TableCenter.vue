@@ -140,12 +140,12 @@ function stackStyle(i) {
 .table-center-wrap {
   position: relative;
   width: 100%;
-  height: 360px;
+  height: 460px;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 4;
-  margin-top: 180px;
+  margin-top: 140px;
   pointer-events: none;
 }
 
@@ -161,20 +161,20 @@ function stackStyle(i) {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 95%;
-  max-width: 720px;
-  height: 80%;
+  width: 96%;
+  max-width: 960px;
+  height: 88%;
   border-radius: 50%;
   box-shadow:
     inset 0 0 40px rgba(0, 0, 0, 0.7),
     inset 0 0 80px rgba(74, 25, 130, 0.35),
     inset 0 0 120px rgba(10, 18, 51, 0.5),
-    inset 0 0 0 4px #a0683a,
-    inset 0 0 0 6px #8B5A2B,
-    inset 0 0 0 8px #6b3f1d,
-    inset 0 0 0 10px rgba(0, 0, 0, 0.4),
-    0 0 50px rgba(126, 87, 194, 0.25),
-    0 10px 32px rgba(0, 0, 0, 0.65);
+    inset 0 0 0 3px #a0683a,
+    inset 0 0 0 4px #8B5A2B,
+    inset 0 0 0 5px #6b3f1d,
+    inset 0 0 0 6px rgba(0, 0, 0, 0.4),
+    0 0 40px rgba(126, 87, 194, 0.18),
+    0 10px 28px rgba(0, 0, 0, 0.55);
   background: radial-gradient(ellipse at center,
     #3a5a8a 0%,
     #2a3a6a 35%,
@@ -325,8 +325,8 @@ function stackStyle(i) {
 }
 .card-stack {
   position: relative;
-  width: 320px;
-  height: 140px;
+  width: 380px;
+  height: 160px;
 }
 .stack-card {
   pointer-events: auto;

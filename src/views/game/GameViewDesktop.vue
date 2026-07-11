@@ -456,16 +456,16 @@ function onNickEditorConfirmed(p) {
 .bg-wood-edge {
   position: absolute;
   left: 50%;
-  top: -98vh;
-  width: 132vw;
-  height: 178vh;
-  min-width: 760px;
+  top: -92vh;
+  width: 126vw;
+  height: 168vh;
+  min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
   background:
-    radial-gradient(ellipse at 50% 48%, transparent 0 66%, rgba(67, 40, 24, 0.94) 67%, #c18b51 71%, #6e4024 76%, transparent 77%),
+    radial-gradient(ellipse at 50% 48%, transparent 0 67%, rgba(67, 40, 24, 0.9) 68%, #c18b51 72%, #6e4024 76%, transparent 77%),
     conic-gradient(from 18deg, #754425, #c18b51, #6d3e21, #ad7441, #553019, #c7965b, #754425);
-  box-shadow: 0 28px 54px rgba(0, 0, 0, 0.56), inset 0 0 28px rgba(255, 235, 180, 0.17);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5), inset 0 0 22px rgba(255, 235, 180, 0.14);
   z-index: 1;
   pointer-events: none;
 }
@@ -624,12 +624,22 @@ function onNickEditorConfirmed(p) {
 }
 .hand-column:last-child { border-right: none; }  /* 最后一列不加竖线 */
 .hand-column.is-selected {
-  /* v3.6: 抬升 16px → 18px,加金色外光晕 */
+  /* v4.x: 抬升 + 金色下划线 */
   transform: translateY(-18px);
   background: rgba(255, 215, 0, 0.12);
   box-shadow:
     inset 0 0 0 2px var(--gold),
     0 0 16px var(--gold-soft);
+}
+.hand-column.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -6px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--gold-primary, #d4af37);
 }
 .hand-column.is-selected .hand-card {
   box-shadow: 0 0 0 1.5px var(--gold), 0 6px 12px rgba(255, 215, 0, 0.4);

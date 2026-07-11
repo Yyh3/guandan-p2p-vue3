@@ -1,34 +1,19 @@
 <!--
-  RoomView.vue — v3.x 房间大厅重做 (UI-REDESIGN-V3-SPEC §4)
+  RoomView.vue — v4.x 房间大厅大改版
 
-  设计:深蓝星空 + 翡翠 felt + 玻璃拟态 + 菱形 4 座位 + 金色金属按钮
+  设计目标（UI-P1 阶段）:
+    - 顶部信息一行展示，不再拥挤
+    - 二维码/邀请改为弹窗，不常驻右上角
+    - 空座位仅保留头像轮廓 + "等待加入"
+    - 队友/对手用边框色区分；房主只保留皇冠徽章
+    - 非核心入口（切牌）压缩，花色选择器/详情按钮收起
+    - 按钮统一使用 app-theme 的 .app-btn-* 层级
 
-  座位映射(spec §4.3 diamond layout):
-    seat-top    = peer 0 (HOST, 金色皇冠 + 光环)
-    seat-left   = peer 1 (对手)
-    seat-right  = peer 3 (对手)
-    seat-bottom = peer 2 (队友 / 跨桌)
-
-  视觉层级:
-    1. 背景层(星空 + felt 椭圆)
-    2. 顶部 menu / settings
-    3. 顶部信息卡(玻璃) + QR 卡(右上)
-    4. 4 座位菱形布局(玻璃卡 + 金色光环头像)
-    5. 底部 action row(开始游戏 + 邀请好友)
-    6. 切牌 / 花色选择器 / 准备状态(保留旧 UI 元素)
-
-  测试契约(本文件改不改都要守住):
-    - 4 座位 class (seat-top/bottom/left/right) 必须在 template
-    - info-card 在 template,portrait 用 bottom 定位 + safe-area
-    - cut-card 在 template,内含 ♠♦♣♥ + "切牌"
-    - style scoped 包含 ≥ 3 段 @media (orientation: landscape)
-    - @media (max-width: 360px) cut-card 60×60
-    - position: fixed 仅出现在 .copy-toast
+  保留的网络/状态逻辑与 v3.x 一致。
 -->
 <template>
   <div class="page">
-    <!-- ============ 背景层 ============ -->
-    <!-- v3.x 房间背景:深蓝星空(顶部) + 翡翠 felt(底部) -->
+    <!-- 背景 -->
     <div class="bg-stars" aria-hidden="true">
       <span
         v-for="(s, i) in stars"
@@ -39,44 +24,35 @@
     </div>
     <div class="bg-felt" aria-hidden="true"></div>
 
-    <!-- ============ 顶部 menu + 设置 ============ -->
-    <div class="top-bar">
-      <button class="menu-btn" @click="showMenu" title="菜单" data-testid="menu-btn">≡</button>
-      <div class="top-right">
-        <span class="net-status" :class="netStatusClass">{{ netStatus }}</span>
-        <button class="dot-btn" @click="onEditMyInfo" title="编辑昵称" data-testid="edit-info-btn">⋯</button>
+    <!-- 顶部栏 -->
+    <header class="room-header">
+      <button class="header-menu" @click="showMenu" title="菜单" data-testid="menu-btn">≡</button>
+      <div class="header-title">
+        <span class="header-label">房间</span>
+        <span class="header-roomno">{{ roomNo }}</span>
       </div>
-    </div>
+      <div class="header-meta">
+        <span class="net-status" :class="netStatusClass">{{ netStatus }}</span>
+        <button class="header-more" @click="onEditMyInfo" title="编辑昵称" data-testid="edit-info-btn">⋯</button>
+      </div>
+    </header>
 
-    <!-- ============ 顶部房间信息卡 (玻璃拟态) ============ -->
+    <!-- 房间信息卡 -->
     <div class="info-card" data-testid="room-info-card">
-      <div class="info-roomno">{{ roomNo }}</div>
-      <div class="info-host-ip">
-        <span class="info-host-label">{{ isHost ? '本机 IP' : '房间号' }}</span>
-        <code class="info-host-value">{{ isHost ? formatHostAddr() : roomNo }}</code>
+      <div class="info-main">
+        <div class="info-roomno">{{ roomNo }}</div>
+        <div class="info-host-ip">
+          <span class="info-host-label">{{ isHost ? '本机 IP' : '房间号' }}</span>
+          <code class="info-host-value">{{ isHost ? formatHostAddr() : roomNo }}</code>
+        </div>
+      </div>
+      <div class="info-side">
+        <div class="info-count"><strong>{{ peers.size }}</strong>/4 人</div>
         <button class="info-copy-btn" @click="onCopyIp" title="复制" data-testid="copy-ip-btn">📋</button>
       </div>
-      <div class="info-meta">
-        <span class="info-meta-item">过几 <strong>2</strong></span>
-        <span class="info-meta-divider">·</span>
-        <span class="info-meta-item">出牌 <strong>30秒</strong></span>
-        <span class="info-meta-divider">·</span>
-        <span class="info-meta-item"><strong>{{ peers.size }}</strong>/4 人</span>
-      </div>
     </div>
 
-    <!-- ============ 二维码卡 (右上) ============ -->
-    <div class="qr-card-wrap" v-if="isHost && hostIp">
-      <QrFallbackCard
-        :host-ip="hostIp"
-        :host-port="hostPort"
-        :qrcode-url="qrDataUrl"
-        @copied="onCopied"
-      />
-    </div>
-
-    <!-- ============ 4 座位菱形布局 ============ -->
-    <!-- seat-top: HOST (peer 0) - 金色皇冠 + 光环 -->
+    <!-- 4 座位 -->
     <div class="seat seat-top" :class="seatClass(0)" data-testid="seat-top">
       <div class="seat-badge seat-badge-crown" aria-label="房主">👑</div>
       <div class="seat-avatar-wrap">
@@ -86,105 +62,67 @@
         </div>
       </div>
       <div class="seat-name">{{ getPeer(0)?.nickname || '等待加入' }}</div>
-      <div class="seat-role-pill" :class="getPeer(0) ? 'role-host' : 'role-empty'">
-        {{ getPeer(0) ? (isHost ? '房主' : '房主') : '等待加入' }}
-      </div>
-      <!-- 自己座位准备按钮 (host 的 self) -->
       <button v-if="isSelfSeat(0)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-0">
         {{ myReady ? '取消准备' : '准备' }}
       </button>
     </div>
 
-    <!-- seat-left: 对手 (peer 1) -->
     <div class="seat seat-left" :class="seatClass(1)" data-testid="seat-left">
-      <div class="seat-badge seat-badge-num">1</div>
       <div class="seat-avatar-wrap">
         <div class="seat-avatar">
-          <span class="avatar-icon" v-if="!getPeer(1)">?</span>
-          <span class="avatar-icon" v-else>{{ getPeer(1).avatar }}</span>
+          <span class="avatar-icon">{{ getPeer(1)?.avatar || '' }}</span>
           <div v-if="getPeer(1)?.ready" class="ready-mark" aria-label="已准备">✓</div>
         </div>
       </div>
       <div class="seat-name">{{ getPeer(1)?.nickname || '等待加入' }}</div>
-      <div class="seat-role-pill" :class="getPeer(1) ? 'role-ready' : 'role-empty'">
-        {{ getPeer(1) ? '准备就绪' : '等待加入' }}
-      </div>
       <button v-if="isSelfSeat(1)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-1">
         {{ myReady ? '取消准备' : '准备' }}
       </button>
-      <!-- ★ v2.1 P1 host 主动踢人 — 只踢对手 -->
       <button v-if="isHost && getPeer(1)" class="seat-kick" @click="onKickPlayer(1)" title="踢出房间" data-testid="kick-seat-1">✕</button>
     </div>
 
-    <!-- seat-right: 对手 (peer 3) -->
     <div class="seat seat-right" :class="seatClass(3)" data-testid="seat-right">
-      <div class="seat-badge seat-badge-num">3</div>
       <div class="seat-avatar-wrap">
         <div class="seat-avatar">
-          <span class="avatar-icon" v-if="!getPeer(3)">?</span>
-          <span class="avatar-icon" v-else>{{ getPeer(3).avatar }}</span>
+          <span class="avatar-icon">{{ getPeer(3)?.avatar || '' }}</span>
           <div v-if="getPeer(3)?.ready" class="ready-mark" aria-label="已准备">✓</div>
         </div>
       </div>
       <div class="seat-name">{{ getPeer(3)?.nickname || '等待加入' }}</div>
-      <div class="seat-role-pill" :class="getPeer(3) ? 'role-ready' : 'role-empty'">
-        {{ getPeer(3) ? '准备就绪' : '等待加入' }}
-      </div>
       <button v-if="isSelfSeat(3)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-3">
         {{ myReady ? '取消准备' : '准备' }}
       </button>
       <button v-if="isHost && getPeer(3)" class="seat-kick" @click="onKickPlayer(3)" title="踢出房间" data-testid="kick-seat-3">✕</button>
     </div>
 
-    <!-- seat-bottom: 队友 (peer 2, 与 HOST 跨桌) -->
     <div class="seat seat-bottom" :class="seatClass(2)" data-testid="seat-bottom">
-      <div class="seat-badge seat-badge-num">2</div>
       <div class="seat-avatar-wrap">
         <div class="seat-avatar">
-          <span class="avatar-icon" v-if="!getPeer(2)">?</span>
-          <span class="avatar-icon" v-else>{{ getPeer(2).avatar }}</span>
+          <span class="avatar-icon">{{ getPeer(2)?.avatar || '' }}</span>
           <div v-if="getPeer(2)?.ready" class="ready-mark" aria-label="已准备">✓</div>
         </div>
       </div>
       <div class="seat-name">{{ getPeer(2)?.nickname || '等待加入' }}</div>
-      <div class="seat-role-pill" :class="getPeer(2) ? 'role-ready' : 'role-empty'">
-        {{ getPeer(2) ? '准备就绪' : '等待加入' }}
-      </div>
       <button v-if="isSelfSeat(2)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-2">
         {{ myReady ? '取消准备' : '准备' }}
       </button>
-      <!-- ★ v2.0 换队友功能:只对 host 视角的 seat 2 队友显示 -->
       <button v-if="isHost && getPeer(2)" class="seat-swap" @click="onSwapWithTeammate" data-testid="swap-btn">换队友</button>
     </div>
 
-    <!-- ============ 底部 action row ============ -->
+    <!-- 底部操作 -->
     <div class="actions-row" data-testid="actions-row">
-      <button class="btn btn-primary" @click="onToggleReady" data-testid="btn-start">
+      <button class="app-btn app-btn-primary" @click="onToggleReady" data-testid="btn-start">
         <span class="btn-icon">▶</span>
         <span class="btn-text">{{ primaryBtnText }}</span>
       </button>
-      <button class="btn btn-secondary" @click="onInvite" data-testid="btn-invite">
+      <button class="app-btn app-btn-secondary" @click="openInvite" data-testid="btn-invite">
         <span class="btn-icon">🔗</span>
         <span class="btn-text">邀请好友</span>
       </button>
     </div>
 
-    <!-- ============ 切牌按钮 (保留,T1 修复要求 4 花色齐全) ============ -->
+    <!-- 切牌（保留但弱化） -->
     <div class="cut-card" @click="onCut" data-testid="cut-card">♠♦♣♥<br/><span class="cut-card-text">切牌</span></div>
-
-    <!-- ============ 准备状态提示 (保留) ============ -->
-    <div class="ready-status" v-if="myReady" data-testid="ready-status"><span>已准备</span></div>
-
-    <!-- ============ 花色选择器 (保留) ============ -->
-    <div class="suit-picker">
-      <span class="suit" :class="{active: mySuit===0}" @click="mySuit=0" data-testid="suit-0">♣</span>
-      <span class="suit" :class="{active: mySuit===1}" @click="mySuit=1" data-testid="suit-1">♦</span>
-      <span class="suit" :class="{active: mySuit===2}" @click="mySuit=2" data-testid="suit-2">♠</span>
-      <span class="suit" :class="{active: mySuit===3}" @click="mySuit=3" data-testid="suit-3">♥</span>
-    </div>
-
-    <!-- ============ 详情弹窗(保留 onDetail 入口) ============ -->
-    <button class="detail-btn" @click="onDetail" title="查看详情" data-testid="detail-btn">🔍</button>
 
     <NicknameEditor
       v-if="showNickEditor"
@@ -192,7 +130,18 @@
       @confirm="onNickConfirm"
     />
 
-    <!-- ★ v2.2 task A:复制 IP 后的 toast 提示(替代 alert) — 全局唯一 position: fixed -->
+    <InviteDialog
+      v-if="showInvite"
+      :is-host="isHost"
+      :room-no="roomNo"
+      :host-ip="hostIp"
+      :host-port="hostPort"
+      :qr-data-url="qrDataUrl"
+      @copied="onCopied"
+      @close="showInvite = false"
+    />
+
+    <!-- 唯一 position: fixed 浮层 -->
     <div v-if="copyToast" class="copy-toast" role="status" data-testid="copy-toast">{{ copyToast }}</div>
   </div>
 </template>
@@ -204,7 +153,7 @@ import storage from '@/common/storage.js'
 import net from '@/common/network.js'
 import WsServer, { isNativeCapacitor } from '@/common/ws-server.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
-import QrFallbackCard from '@/components/QrFallbackCard.vue'
+import InviteDialog from '@/components/InviteDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -215,15 +164,8 @@ const hostPort = ref(8848)
 const qrDataUrl = ref('')
 const qrLibOk = ref(true)
 
-// ★ v2.1 测试脚手架:把 net 暴露到 window(给 4-tab BC 自动化测试用,
-//   production 也无害——net 是 ESM 单例,本来就是 reactive 状态)
 if (typeof window !== 'undefined') window.__gd_net = net
 
-// ★ BUG-004 修复:disposers 数组追踪所有 net.on(...) 监听器,
-//   showMenu / onUnmounted 调 cleanupRoomListeners() 释放,避免 RoomView 卸载后
-//   net 内部 handlers Map 残留旧 handler → 二次进房触发 stale callback
-//   跟 useGameLogic.js L901-908 的 net.off('message:X')(无 handler,全删)不同:
-//   这里用精确 off(event, handler) 只删自己注册的,不破坏其它组件订阅
 const disposers = []
 function onNet(event, handler) {
   net.on(event, handler)
@@ -237,9 +179,7 @@ function cleanupRoomListeners() {
   }
 }
 
-// v3.x 房间背景星空:固定 14 个星点位置(避免每次 mount 重新生成导致动画抖动)
 function genStars() {
-  // 固定 seed,保证 SSR 一致 + 测试可重复
   const positions = [
     [8, 12, 2, 0.7, 0],
     [22, 38, 1.5, 0.55, 1.2],
@@ -266,7 +206,6 @@ function genStars() {
 }
 const stars = ref(genStars())
 
-// qrcode 库可选,动态 import,失败时降级为只显示文本地址
 let QRCodeLib = null
 async function ensureQrcodeLib() {
   if (QRCodeLib !== null) return QRCodeLib
@@ -284,11 +223,6 @@ async function ensureQrcodeLib() {
   return QRCodeLib
 }
 
-// 房主房间号生成与持久化:首次生成后存 sessionStorage(per-tab 隔离,4-tab 演示不会撞房号)
-// 真实设备 1v1 场景:刷新页面仍能用同一个房间号继续开局
-// joiner 必须沿用 URL 里的 roomNo(房主的房间号),不能自己随机生成新的
-// 否则 joiner 调 joinRoom(909682) 成功了,但本地 roomNo 显示 921514,
-// 用户复制 921514 给朋友会找不到房主 → 4-tab 演示死锁
 function pickRoomNo() {
   if (route.query.roomNo) return String(route.query.roomNo)
   if (isHost.value) {
@@ -305,14 +239,12 @@ const myName = ref('')
 const myAvatar = ref('🀄')
 const myReady = ref(false)
 const mySuit = ref(0)
-// ★ v3.x 房间重做:跟踪自己的座位 — host 永远在 seat 0 (peer 0),
-//   joiner 由 'connect' 事件返回的 seat 赋值
 const mySeat = ref(isHost.value ? 0 : null)
 const showNickEditor = ref(false)
+const showInvite = ref(false)
 const netStatus = ref('⏺')
 const peers = reactive(new Map())
 
-// 底部主按钮文案 — host 视角跟 joiner 视角不同
 const primaryBtnText = computed(() => {
   if (isHost.value) return '开始游戏'
   return myReady.value ? '取消准备' : '准备'
@@ -337,9 +269,7 @@ async function generateQr() {
 
 function getPeer(seat) { return peers.get(seat) }
 function seatClass(idx) { return peers.has(idx) ? 'filled' : 'empty' }
-// ★ v3.x:isSelfSeat — 判断 idx 是否是本地玩家的座位(host=0,joiner=connect 返回的 seat)
 function isSelfSeat(idx) { return idx === mySeat.value }
-// 格式化 host IP:port(QrFallbackCard 用的就是 formatHostAddress,但本地也用一份保持一致)
 function formatHostAddr() {
   if (!hostIp.value) return '获取中...'
   return `${hostIp.value}:${hostPort.value}`
@@ -348,11 +278,8 @@ function formatHostAddr() {
 async function initNetwork() {
   onNet('connect', ({ seat, info }) => {
     netStatus.value = '🟢'
-    // ★ v3.8 P1 修复:用 connect 事件拿正确的 assignedSeat(不是 from)
-    // joiner 第一次发 JOIN 时 selfSeat=-1,RoomView 之前用 peers.set(from, ...) 会写到 -1
     if (seat != null && seat !== 0 && info) {
       peers.set(seat, { ...info, ready: false })
-      // ★ v3.x 房间重做:joiner 视角下,connect 事件的 seat 就是自己的座位
       if (!isHost.value) mySeat.value = seat
     }
   })
@@ -360,29 +287,18 @@ async function initNetwork() {
     netStatus.value = '🔴'
     console.error('network error:', e)
   })
-  // ★ v2.1 P1 host 主动踢人:host 端 transport forceDisconnectSeat → _DISCONNECT → peer:leave
-  //   host 自己调用后立即在 UI 上把该 seat 显示"等待加入" (因为对端会被踢 + release)
-  // ★ v0.4.17 对抗性审查 (V0416-03):joiner 端 host(seat=0)离开时必须跳回首页 + 提示
-  //   旧版只 peers.delete(0),joiner 还留在房间页但没人能开局 → "无 host 房间"死锁。
-  //   产品定义:房间页 host 退出即房间解散(因为 RoomView 没有 lobby 级 host 迁移 —
-  //   lobby 迁移需要更新 isHost/mySeat/peers/net.selfSeat/isHostFlag,实现成本大,
-  //   而产品语义上 host 离开大厅 = 房间解散更符合用户预期)。
-  //   实现:joiner 端检测 seat=0,弹提示 + 跳首页;host 自己也会走这路径(自己退自己删)。
   onNet('peer:leave', ({ seat, reason }) => {
     if (seat == null) return
     peers.delete(seat)
     if (seat === 0) {
-      // host 离开 → 房间解散
       const isMyself = (() => { try { return net.getSelfSeat && net.getSelfSeat() === 0 } catch { return false } })()
-      if (isMyself) return  // host 自己退,已经在 showMenu 里处理了,这里不重复跳页
+      if (isMyself) return
       cleanupRoomListeners()
       try { net.close() } catch (e) { /* swallow */ }
       router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已退出,房间解散'))
     }
   })
-  // ★ v2.1 P1 host 主动踢人:joiner 端收到 self:kicked → 跳 /?force_disconnected=1
   onNet('self:kicked', ({ reason }) => {
-    // 先 cleanup 再 close + 跳页(避免下次进房残留旧 listener)
     cleanupRoomListeners()
     try { net.close() } catch (e) { /* swallow */ }
     router.push('/?force_disconnected=1' + (reason ? '&reason=' + encodeURIComponent(reason) : ''))
@@ -406,28 +322,16 @@ async function initNetwork() {
       tryStartGame()
     }
   })
-  // ★ v3.8 P1 修复:joiner 收到 host 的 GAME_START 也跳到 /game(否则 host 单方面跳转,joiner 卡在 /room)
-  // ★ v0.4.16 对抗性复查 (V0414-01):跳转 URL 加 &role=joiner,GameView isP2PMode 才会判 true
   onNet('message:GAME_START', () => {
     if (!isHost.value) {
       router.push('/game?roomNo=' + roomNo.value + '&role=joiner')
     }
   })
-  // ★ v3.8 P1 修复:joiner 收到 host 的 SEAT_SWAP 也本地交换(否则 joiner 还看到旧的 seat 名字)
-  // ★ v2.4-p4 BUG-006 修复:swap 改成走 network.js 权威(peer:seat_swap 事件)
-  //   - 不再在 RoomView 自己 broadcast SEAT_SWAP (之前会让 joiner 端 peers Map 与
-  //     network.js 内部 peers Map 不同步 → GameView 初始化读到 stale state)
-  //   - onSwapWithTeammate 调 net.swapSeats(0, 2),network.js 统一改 peers Map / selfSeat
-  //   - RoomView 监听 'peer:seat_swap' 事件同步本地 reactive peers Map(纯 UI 拷贝)
-  //   - SEAT_SWAP(老协议)保留 handler 作 backward-compat(其它客户端可能还广播老协议)
   onNet('peer:seat_swap', (payload) => {
     if (!payload) return
     const a = payload.a
     const b = payload.b
     if (typeof a !== 'number' || typeof b !== 'number') return
-    // 拷贝 network.js 已经 swap 完的 peers Map entries 到本地 reactive peers Map
-    // (network.js 已经 swap 过,这里只需要同步读 + 写到本地 reactive Map 让 UI 重渲染)
-    // 注意:infoA / infoB 是 swap 之前的信息,这里直接重读 net.getPeers() 拿 swap 后状态
     try {
       const fresh = net.getPeers ? net.getPeers() : null
       if (fresh && fresh.get) {
@@ -439,10 +343,6 @@ async function initNetwork() {
         else peers.delete(a)
       }
     } catch (e) { /* swallow */ }
-    // ★ 静态审查 BUG-E 修复:换座后本地 mySeat / 身份信息必须跟随网络层同步,
-    //   否则 host 端换座后 UI 高亮仍是旧 seat,昵称/头像/ready 状态错位。
-    //   修法:从 net.getSelfSeat() 拿权威 selfSeat,更新本地 mySeat;
-    //   myName/myAvatar/myReady 来源改为"当前 seat 对应 peer",不要手动复制 teammate 信息。
     try {
       const netSelfSeat = net.getSelfSeat ? net.getSelfSeat() : null
       if (netSelfSeat != null && netSelfSeat >= 0 && netSelfSeat <= 3) {
@@ -467,20 +367,14 @@ async function initNetwork() {
   })
 
   if (isHost.value) {
-    // ★ v3.8 P0 修复:必须先 setRoomId 再 startAsHost
-    // 否则 startAsHost 内部会用空 roomId 创建 channel,channel name 永远 = 'default',
-    // joiner 用 6 位数字 roomNo 永远对不上 → 4-tab 联机死锁
     net.setRoomId(roomNo.value)
     const r = net.startAsHost({ nickname: myName.value, avatar: myAvatar.value })
     netStatus.value = r.ok ? '🟢' : '🔴'
-    // ★ v3.8 P1 修复:host 自己也算 seat 0(之前漏掉,导致 peers.size 永远 < 4,开局按钮不显示)
     peers.set(0, { nickname: myName.value, avatar: myAvatar.value, ready: myReady.value })
-    // ★ v2.0 改造:host 端取本机 IP(供 joiner 用)
     if (isNative.value) {
       try {
         const ipRes = await WsServer.getLocalIp()
         hostIp.value = ipRes?.ip || ''
-        // 端口从 transport 拿;AndroidWsTransport 同步返回 getBoundPort()
         const t = net._getTransport && net._getTransport()
         if (t && typeof t.getBoundPort === 'function') hostPort.value = t.getBoundPort() || 8848
         await generateQr()
@@ -488,19 +382,12 @@ async function initNetwork() {
         hostIp.value = '(获取失败)'
       }
     } else {
-      // 浏览器版:用当前 location.hostname 作为"本机 IP"(本地测试用)
       hostIp.value = (typeof location !== 'undefined' && location.hostname) || '127.0.0.1'
       await generateQr()
     }
   } else {
-    // joiner: 支持 ?host=1.2.3.4:8848 (跨设备 WS,真机或远端电脑 host)
-    //                          ?host=1.2.3.4 (端口默认 8848)
-    //                          ?roomNo=xxx (浏览器 BC,同电脑多 tab)
     const hostParam = route.query.host ? String(route.query.host) : null
     if (hostParam) {
-      // ★ v2.2 task B:跨设备联机 — 浏览器 joiner 端走 WebSocket 远程连 host
-      //   joinRemoteRoom 内部注入 WebSocketTransport client + 解析 host:port + 走 WS 路径
-      //   跟原 Capacitor path 行为一致,但 transport 用的是浏览器 WebSocketTransport (vs AndroidWsTransport)
       const r = net.joinRemoteRoom(hostParam, { nickname: myName.value, avatar: myAvatar.value })
       netStatus.value = r.ok ? '🟢' : '🔴'
     } else {
@@ -511,35 +398,19 @@ async function initNetwork() {
 }
 
 onMounted(() => {
-  // URL ?nick=玩家-A&avatar=♠ 优先于 localStorage(扫码加入时传参 / 测试脚本控制)
   myName.value = route.query.nick ? String(route.query.nick) : storage.getNickname()
   myAvatar.value = route.query.avatar ? String(route.query.avatar) : storage.getAvatar()
   isNative.value = isNativeCapacitor()
   initNetwork()
 })
-// ★ v3.8 P1 修复:不在这里关 network!
-// 之前 unmount 关 network,joiner 收到 GAME_START 跳 /game 时 channel 就关了,
-// 后续 host 广播的 DEAL/PLAY/PASS 全部丢失,4-tab 联机出牌同步失效
-// network 在以下时机关:用户点"退出"返回 /、手动点"断开连接"、应用关闭
-// ★ BUG-004 修复:这里只清理 net.on(...) 监听器(disposers),不调 net.close()
-//   - 跳 /game 时 channel 必须保留,否则 host 后续广播全部丢失
-//   - 监听器释放避免下次进 /room 时旧 callback 残留触发 stale behavior
 onUnmounted(() => {
   cleanupRoomListeners()
-  // ★ v2.2 task A:清理 copy toast timer
   if (_copyToastTimer) clearTimeout(_copyToastTimer)
 })
 
-// ★ BUG-004 修复:showMenu 必须先 cleanup listeners + net.close() 再跳页,
-//   否则会留下 net 内部 handlers Map 残留 → 下次进房 / 别人发消息触发旧 callback
 function showMenu() {
   if (!confirm('退出房间?')) return
   cleanupRoomListeners()
-  // ★ v0.4.16 对抗性复查 (V0414-03):host 端主动退出广播 PEER_LEAVE 让 joiner 走 N-3 兜底迁移
-  //   旧版默认 broadcast=false,joiner 只能等 6-8s 心跳超时才能发现 host 走了;
-  //   现在 host 主动广播 PEER_LEAVE { migrate: true },joiner onPeerLeave 立即触发
-  //   requestPromoteToHost(snapshot) → 队友优先升级 + TRANSPORT_REBUILD_ANNOUNCE
-  //   joiner 端走 net.close() 不广播(自己走自己的,不会影响其他人)
   try { net.close(isHost.value ? { broadcast: true } : {}) } catch (e) { /* swallow */ }
   router.push('/')
 }
@@ -550,12 +421,6 @@ function onNickConfirm({ nickname, avatar }) {
   showNickEditor.value = false
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname, avatar } })
 }
-function onDetail() {
-  const mode = isNative.value ? '真机 WebSocket (Capacitor)' : '浏览器 BroadcastChannel'
-  const addr = isHost.value && hostIp.value ? `\n本机 IP: ${hostIp.value}:${hostPort.value}` : ''
-  alert(`房间号: ${roomNo.value}${addr}\n人数: ${peers.size}/4\n网络: ${netStatus.value === '🟢' ? '正常' : '异常'}\n模式: 局域网 P2P (${mode})`)
-}
-// ★ v3.x:onCopyIp — 新房型右上角复制按钮(替代旧的 onInvite alert)
 function onCopyIp() {
   if (isHost.value && hostIp.value) {
     const text = `${hostIp.value}:${hostPort.value}`
@@ -570,13 +435,8 @@ function onCopyIp() {
     )
   }
 }
-function onInvite() {
-  // 邀请好友按钮:host 弹 QR 详情,joiner 复制房间号
-  // ★ v3.x 简化:实际跟 onCopyIp 行为相同,统一为"复制 IP:端口 或 房间号 + 弹 toast"
-  onCopyIp()
-}
+function openInvite() { showInvite.value = true }
 
-// ★ v2.2 task A:QrFallbackCard 复制回调 → 写剪贴板 + 弹"已复制"toast(原 onInvite 用 alert,体验差)
 const copyToast = ref('')
 let _copyToastTimer = null
 function onCopied(text) {
@@ -593,9 +453,6 @@ function showCopyToast(msg) {
 }
 function onToggleReady() {
   myReady.value = !myReady.value
-  // ★ GD-RC-001 修复:同步自己到 peers 应该用当前 selfSeat(网络 host 换座后
-  //   selfSeat 可能 = 2 而不是 0)。原来硬编码 peers[0] 会导致 host 换队友后
-  //   准备状态错位(自己点准备但 peers[selfSeat].ready 没更新,tryStartGame 失败)
   const myCurrentSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
   if (myCurrentSeat != null && peers.has(myCurrentSeat)) {
     peers.set(myCurrentSeat, { ...peers.get(myCurrentSeat), ready: myReady.value })
@@ -603,62 +460,26 @@ function onToggleReady() {
   net.broadcast({ type: 'READY', payload: { ready: myReady.value } })
   tryStartGame()
 }
-
-// ★ v3.8 P1 修复:host 点开局时 joiner 的 READY 可能还没传到 host,
-// 改成持续监听:每次 peers 变化都重试 allReady 检查
 function tryStartGame() {
   if (!isHost.value) return
   if (peers.size < 4) return
   const allReady = Array.from(peers.values()).every(p => p.ready)
   if (allReady) {
-    // ★ v3.8 P1 修复:广播 GAME_START 让 joiner 也跳到 /game
     net.broadcast({ type: 'GAME_START', payload: { roomNo: roomNo.value } })
-    // ★ v0.4.16 对抗性复查 (V0414-01):跳转 URL 加 &role=host,GameView isP2PMode 才会判 true
-    //   旧版只带 roomNo,GameView 的 isP2PMode = (role==='joiner' || host 参数),会判 false
     router.push('/game?roomNo=' + roomNo.value + '&role=host')
   }
 }
 function onSwapWithTeammate() {
   if (!peers.has(2)) return
   if (!confirm('和队友换座?')) return
-  // ★ 静态审查 BUG-E 修复:不再手动把 myName/myAvatar/myReady 复制成 teammate
-  //   的值并写入 localStorage — 那是 UI 上换显示,而不是真实交换玩家座位。
-  //   真实交换是让 net 端 swap 0/2 → network.js 改 selfSeat + peers Map →
-  //   emit 'peer:seat_swap' → 上面 handler 从 net 拿新 selfSeat 再更新
-  //   mySeat/myName/myAvatar/myReady(localStorage 不写,因为队友的昵称不应
-  //   覆盖本机用户的昵称)。
-  //   ★ v2.4-p4 BUG-006 修复:swap 走网络层权威 net.swapSeats(0, 2)
-  //   network.js 内部统一改 peers Map / selfSeat + 广播 SEAT_SWAP_ACK +
-  //   emit 'peer:seat_swap' 给本机监听者(RoomView 已经在 onNet('peer:seat_swap')
-  //   里同步了本地 reactive peers Map)
   const r = net.swapSeats(0, 2)
   if (!r.ok) {
     console.warn('swapSeats 失败:', r.error)
     return
   }
-  // ★ 同时广播 NICK_UPDATE 让 joiner 更新 seat 0 的新昵称
-  //   (SEAT_SWAP_ACK 互换 entries 也能更新,但 NICK_UPDATE 是更直接的
-  //   "自己改了自己名"信号,防 NICK_UPDATE 监听器依赖 from 字段的逻辑漏掉)
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
 }
 function onCut() { alert('切牌完成') }
-
-// ★ v2.1 P1 host 主动踢人
-//   - 仅 host 可调(UI 按钮只对 host 显示)
-//   - 只踢对手 seat 1 / seat 3(seat 2 队友留给"换队友")
-//   - confirm 防误触
-//   - 立即改 reactive `peers` Map (UI 状态,跟 network.js 内部 peers Map 解耦),
-//     让 seat 卡片回"等待加入"。
-//   - network.js 内部 peers Map 释放由 _tickHeartbeatChecker 在 6-8s 后处理
-//     (owner steer: 不能立即清 host 端 peers Map,保留 v2.1 心跳 6-8s 路径)
-//   - 其他 joiner 端:从 host broadcast PEER_LEAVE { kick: true } 收到后:
-//        * selfSeat === seat + kick:true → 'self:kicked' → UI 跳 /?force_disconnected=1
-//        * selfSeat !== seat → 旁观者,正常 peers.delete + peer:leave
-// ★ v2.4-p4 BUG-007 修复:改用 net.kickPlayer(seat) 统一踢人协议
-//   - host 端 peers Map 立即清(不等心跳)
-//   - 给被踢 joiner 定向发 KICKED(优先于 ws.onclose,joiner 端立即跳页)
-//   - 旁观 joiner 端立即 peers.delete(不等心跳)
-//   - transport.forceDisconnectSeat 行为不变,只在 WS / AndroidWs 路径下调
 function onKickPlayer(seat) {
   if (!isHost.value) return
   if (seat !== 1 && seat !== 3) return
@@ -666,58 +487,36 @@ function onKickPlayer(seat) {
   if (!target) return
   const nickname = target.nickname || `座位 ${seat}`
   if (!confirm(`确定要踢出 ${nickname} 吗?\n\n该玩家将立即断开连接。`)) return
-  // 1) 调网络层统一踢人接口(立即清 host 端 peers Map + 定向 KICKED + 广播 PEER_LEAVE + ws 关)
   const r = net.kickPlayer(seat, 'kicked')
   if (!r || !r.ok) {
     console.warn('kickPlayer 失败:', r && r.error)
     return
   }
-  // 2) 同步 UI 反映 — 立即改 reactive peers Map (RoomView UI 状态,与 network.js 解耦)
-  //   net.kickPlayer 已经 emit 'peer:leave' 给本机 listener,但 RoomView 自己的 reactive
-  //   peers Map 也需要同步(否则 UI 卡片还在)
   peers.delete(seat)
 }
 </script>
 
 <style scoped>
-/* ============================================================
- * v3.x 房间大厅样式 (UI-REDESIGN-V3-SPEC §4)
- *
- * 视觉层级:
- *   .page           屏幕基底(深蓝星空 + felt 椭圆)
- *   .bg-stars       星空层(14 个星点)
- *   .bg-felt        felt 椭圆(翡翠绿渐变)
- *   .info-card      顶部房间信息卡(玻璃拟态)
- *   .qr-card-wrap   右上 QR 卡片容器
- *   .seat-*         4 座位菱形布局
- *   .actions-row    底部按钮行
- * ============================================================ */
-
 .page {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background: var(--room-bg-deep);
-  background-image:
-    radial-gradient(ellipse at 50% 18%, rgba(119, 142, 222, 0.45), transparent 45%),
-    linear-gradient(180deg, #222744 0%, #19152a 56%, #090910 100%);
-  color: #fff;
+  background: var(--bg-page, #071426);
+  color: var(--text-primary, #fff);
   font: var(--font-body);
 }
 
-/* ========== 背景层 ========== */
+/* 背景层 — 更克制的深蓝 + 底部 felt */
 .bg-stars {
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  /* v3.x 星空层:14 个星点散落在顶部 35% 区域(径向渐变覆盖范围) */
 }
 .star {
   position: absolute;
   background: var(--room-star);
   border-radius: 50%;
-  /* 微闪烁动画 */
   animation: star-twinkle 3.5s ease-in-out infinite;
 }
 @keyframes star-twinkle {
@@ -726,10 +525,12 @@ function onKickPlayer(seat) {
 }
 .bg-felt {
   position: absolute;
-  left: 50%; top: -82vh;
-  transform: translateX(-50%);
-  width: 124vw; height: 160vh;
+  left: 50%;
+  top: -78vh;
+  width: 120vw;
+  height: 140vh;
   min-width: 720px;
+  transform: translateX(-50%);
   border-radius: 50%;
   background: var(--felt-base);
   background-image:
@@ -737,255 +538,220 @@ function onKickPlayer(seat) {
     repeating-radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.035) 0 1px, transparent 1px 7px),
     radial-gradient(ellipse at 50% 42%, #7387ce 0%, #435690 44%, #2f3768 74%, #202548 100%);
   box-shadow:
-    0 34px 0 22px rgba(110, 64, 36, 0.7),
+    0 24px 0 18px rgba(110, 64, 36, 0.55),
     inset 0 -34px 72px rgba(0,0,0,0.42),
     inset 0 4px 16px rgba(255,255,255,0.12);
   z-index: 0;
   pointer-events: none;
 }
 
-/* ========== 顶部 menu ========== */
-.top-bar {
+/* 顶部栏 */
+.room-header {
   position: absolute;
   top: max(16px, env(safe-area-inset-top, 0px) + 12px);
-  left: 16px; right: 16px;
-  display: flex; align-items: center; justify-content: space-between;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   z-index: 12;
 }
-.menu-btn {
-  width: 44px; height: 44px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+.header-menu,
+.header-more {
+  width: 44px;
+  height: 44px;
+  border: 0;
   border-radius: 50%;
-  color: #fff; font-size: 22px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  font-size: 22px;
   cursor: pointer;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.menu-btn:active { transform: scale(0.95); }
-.top-right { display: flex; align-items: center; gap: 10px; }
-.net-status {
+.header-menu:hover,
+.header-more:hover { background: rgba(255,255,255,0.14); }
+.header-menu:active,
+.header-more:active { transform: scale(0.95); }
+.header-title {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+.header-label {
   font-size: 14px;
-  padding: 4px 10px;
+  color: rgba(255,255,255,0.6);
+}
+.header-roomno {
+  font: var(--font-display);
+  color: var(--gold-bright);
+  letter-spacing: 3px;
+}
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.net-status {
+  font-size: 13px;
+  padding: 5px 10px;
   border-radius: 999px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.8);
 }
 .net-status.net-ok    { color: #6fdb6f; }
 .net-status.net-bad   { color: #ff7e7e; }
 .net-status.net-pending { color: #ffd56b; }
-.dot-btn {
-  width: 40px; height: 40px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 50%;
-  color: #fff; font-size: 20px;
-  cursor: pointer;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-}
-.dot-btn:active { transform: scale(0.95); }
 
-/* ========== 顶部信息卡 (玻璃拟态) ========== */
+/* 房间信息卡 */
 .info-card {
-  /* v3.x:portrait 顶部左上浮动 + 安全区(给 QR 卡留右半空间) */
   position: absolute;
   left: 16px;
+  right: 16px;
   top: max(72px, env(safe-area-inset-top, 0px) + 64px);
-  /* 给 QR 卡留 ~150px(右侧 + 16px 间隔 + 150 QR 宽) */
-  width: calc(100% - 192px);
-  max-width: 360px;
-  /* v3.x:玻璃面板 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
-  padding: 14px 18px 12px;
+  padding: 14px 18px;
   box-shadow: var(--glass-shadow);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   z-index: 8;
-  text-align: center;
-  /* v3.x:portrait 也加 max-height + overflow-y 防御(iPhone 短屏不溢出) */
   max-height: 80vh;
   overflow-y: auto;
 }
+.info-main { min-width: 0; }
 .info-roomno {
   font: var(--font-display);
   color: var(--gold-bright);
-  letter-spacing: 4px;
-  margin-bottom: 6px;
-  /* v3.x:金色金属渐变 */
   background: var(--gold-metallic);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 2px 8px rgba(255, 215, 0, 0.35);
 }
 .info-host-ip {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
   font-size: 13px;
-  margin-bottom: 8px;
 }
-.info-host-label {
-  opacity: 0.7;
-  font-size: 11px;
-}
+.info-host-label { color: rgba(255,255,255,0.55); font-size: 12px; }
 .info-host-value {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 14px;
-  font-weight: bold;
-  background: rgba(255,255,255,0.12);
-  padding: 4px 10px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  background: rgba(255,255,255,0.1);
+  padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.18);
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
+.info-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.info-count {
+  font-size: 13px;
+  color: rgba(255,255,255,0.8);
+}
+.info-count strong {
+  color: var(--gold-bright);
+  font-weight: 800;
+}
 .info-copy-btn {
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.22);
+  width: 34px;
+  height: 34px;
+  border: 0;
   border-radius: 50%;
-  width: 30px; height: 30px;
-  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 14px;
-  transition: all 200ms ease-out;
 }
-.info-copy-btn:hover { background: rgba(255,255,255,0.22); }
-.info-copy-btn:active { transform: scale(0.92); }
-.info-meta {
-  display: flex; align-items: center; justify-content: center;
-  gap: 10px;
-  font-size: 12px;
-  opacity: 0.85;
-}
-.info-meta-item strong {
-  color: var(--gold-bright);
-  font-weight: bold;
-  margin: 0 2px;
-}
-.info-meta-divider { opacity: 0.4; }
+.info-copy-btn:hover { background: rgba(255,255,255,0.2); }
 
-/* ========== QR 卡 (右上) ========== */
-.qr-card-wrap {
-  position: absolute;
-  top: max(72px, env(safe-area-inset-top, 0px) + 64px);
-  right: 16px;
-  width: 160px;
-  z-index: 8;
-}
-.qr-card-wrap :deep(.qr-fallback-card) {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  color: #fff;
-}
-.qr-card-wrap :deep(.qr-fallback-headline) {
-  color: var(--gold-bright);
-}
-.qr-card-wrap :deep(.qr-fallback-ip) {
-  background: rgba(255,255,255,0.12);
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.22);
-}
-.qr-card-wrap :deep(.qr-fallback-copy-btn) {
-  background: var(--gold-metallic);
-  color: #1a1a00;
-}
-
-/* ========== 4 座位菱形布局 ========== */
+/* 4 座位 */
 .seat {
   position: absolute;
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   z-index: 5;
-  /* v3.x:玻璃卡底 */
-  padding: 16px 18px 14px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  padding: 14px 16px 12px;
+  background: rgba(3, 7, 20, 0.45);
+  border: 1.5px solid rgba(255,255,255,0.12);
   border-radius: var(--radius-lg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  min-width: 130px;
+  min-width: 120px;
+  transition: border-color 0.2s ease-out;
 }
-.seat.filled {
-  border-color: rgba(255, 215, 0, 0.35);
-}
+.seat.filled { border-color: rgba(255,255,255,0.22); }
 .seat.empty {
   border-style: dashed;
-  border-color: rgba(255, 215, 0, 0.45);
-  animation: empty-pulse 2s ease-in-out infinite;
+  border-color: rgba(255,255,255,0.18);
 }
-@keyframes empty-pulse {
-  0%, 100% { border-color: rgba(255, 215, 0, 0.35); }
-  50%      { border-color: rgba(255, 215, 0, 0.75); }
-}
+.seat-top.filled { border-color: rgba(244, 196, 94, 0.45); }
+.seat-bottom.filled { border-color: rgba(94, 156, 244, 0.55); }
+.seat-left.filled,
+.seat-right.filled { border-color: rgba(180, 94, 244, 0.55); }
+
 .seat-badge {
   position: absolute;
-  top: -14px; left: 50%;
+  top: -12px;
+  left: 50%;
   transform: translateX(-50%);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: bold;
   z-index: 6;
 }
 .seat-badge-crown {
-  font-size: 28px;
-  /* 金色光晕 */
-  filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.8));
-  /* 让皇冠悬浮在头像上方,负 top 让它超出 seat 卡 */
-  top: -22px;
+  font-size: 26px;
+  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.7));
 }
-.seat-badge-num {
-  width: 28px; height: 28px;
-  background: var(--gold-metallic);
-  color: #1a1a00;
-  border-radius: 50%;
-  font-size: 14px;
-  border: 2px solid var(--room-bg-deep);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-}
-.seat-avatar-wrap {
-  position: relative;
-  margin-top: 6px;
-}
+.seat-avatar-wrap { position: relative; margin-top: 4px; }
 .seat-avatar {
   position: relative;
-  width: 72px; height: 72px;
+  width: 68px;
+  height: 68px;
   background: linear-gradient(135deg, #2a3a5e, #1a2a4e);
-  border: 3px solid var(--gold-primary);
+  border: 3px solid rgba(255,255,255,0.25);
   border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--avatar-halo-gold);
-  transition: all 300ms ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease-out;
 }
 .seat.empty .seat-avatar {
   border-style: dashed;
   background: transparent;
-  box-shadow: none;
-  opacity: 0.7;
+  opacity: 0.55;
 }
-.seat-avatar .avatar-icon { font-size: 36px; line-height: 1; }
-.seat-top .seat-avatar {
-  /* HOST 头像特殊光环 + 脉冲 */
+.seat-top.filled .seat-avatar {
   border-color: var(--gold-bright);
-  box-shadow: var(--avatar-halo-active);
-  animation: pulse-glow 2s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(244, 196, 94, 0.25), 0 0 18px rgba(244, 196, 94, 0.25);
 }
-.ready-mark {
-  position: absolute;
-  right: -4px; top: -4px;
-  width: 24px; height: 24px;
-  background: linear-gradient(135deg, #4caf50, #2e7d32);
-  color: #fff;
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: bold;
-  border: 2px solid var(--room-bg-deep);
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+.seat-bottom.filled .seat-avatar {
+  border-color: #5e9cf4;
+  box-shadow: 0 0 0 3px rgba(94, 156, 244, 0.22);
 }
+.seat-left.filled .seat-avatar,
+.seat-right.filled .seat-avatar {
+  border-color: #b45ef4;
+  box-shadow: 0 0 0 3px rgba(180, 94, 244, 0.22);
+}
+.seat-avatar .avatar-icon { font-size: 34px; line-height: 1; }
+.seat.empty .seat-avatar .avatar-icon { font-size: 28px; opacity: 0.6; }
 .seat-name {
   font-size: 14px;
   font-weight: 600;
@@ -994,51 +760,45 @@ function onKickPlayer(seat) {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
+  color: rgba(255,255,255,0.9);
 }
-.seat-role-pill {
-  font-size: 12px;
-  padding: 3px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.18);
-  color: rgba(255,255,255,0.85);
-}
-.seat-role-pill.role-host {
-  background: var(--gold-metallic);
-  color: #1a1a00;
-  border-color: var(--gold-bright);
+.seat.empty .seat-name { color: rgba(255,255,255,0.55); }
+
+.ready-mark {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 13px;
   font-weight: bold;
-}
-.seat-role-pill.role-ready {
-  background: rgba(76, 175, 80, 0.22);
-  border-color: rgba(76, 175, 80, 0.5);
-  color: #a8e6a8;
-}
-.seat-role-pill.role-empty {
-  opacity: 0.7;
-  border-style: dashed;
+  border: 2px solid var(--bg-page, #071426);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* 准备按钮 (在 self 座位内) */
 .seat-ready-btn {
-  font-size: 11px;
-  padding: 4px 10px;
+  font-size: 12px;
+  padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.1);
   color: #fff;
   cursor: pointer;
-  transition: all 200ms ease-out;
-  margin-top: 2px;
+  transition: all 0.2s ease-out;
 }
-.seat-ready-btn:hover { background: rgba(255,255,255,0.22); }
-.seat-ready-btn:active { transform: scale(0.95); }
+.seat-ready-btn:hover { background: rgba(255,255,255,0.18); }
 
-/* ★ v2.1 P1 host 主动踢人按钮 — 红色圆形小图标,座位卡片右下角 */
 .seat-kick {
   position: absolute;
-  right: -6px; bottom: -6px;
-  width: 24px; height: 24px;
+  right: -6px;
+  bottom: -6px;
+  width: 24px;
+  height: 24px;
   background: linear-gradient(180deg, #ff7e7e, #d4404a);
   color: #fff;
   font-size: 12px;
@@ -1046,15 +806,15 @@ function onKickPlayer(seat) {
   border: 2px solid #fff;
   border-radius: 50%;
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   z-index: 6;
   padding: 0;
 }
-.seat-kick:hover { transform: scale(1.1); background: linear-gradient(180deg, #ff5050, #b03040); }
-.seat-kick:active { transform: scale(0.95); }
+.seat-kick:hover { transform: scale(1.1); }
 
-/* 换队友按钮 (host 的 seat 2 队友卡上) */
 .seat-swap {
   background: var(--gold-metallic);
   color: #1a1a00;
@@ -1064,26 +824,22 @@ function onKickPlayer(seat) {
   border-radius: 999px;
   border: none;
   cursor: pointer;
-  margin-top: 2px;
 }
 .seat-swap:hover { filter: brightness(1.1); }
-.seat-swap:active { transform: scale(0.95); }
 
-/* ========== 座位定位 (portrait 菱形) ========== */
-/* v3.x spec §4.3 diamond layout:
- *   " .    seat1    . "   seat-top = HOST
- *   " seat2  .   seat3 "   seat-left/right = 对手
- *   " .    seat4    . "   seat-bottom = 队友
- */
+/* 座位定位 — portrait 菱形 */
 .seat-top {
-  left: 50%; top: 220px;
+  left: 50%;
+  top: 210px;
   transform: translateX(-50%);
 }
 .seat-left {
-  left: 16px; top: 360px;
+  left: 16px;
+  top: 350px;
 }
 .seat-right {
-  right: 16px; top: 360px;
+  right: 16px;
+  top: 350px;
 }
 .seat-bottom {
   left: 50%;
@@ -1091,141 +847,55 @@ function onKickPlayer(seat) {
   transform: translateX(-50%);
 }
 
-/* ========== 底部 action row ========== */
+/* 底部操作 */
 .actions-row {
   position: absolute;
   left: 50%;
   bottom: max(20px, env(safe-area-inset-bottom, 0px) + 12px);
   transform: translateX(-50%);
-  display: flex; gap: 12px;
+  display: flex;
+  gap: 12px;
   width: calc(100% - 32px);
   max-width: 440px;
   z-index: 10;
 }
-.btn {
+.actions-row .app-btn {
   flex: 1;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 56px;
-  padding: 0 20px;
+  height: 52px;
   border-radius: var(--radius-pill);
   font: var(--font-button);
-  cursor: pointer;
-  border: none;
-  transition: all 200ms ease-out;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
 }
-.btn-icon { font-size: 22px; line-height: 1; }
-.btn-primary {
-  background: var(--gold-metallic);
-  color: #1a1a00;
-  box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.3);
-}
-.btn-primary:hover { filter: brightness(1.08); box-shadow: 0 8px 24px rgba(255, 215, 0, 0.5); }
-.btn-primary:active { transform: scale(0.97); }
-.btn-secondary {
-  background: var(--glass-bg);
-  border: 1.5px solid var(--gold-primary);
-  color: var(--gold-bright);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-}
-.btn-secondary:hover { background: rgba(255, 215, 0, 0.12); border-color: var(--gold-bright); }
-.btn-secondary:active { transform: scale(0.97); }
 
-/* ========== 切牌按钮 (保留,T1 修复要求 4 花色齐全) ========== */
+/* 切牌（弱化） */
 .cut-card {
   position: absolute;
   right: 16px;
-  /* v3.x:避开底部 action row (56+12=68px),贴右下角 */
-  bottom: max(80px, calc(68px + env(safe-area-inset-bottom, 0px)));
-  width: 64px; height: 64px;
-  background: var(--glass-bg);
-  border: 1.5px solid var(--gold-primary);
+  bottom: max(86px, calc(76px + env(safe-area-inset-bottom, 0px)));
+  width: 56px;
+  height: 56px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 50%;
-  color: var(--gold-bright);
-  font-size: 16px;
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
   font-weight: bold;
   cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   z-index: 10;
   line-height: 1.1;
   text-align: center;
 }
-.cut-card:hover { border-color: var(--gold-bright); }
+.cut-card:hover { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); }
 .cut-card:active { transform: scale(0.94); }
 .cut-card-text {
-  font-size: 10px;
-  color: var(--gold-bright);
+  font-size: 9px;
   margin-top: 2px;
 }
 
-/* ========== 准备状态提示 (保留) ========== */
-.ready-status {
-  position: absolute;
-  left: 16px;
-  bottom: max(80px, calc(68px + env(safe-area-inset-bottom, 0px)));
-  background: var(--gold-metallic);
-  color: #1a1a00;
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  font-weight: bold;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  transform: rotate(-6deg);
-  z-index: 9;
-}
-
-/* ========== 花色选择器 (保留)— 移到左侧中部,避开顶部信息卡 / QR 卡 ========== */
-.suit-picker {
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex; flex-direction: column; gap: 10px;
-  z-index: 9;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 999px;
-  padding: 10px 8px;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-}
-.suit {
-  font-size: 22px;
-  color: rgba(255,255,255,0.7);
-  cursor: pointer;
-  transition: all 200ms ease-out;
-  text-align: center;
-  line-height: 1;
-}
-.suit.active {
-  color: var(--gold-bright);
-  transform: scale(1.3);
-  text-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
-}
-.suit:hover { color: var(--gold-bright); }
-
-/* ========== 详情按钮 (隐藏但保留入口) ========== */
-.detail-btn {
-  position: absolute;
-  left: 16px;
-  top: max(72px, env(safe-area-inset-top, 0px) + 64px);
-  width: 40px; height: 40px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 50%;
-  display: none; /* spec §4.2 顶部信息卡占位,详情按钮合并入 info-card */
-  align-items: center; justify-content: center;
-  cursor: pointer;
-  z-index: 8;
-  font-size: 16px;
-}
-
-/* ========== copy toast (全局唯一 position: fixed) ========== */
+/* copy toast — 全局唯一 position: fixed */
 .copy-toast {
   position: fixed;
   left: 50%;
@@ -1249,33 +919,23 @@ function onKickPlayer(seat) {
   100% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
 }
 
-/* ============================================================
- * portrait 媒体查询:320-360px 屏切牌按钮压缩到 60×60
- * ============================================================ */
+/* 小屏切牌压缩 */
 @media (max-width: 360px) {
   .cut-card {
     width: 60px;
     height: 60px;
     font-size: 14px;
     right: 8px;
-    bottom: max(80px, calc(68px + env(safe-area-inset-bottom, 0px)));
+    bottom: max(86px, calc(76px + env(safe-area-inset-bottom, 0px)));
   }
-  .seat-avatar { width: 64px; height: 64px; }
-  .seat-avatar .avatar-icon { font-size: 32px; }
-  .seat { min-width: 110px; padding: 14px 14px 12px; }
-  .info-card { padding: 12px 16px 10px; }
+  .seat-avatar { width: 60px; height: 60px; }
+  .seat-avatar .avatar-icon { font-size: 30px; }
+  .seat { min-width: 110px; padding: 12px 14px 10px; }
+  .info-card { padding: 12px 14px; }
   .info-roomno { font-size: 28px !important; }
-  .qr-card-wrap { width: 160px; }
 }
 
-/* ============================================================
- * landscape 横屏 4 段媒体查询 (test §4 要求 ≥ 3 段 landscape)
- *   1. .seat-* 重新定位
- *   2. .info-card 居中浮动
- *   3. .cut-card 贴右下
- * ============================================================ */
-
-/* ---- (1) landscape 4 座位均匀分布 ---- */
+/* landscape 横屏 */
 @media (orientation: landscape) {
   .seat-top {
     left: 50%;
@@ -1299,19 +959,16 @@ function onKickPlayer(seat) {
   }
 }
 
-/* ---- (2) landscape .info-card 居中浮动 ---- */
 @media (orientation: landscape) {
   .info-card {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
     max-width: 460px;
-    max-height: 80vh;
-    overflow-y: auto;
+    width: min(460px, calc(100% - 32px));
   }
 }
 
-/* ---- (3) landscape .cut-card 贴右下(避开中心信息卡)---- */
 @media (orientation: landscape) {
   .cut-card {
     right: 30px;

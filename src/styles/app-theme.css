@@ -88,3 +88,80 @@ button {
   box-shadow: 0 8px 18px rgba(255, 178, 24, 0.38), inset 0 1px 0 rgba(255,255,255,0.72);
   text-shadow: 0 1px 0 rgba(255,255,255,0.45);
 }
+
+/* ============================================================
+ * 统一按钮层级（primary / secondary / text）
+ * ============================================================ */
+.app-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--radius-lg, 12px);
+  font: var(--font-button);
+  cursor: pointer;
+  transition: transform 0.15s ease-out, filter 0.15s ease-out, box-shadow 0.15s ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+.app-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  box-shadow: none !important;
+}
+.app-btn:active:not(:disabled) { transform: scale(0.98); }
+
+.app-btn-primary {
+  background: linear-gradient(180deg, #ffd978 0%, #e9ad3f 100%);
+  color: #2a1d08;
+  border: 1.5px solid #fff8dc;
+  box-shadow: 0 8px 24px rgba(233, 173, 63, 0.26), inset 0 1px 0 rgba(255,255,255,0.45);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+}
+.app-btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+
+.app-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.app-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.app-btn-text {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 0;
+  box-shadow: none;
+  font: var(--font-body);
+}
+.app-btn-text:hover:not(:disabled) { color: #fff; }
+
+/* 深色玻璃面板（比 .app-panel 更克制） */
+.app-panel-dark {
+  background: rgba(3, 7, 20, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+}
+
+/* 当前玩家发光外圈 */
+.app-turn-glow {
+  box-shadow: 0 0 0 3px rgba(244, 196, 94, 0.55), 0 0 18px rgba(244, 196, 94, 0.35);
+}
+
+/* 选中列金色下划线 */
+.app-selected-underline::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -6px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--gold-primary, #d4af37);
+}

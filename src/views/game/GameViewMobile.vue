@@ -199,6 +199,15 @@
     </div>
 
     <!-- ===== 7. 手牌 28% (按 rank 分组竖叠,9 列 56px 宽) ===== -->
+    <button
+      class="smart-sort-float"
+      :disabled="myHand.length === 0"
+      @click="onAutoFindBest"
+      title="智能理牌 · 自动凑炸弹/顺子/三带二"
+    >
+      <span class="ss-icon">✨</span>
+      <span class="ss-text">理牌</span>
+    </button>
     <div class="hand-area" :class="{ disabled: !myTurn || isDealing, 'is-urgent': urgent && myTurn }">
       <div class="hand-inner">
         <div
@@ -237,24 +246,15 @@
       </div>
     </div>
 
-    <!-- ===== 8. 操作栏 14% (4 大按钮) ===== -->
+    <!-- ===== 8. 操作栏 14% (3 大按钮) ===== -->
     <div v-if="myTurn && !isDealing" class="action-bar">
-      <button
-        class="action-btn-smart"
-        :disabled="myHand.length === 0"
-        @click="onAutoFindBest"
-        title="智能理牌 · 自动凑炸弹/顺子/三带二"
-      >
-        <span class="action-icon">✨</span>
-        <span class="action-text">理牌</span>
-      </button>
       <button
         class="action-btn-pass"
         :disabled="!lastPlay"
         @click="onPass"
         title="不出"
       >
-        <span class="action-icon">🚫</span>
+        <span class="action-icon">—</span>
         <span class="action-text">不出</span>
       </button>
       <button
@@ -483,16 +483,16 @@ onUnmounted(() => {
 .bg-wood-edge {
   position: absolute;
   left: 50%;
-  top: -98vh;
-  width: 132vw;
-  height: 178vh;
-  min-width: 760px;
+  top: -92vh;
+  width: 128vw;
+  height: 170vh;
+  min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
   background:
-    radial-gradient(ellipse at 50% 48%, transparent 0 66%, rgba(67, 40, 24, 0.94) 67%, #c18b51 71%, #6e4024 76%, transparent 77%),
+    radial-gradient(ellipse at 50% 48%, transparent 0 67%, rgba(67, 40, 24, 0.9) 68%, #c18b51 72%, #6e4024 76%, transparent 77%),
     conic-gradient(from 18deg, #754425, #c18b51, #6d3e21, #ad7441, #553019, #c7965b, #754425);
-  box-shadow: 0 28px 54px rgba(0, 0, 0, 0.56), inset 0 0 28px rgba(255, 235, 180, 0.17);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5), inset 0 0 22px rgba(255, 235, 180, 0.14);
   z-index: 1;
   pointer-events: none;
 }
@@ -839,20 +839,20 @@ button {
  * ============================================================ */
 .table-area {
   position: fixed;
-  top: 32%;             /* 抬到 mini-pill 下方,不再被遮挡 */
+  top: 30%;
   left: 50%;
   transform: translateX(-50%);
-  width: clamp(240px, 70vw, 300px);
-  height: clamp(150px, 22vh, 200px);
+  width: clamp(260px, 80vw, 360px);
+  height: clamp(170px, 26vh, 240px);
   z-index: 4;
   pointer-events: none;
 }
-/* 移动端 TableCenter 缩放:整体 transform scale */
+/* 移动端 TableCenter 缩放:整体放大到 0.75 */
 .table-area :deep(.table-center-wrap) {
   margin-top: 0;
   height: 100%;
   width: 100%;
-  transform: scale(0.6);
+  transform: scale(0.75);
   transform-origin: center center;
 }
 .table-area :deep(.ellipse-table) {
@@ -980,6 +980,16 @@ button {
   background: rgba(255, 215, 0, 0.12);
   box-shadow: inset 0 0 0 2px var(--gold, #FFD700), 0 0 12px var(--gold-soft, rgba(255, 215, 0, 0.2));
 }
+.hand-column.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -4px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--gold-primary, #d4af37);
+}
 
 .col-rank {
   position: absolute;
@@ -1056,14 +1066,39 @@ button {
  * 6. 操作栏 14%(≤115px @812)
  * 4 大按钮:智能理牌 / 不出 / 提示 / 出牌
  * ============================================================ */
+/* 智能理牌悬浮按钮(手牌区右上角) */
+.smart-sort-float {
+  position: fixed;
+  right: 10px;
+  bottom: calc(clamp(76px, 14vh, 115px) + 12px);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: all var(--t-fast, 120ms) var(--ease-out, ease);
+}
+.smart-sort-float:active:not(:disabled) { transform: scale(0.95); }
+.smart-sort-float:disabled { opacity: 0.4; cursor: not-allowed; }
+.ss-icon { font-size: 14px; line-height: 1; }
+.ss-text { line-height: 1; }
+
 .action-bar {
   position: fixed;
   left: 0; right: 0;
-  bottom: 0;                              /* 贴屏幕底,iOS 安全区自适应 */
+  bottom: 0;
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr; /* 4 等分 */
-  gap: 6px;
+  grid-template-columns: 1fr 1fr 1.2fr; /* 出牌略宽 */
+  gap: 8px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.7) 100%);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -1072,20 +1107,18 @@ button {
 }
 
 .action-bar button {
-  height: 56px;                            /* Apple HIG: ≥44,这里加到 56 让大拇指舒服 */
+  height: 56px;
   min-height: 44px;
   border: none;
   border-radius: 12px;
-  font-size: 16px;                          /* iOS Safari 避免自动放大的下限 */
+  font-size: 16px;
   font-weight: 900;
-  color: #fff;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
   transition: transform var(--t-fast, 120ms) var(--ease-out, ease),
               filter var(--t-fast, 120ms) var(--ease-out, ease);
   touch-action: manipulation;
@@ -1098,36 +1131,31 @@ button {
 .action-icon { font-size: 20px; line-height: 1; }
 .action-text { font-size: 12px; line-height: 1; }
 
-.action-btn-smart {
-  background: linear-gradient(180deg, var(--orange-warm, #FFB300) 0%, var(--orange-bright, #FF6D00) 100%);
-  color: #4a2c00;
-  border: 1.5px solid #fff;
-  box-shadow:
-    0 3px 8px rgba(255, 109, 0, 0.5),
-    0 0 12px rgba(255, 179, 0, 0.4);
-}
 .action-btn-pass {
-  background: linear-gradient(180deg, #ffc107 0%, #ff8f00 100%);
-  color: #4a2c00;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 .action-btn-hint {
-  background: linear-gradient(180deg, #78909c 0%, #455a64 100%);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 .action-btn-hint.active {
-  background: linear-gradient(180deg, #ff9800 0%, #ef6c00 100%);
-  box-shadow:
-    0 3px 8px rgba(255, 109, 0, 0.5),
-    0 0 12px rgba(255, 179, 0, 0.6);
+  background: rgba(244, 196, 94, 0.18);
+  border-color: var(--gold-primary, #d4af37);
+  color: var(--gold-bright, #ffd700);
   animation: hint-pulse 1.1s ease-in-out infinite;
 }
 @keyframes hint-pulse {
-  0%, 100% { box-shadow: 0 3px 8px rgba(255, 109, 0, 0.5), 0 0 12px rgba(255, 179, 0, 0.6); }
-  50%      { box-shadow: 0 3px 8px rgba(255, 109, 0, 0.7), 0 0 20px rgba(255, 179, 0, 0.9); }
+  0%, 100% { box-shadow: 0 0 0 rgba(244, 196, 94, 0); }
+  50%      { box-shadow: 0 0 12px rgba(244, 196, 94, 0.35); }
 }
 .action-btn-play {
-  background: linear-gradient(180deg, #42a5f5 0%, #1976d2 100%);
-  color: #fff;
+  background: linear-gradient(180deg, #ffd978 0%, #e9ad3f 100%);
+  color: #2a1d08;
+  border: 1.5px solid #fff8dc;
+  box-shadow: 0 6px 18px rgba(233, 173, 63, 0.28);
 }
 
 /* ============================================================

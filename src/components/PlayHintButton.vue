@@ -1,21 +1,21 @@
 <template>
   <div class="hint-group">
     <button
-      class="hint-btn"
+      class="app-btn app-btn-secondary hint-btn"
       :class="{ active: showing }"
       :disabled="disabled"
       @click="onToggle"
     >
       <span class="hint-icon">{{ showing ? '✕' : '💡' }}</span>
-      <span class="hint-text">{{ showing ? '取消提示' : '提示' }}</span>
+      <span class="hint-text">{{ showing ? '取消' : '提示' }}</span>
     </button>
     <button
       v-if="showing"
-      class="hint-btn auto"
+      class="app-btn app-btn-primary auto-btn"
       @click="onAutoPlay"
     >
       <span class="hint-icon">⚡</span>
-      <span class="hint-text">按提示出牌</span>
+      <span class="hint-text">按提示出</span>
     </button>
   </div>
 </template>
@@ -24,15 +24,12 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  // 是否禁用(非玩家回合)
   disabled: { type: Boolean, default: false },
-  // 当前是否有有效提示(影响"按提示出牌"二级按钮)
   hasHint: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toggle', 'autoPlay'])
 
-// 是否处于提示高亮状态
 const showing = ref(false)
 
 function onToggle() {
@@ -47,7 +44,6 @@ function onAutoPlay() {
   showing.value = false
 }
 
-// 暴露给父组件控制状态(用于牌型变化时自动取消)
 function setShowing(v) { showing.value = !!v }
 function isShowing() { return showing.value }
 
@@ -61,36 +57,38 @@ defineExpose({ setShowing, isShowing })
   align-items: center;
 }
 .hint-btn {
-  background: linear-gradient(180deg, #ffd54f, #f57c00);
-  color: #fff;
-  border: none;
-  border-radius: 18px;
-  padding: 8px 14px;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  box-shadow: 0 2px 6px rgba(245, 124, 0, 0.35);
-  transition: filter 0.15s;
+  min-width: 96px;
+  height: 52px;
+  padding: 0 16px;
+  border-radius: var(--radius-lg, 12px);
+  font: var(--font-button);
 }
-.hint-btn:hover:not(:disabled) { filter: brightness(1.08); }
-.hint-btn:active:not(:disabled) { filter: brightness(0.92); }
-.hint-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .hint-btn.active {
-  background: linear-gradient(180deg, #ff7043, #d84315);
-  box-shadow: 0 2px 6px rgba(216, 67, 21, 0.5);
+  background: rgba(244, 196, 94, 0.18);
+  border-color: var(--gold-primary, #d4af37);
+  color: var(--gold-bright, #ffd700);
 }
-.hint-btn.auto {
-  background: linear-gradient(180deg, #66bb6a, #2e7d32);
-  box-shadow: 0 2px 6px rgba(102, 187, 106, 0.4);
+.auto-btn {
+  min-width: 96px;
+  height: 52px;
+  padding: 0 14px;
+  border-radius: var(--radius-lg, 12px);
+  font: var(--font-button);
   animation: hint-pulse 1.2s ease-in-out infinite;
 }
 @keyframes hint-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.04); }
+  0%, 100% { box-shadow: 0 4px 14px rgba(233, 173, 63, 0.25); }
+  50%      { box-shadow: 0 4px 18px rgba(233, 173, 63, 0.45); }
 }
-.hint-icon { font-size: 15px; line-height: 1; }
-.hint-text { font-size: 13px; line-height: 1; }
+.hint-icon { font-size: 16px; line-height: 1; }
+.hint-text { font-size: 14px; line-height: 1; letter-spacing: 1px; }
+
+@media (max-width: 480px) {
+  .hint-btn, .auto-btn {
+    min-width: 84px;
+    height: 50px;
+    padding: 0 10px;
+  }
+  .hint-text { font-size: 13px; }
+}
 </style>
