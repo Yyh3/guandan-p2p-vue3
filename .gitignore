@@ -19,3 +19,7 @@ dist/
 # Mavis 内部
 .mavis/
 .opencode/
+
+# 本地 UI/需求草稿（不进入版本库）
+guandan-p2p-vue3-UI修改建议.md
+guandan-p2p-vue3-*修改建议.md
