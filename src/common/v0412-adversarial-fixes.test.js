@@ -187,12 +187,12 @@ console.log('\n=== 6. P1-4: game.applyPlay 防御 cards-not-found + useGameLogic
   assert('applyPlay 正常出牌时手牌 -1', stAfter2.hands[0].length === hand0Before.length - 1)
   assert('applyPlay 正常出牌时 tableCards = [card]', stAfter2.tableCards.length === 1)
 
-  // 6.3 源码:useGameLogic.js _appliedPlayIds Set 去重
+  // 6.3 源码:useGameLogic.js _appliedActionIds Set 去重(Phase 2 扩展到 PLAY/PASS 共用)
   const src = await fs.readFile('src/views/game/useGameLogic.js', 'utf-8')
-  assert('useGameLogic 有 _appliedPlayIds Set', /const _appliedPlayIds\s*=\s*new Set\(\)/.test(src))
-  assert('useGameLogic 有 _dedupPlayId(playId) 函数', /function _dedupPlayId/.test(src))
-  assert('useGameLogic onP2PPlay 调用 _dedupPlayId 去重',
-    /onP2PPlay[\s\S]*?_dedupPlayId\(payload\.ts\)/.test(src)
+  assert('useGameLogic 有 _appliedActionIds Set', /const _appliedActionIds\s*=\s*new Set\(\)/.test(src))
+  assert('useGameLogic 有 _dedupActionId(actionId) 函数', /function _dedupActionId/.test(src))
+  assert('useGameLogic onP2PPlay 调用 _dedupActionId 去重',
+    /onP2PPlay[\s\S]*?_dedupActionId\(payload\.actionId \?\? payload\.ts\)/.test(src)
   )
 }
 

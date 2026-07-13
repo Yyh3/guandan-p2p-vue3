@@ -23,6 +23,8 @@
 import * as E from './guandan-engine.js'
 import * as AI from './guandan-ai.js'
 
+const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
+
 function createGame(opts) {
   const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null, difficulty = 'medium' } = opts
   // ★ v3.8 P1:aiPlayers 用可变数组(支持运行时加 seat,例如断线 AI 接管)
@@ -110,6 +112,27 @@ function createGame(opts) {
     }
   }
 
+  // ★ P0-02 辅助函数:判断座位是否已 inactive(出完/弃赛)
+  function isInactiveSeat(seat) {
+    return state.finishedOrder.includes(seat) || state.abandonedSeats.includes(seat)
+  }
+
+  // 从 startSeat 向后找下一个活跃座位;找不到返回 null
+  function findNextActiveSeat(startSeat) {
+    for (let i = 1; i <= 4; i++) {
+      const seat = (startSeat + i) % 4
+      if (!isInactiveSeat(seat)) return seat
+    }
+    return null
+  }
+
+  // 掼蛋接风规则:领出者已出完时,由其对家接风;对家也 inactive 则顺延下一个活跃玩家
+  function findWindSeat(leader) {
+    const teammate = (leader + 2) % 4
+    if (!isInactiveSeat(teammate)) return teammate
+    return findNextActiveSeat(leader)
+  }
+
   function getState() {
     if (typeof structuredClone === 'function') {
       try { return structuredClone(state) } catch (e) { /* fallback:可能含 Vue proxy / 不可 clone 对象 */ }
@@ -164,7 +187,8 @@ function createGame(opts) {
   // ============ 发牌 ============
   // ★ v3.8 P1 修复:4-tab 联机用 host 广播的 seed 发同一手牌
   // 不传 seed → 走引擎的随机(单机模式兼容)
-  function deal(forcedSeed) {
+  // ★ UX 改进:支持 host 切牌指定首家(firstSeat)
+  function deal(forcedSeed, firstSeat) {
     const alive = ensureAlive(); if (alive) return alive
     const useSeed = forcedSeed != null ? forcedSeed : seed
     const result = useSeed == null ? E.deal() : E.deal(useSeed)
@@ -180,8 +204,10 @@ function createGame(opts) {
     state.tribute = null
     state.levelUp = 0
     state.ghost = { suit: 1, rank: state.levelRank }  // 红桃级牌
-    // 找红桃级牌的拥有者 → 翻牌定首家(简化:seeded 随机,4-tab 联机时所有 tab 拿同一家)
-    if (useSeed != null && E.mulberry32) {
+    // 切牌指定首家 > seeded 随机 > 纯随机
+    if (isValidSeat(firstSeat)) {
+      state.firstPlayer = firstSeat
+    } else if (useSeed != null && E.mulberry32) {
       const rng = E.mulberry32(useSeed ^ 0x5A5A5A5A)
       state.firstPlayer = Math.floor(rng() * 4)
     } else {
@@ -316,12 +342,28 @@ function applyPlay(seat, cards, hand, rec) {
     state.passCount++
     state.trickHistory.push({ seat, pass: true })
     emit('pass', { seat })
+
+    // ★ P0-02 修复:头游出完后,剩余活跃玩家都 pass 时由对家/下一活跃玩家接风,
+    //   不能把回合交回已出完的 leader 导致卡局。
     const activePlayers = 4 - state.finishedOrder.length - state.abandonedSeats.length
-    if (state.passCount >= activePlayers - 1) {
-      const leader = state.lastPlay.who
-      state.leaderPlayer = leader
-      state.firstPlayer = leader
-      state.currentPlayer = leader
+    const leader = state.lastPlay.who
+    const leaderInactive = isInactiveSeat(leader)
+    // leader 已出完/弃赛时,其余所有活跃玩家都要 pass 才算本墩结束
+    const requiredPasses = leaderInactive ? activePlayers : activePlayers - 1
+
+    if (state.passCount >= requiredPasses) {
+      let nextLeader = leader
+      if (leaderInactive) {
+        nextLeader = findWindSeat(leader)
+        // 极端情况:4 人全部 inactive,直接结束本局
+        if (nextLeader == null) {
+          finishRound()
+          return { ok: true }
+        }
+      }
+      state.leaderPlayer = nextLeader
+      state.firstPlayer = nextLeader
+      state.currentPlayer = nextLeader
       state.lastPlay = null
       state.tableCards = []
       state.passCount = 0
@@ -329,7 +371,9 @@ function applyPlay(seat, cards, hand, rec) {
       //   不是"数组包含 i"。finishedOrder 长度 < 4 时 0/1/2/3 都会 in 命中,语义错误。
       //   改用 includes(i) 正确判断"玩家 i 是否已出完牌"。
       emit('trickEnd', {
-        leader,
+        leader: nextLeader,
+        originalLeader: leader,
+        wind: leaderInactive,
         handsRemaining: state.hands.map((h, i) =>
           (state.finishedOrder.includes(i) || state.abandonedSeats.includes(i)) ? 0 : h.length
         ),
@@ -337,16 +381,19 @@ function applyPlay(seat, cards, hand, rec) {
       // ★ 静态审查 BUG-B 修复:一墩结束后只 emit('trickEnd') 不 emit('turn'),
       //   useGameLogic 主要通过 'turn' 事件同步 currentPlayer / lastPlay /
       //   tableCards 等 UI 状态,缺 'turn' 会导致 UI 与 game 状态不同步,
-      //   leader 不会重新领出,若 leader 是 AI 也不会被调度。
+      //   若 leader 是 AI 也不会被调度。
       //   联机模式(4 真人)由 P2P 同步处理,这里只在有 AI 的场景发 turn。
       emit('turn', state.currentPlayer, state.lastPlay, {
         isTeammateLast: false,
         trickReset: true,
+        wind: leaderInactive,
       })
       if (aiPlayers.length > 0) scheduleAI()
-    } else {
-      nextTurn(false)
+      return { ok: true }
     }
+
+    nextTurn(false)
+    return { ok: true }
   }
 
   function nextTurn(isFirstPlayer) {
@@ -685,111 +732,50 @@ function applyPlay(seat, cards, hand, rec) {
     // ★ v3.8 P1:AI 出的牌要广播(GameView 注入回调)
     setAIBroadcast(fn) { aiBroadcast = fn },
     /**
-     * ★ v2.1 P3:host 退场 → 座位重映射 + 状态转移
+     * ★ Phase 1:host 退场 → 座位稳定迁移
      *
      * 触发:旧 host 走人(关 App / 断网 / 自己踢自己),某个 joiner 按"队友优先"
      * 升级为新 host,接管牌局控制权。
      *
-     * 重映射规则:
-     *   - hands[] 数组索引按"逻辑 seat 0/1/2/3"重新分配
-     *   - 新 host (oldSeat=newHostSeat) 的手牌 → 移动到 hands[0],他原 seat (newHostSeat) 的位置置空
-     *   - 旧 host (oldHostSeat=0) 的手牌 → 标记"弃牌"(加入 finishedOrder 尾,作最末位)
-     *   - 其他 joiner 的 hands[oldSeat] 保持不变(他们的 seat 不动)
-     *   - finishedOrder / levelRank / round / phase 保留(但旧 host 加到 finishedOrder 末位)
+     * 座位稳定规则:
+     *   - 每个玩家的逻辑 seat 0/1/2/3 保持不变
+     *   - 旧 host 的 seat 标记 abandoned,手牌清空
+     *   - 新 host 的手牌留在 hands[newHostSeat],不移动到 hands[0]
+     *   - currentPlayer / firstPlayer / leaderPlayer / lastPlay.who 等指针
+     *     从 oldHostSeat 重定向到 newHostSeat
+     *   - trickHistory 中旧 host 出的牌标记 _originalSeat,seat 改为 newHostSeat
      *
-     * 副作用:
-     *   - state.currentPlayer 调整:如果之前是旧 host 回合 → 切到新 host 回合(0 = new host)
-     *   - state.firstPlayer / leaderPlayer 调整:同上
-     *   - emit('host:migrated', { oldHostSeat, newHostSeat }) 让 UI 弹提示
-     *
-     * @param {number} oldHostSeat — 旧 host seat (这里恒为 0)
-     * @param {number} newHostSeat — 升级者原 seat(1/2/3,队友优先=2)
+     * @param {number} oldHostSeat — 旧 host 逻辑 seat(0/1/2/3)
+     * @param {number} newHostSeat — 升级者逻辑 seat(0/1/2/3)
      * @returns {boolean} true=成功,false=参数不合法
      */
     migrateHost(oldHostSeat, newHostSeat) {
       const alive = ensureAlive(); if (alive) return alive
-      if (oldHostSeat !== 0) return false
-      if (![1, 2, 3].includes(newHostSeat)) return false
+      if (!isValidSeat(oldHostSeat) || !isValidSeat(newHostSeat)) return false
       if (oldHostSeat === newHostSeat) return false
-      // v3.x P2-23 修复:新 host 不能是已出完牌的玩家(他手牌已空,迁移过去会破坏回合计算)
       if (state.finishedOrder.includes(newHostSeat)) return false
-      // 防御:手牌不存在时不做(空 hands)
       if (!state.hands[oldHostSeat] || !state.hands[newHostSeat]) return false
 
-      // 1) 旧 host 走人 → 他的 27 张牌"弃牌" → 加入 abandonedSeats
-      //    v3.x P2-30 修复(2):改用 abandonedSeats 而不是 finishedOrder,
-      //    避免新 host(seat 0)也在 finishedOrder 里导致 playerPlay 拒绝出牌
-      //    finishedOrder 严格表示"出完牌"语义,弃赛不算出完
-      // ★ v0.4.14 对抗性审查 (V0412-02):但 oldHostSeat=0 不能放 abandonedSeats,
-      //   因为 0 已经被新 host 接管(下一步 hands[0] = newHostHand),如果 0 留在
-      //   abandonedSeats,nextTurn() 会用 while 循环把新 host 永远跳过 —
-      //   表现为新 host 自己永远不能再获得回合。修法:不要 push 0,旧 host 用
-      //   finishedOrder 末位 + state.hands[0] = [] 的"事实清空"就够了。
-      //   其他 seat(1/2/3)弃赛仍可放 abandonedSeats(比如 host 离开前某 joiner
-      //   已弃赛),保留逻辑不变。
-      const oldHostHand = state.hands[oldHostSeat]
-      if (oldHostSeat !== 0 && !state.abandonedSeats.includes(oldHostSeat)) {
-        state.abandonedSeats.push(oldHostSeat)
-      }
-      // 旧 host 的 27 张牌作废(清空)
-      state.hands[oldHostSeat] = []
-
-      // 2) 新 host 的手牌从 hands[newHostSeat] 移到 hands[0]
-      //    hands[newHostSeat] 留空(他现在是 seat 0 了)
-      const newHostHand = state.hands[newHostSeat].slice()
-      state.hands[0] = newHostHand
-      state.hands[newHostSeat] = []
-      // ★ 新 host 原座位已无人接管,标记弃赛,避免 nextTurn 落到空座位
-      if (!state.abandonedSeats.includes(newHostSeat)) {
-        state.abandonedSeats.push(newHostSeat)
+      // 1) 旧 host 走人 → 座位保留,由 AI 接管,不标记 abandoned,不清空手牌
+      //   网络 host 身份与游戏座位解耦:旧 host 只是控制器离线,其游戏座位继续参与,
+      //   由 AI 替它出牌,确保最终 finishedOrder 仍能有 4 人排名。
+      if (!state.finishedOrder.includes(oldHostSeat) && !aiPlayers.includes(oldHostSeat)) {
+        aiPlayers.push(oldHostSeat)
       }
 
-      // ★ v0.4.14 对抗性审查 (V0412-02) 防御性清理:即使历史原因 abandonedSeats
-      //   里残留 0(老 host 端收到了旧版本广播的 snapshot 带着 [0]),也要在这里
-      //   filter 掉,保证新 host 不会被 nextTurn 跳过。
-      if (state.abandonedSeats.includes(0)) {
-        state.abandonedSeats = state.abandonedSeats.filter(s => s !== 0)
-      }
+      // 2) 新 host 手牌保持在原 seat,不移动;新 host 控制器是人类,不应在 aiPlayers 中
+      const newHostAIIdx = aiPlayers.indexOf(newHostSeat)
+      if (newHostAIIdx >= 0) aiPlayers.splice(newHostAIIdx, 1)
 
-      // 3) 调整 currentPlayer:如果当时是旧 host (0) 或新 host 原 seat (newHostSeat) 回合
-      //    → 切到新 host 回合(逻辑 seat 0)
-      //    其他 seat (1/2/3 中除 newHostSeat 外) 保持
-      if (state.currentPlayer === oldHostSeat || state.currentPlayer === newHostSeat) {
-        state.currentPlayer = 0  // 新 host 现在是 seat 0
-      }
-      if (state.firstPlayer === oldHostSeat || state.firstPlayer === newHostSeat) {
-        state.firstPlayer = 0
-      }
-      if (state.leaderPlayer === oldHostSeat || state.leaderPlayer === newHostSeat) {
-        state.leaderPlayer = 0
-      }
+      // 3) 游戏座位保持不变,不重定向 currentPlayer / firstPlayer / leaderPlayer / lastPlay.who / trickHistory
+      //   这些指针代表的是游戏座位,不是网络 host 身份。
 
-      // 4) lastPlay.who 也要修正(如果在迁移前是这两个 seat 出的牌)
-      if (state.lastPlay && (state.lastPlay.who === oldHostSeat || state.lastPlay.who === newHostSeat)) {
-        state.lastPlay = { ...state.lastPlay, who: 0 }
-      }
+      // 4) 旧 host 不再交给 AI 接管的旧逻辑已删除,现在明确由 AI 接管旧 host 座位。
 
-      // 5) trickHistory 也要修正 — v3.x P3-8 修复:保留旧 seat 信息作 trace,
-//    而不是丢信息直接映射为 0。新增 _originalSeat 字段记录迁移前的 seat。
-state.trickHistory = state.trickHistory.map(h => {
-  if (h.seat === oldHostSeat || h.seat === newHostSeat) {
-    return { ...h, seat: 0, _originalSeat: h.seat }
-  }
-  return h
-})
-
-      // 6) 旧 host 不再是 AI(他走人了),如果他是 AI(被 aiPlayers 含)就移除
-      if (aiPlayers.includes(oldHostSeat)) {
-        const i = aiPlayers.indexOf(oldHostSeat)
-        if (i >= 0) aiPlayers.splice(i, 1)
-      }
-      // 新 host 不应该再被 AI 接管(他现在是真人 host)
-      if (aiPlayers.includes(newHostSeat)) {
-        const i = aiPlayers.indexOf(newHostSeat)
-        if (i >= 0) aiPlayers.splice(i, 1)
-      }
-
-      emit('host:migrated', { oldHostSeat, newHostSeat, finishedOrder: state.finishedOrder.slice(), abandonedSeats: state.abandonedSeats.slice() })
+      emit('host:migrated', { oldHostSeat, newHostSeat,
+        finishedOrder: state.finishedOrder.slice(),
+        abandonedSeats: state.abandonedSeats.slice()
+      })
       // ★ v0.4.13 对抗性审查 (P1-1):migrateHost 后必须 emit 'turn',
       //   让 useGameLogic.on('turn') 监听器刷新 currentPlayer / lastPlay / 计时器 /
       //   选中态。当前 useGameLogic.onHostMigrated 走 refreshUiFromGameState() 兜底,
@@ -856,12 +842,17 @@ state.trickHistory = state.trickHistory.map(h => {
         next.abandonedSeats = snap.abandonedSeats.slice()
       }
 
-      // 计算应用后的 finished/abandoned,检查二者不重叠且 currentPlayer 不在其中
+      // 计算应用后的 finished/abandoned,检查二者不重叠。
       const finalFinished = next.finishedOrder ?? state.finishedOrder
       const finalAbandoned = next.abandonedSeats ?? state.abandonedSeats
       if (finalFinished.some(s => finalAbandoned.includes(s))) return
+      // ★ P0-03 修复:phase=finished 的合法快照允许 currentPlayer 在 finishedOrder 中
+      //   (结算态没有"当前出牌者",seat 只作为占位)。非 finished 态仍拒绝 inactive currentPlayer。
+      //   注意:phase 字段的正式校验在下方,这里先从 snap 读取最终 phase。
+      const finalPhase = ('phase' in snap) ? snap.phase : state.phase
       const finalCurrentPlayer = ('currentPlayer' in next) ? next.currentPlayer : state.currentPlayer
-      if (finalFinished.includes(finalCurrentPlayer) || finalAbandoned.includes(finalCurrentPlayer)) return
+      if (finalPhase !== 'finished' &&
+          (finalFinished.includes(finalCurrentPlayer) || finalAbandoned.includes(finalCurrentPlayer))) return
 
       if ('passCount' in snap) {
         if (typeof snap.passCount !== 'number' || snap.passCount < 0 || snap.passCount > 3) return

@@ -6,6 +6,31 @@
 
 ## 当前任务记录
 
+- 2026-07-13：完成 Plan 3 UI/UX polish（Phase 3）：
+  - 同步切牌：`guandan-game.js` `deal()` 支持 `firstSeat` 参数；`RoomView.vue` 增加切牌覆盖层，`tryStartGame()` 切牌后广播 `GAME_START { firstSeat }`；`GameView.vue` / `GameViewDesktop.vue` / `GameViewMobile.vue` / `useGameLogic.js` 透传 `firstSeat` 并写入 `DEAL` 重试消息。
+  - SettingsView 折叠区 + 紧凑音乐列表：折叠区用 `<button class="section-title section-title-btn">` + `collapsedSections` + `aria-expanded`；音乐风格从 grid 改为 `.style-list/.style-row`；新增 `src/views/settings/SettingsView.test.js` 锁定契约。
+  - HomeView 能力提示：`isNativeCapacitor()` 运行时检测 + `capability-hint` 区分浏览器/原生环境；新增 `src/views/index/HomeView.test.js`。
+  - SVG 图标替换 emoji：新增 `src/components/icons/`（IconBase/Play/Link/Gear/Robot/Phone/Back/Close/ChevronDown/Ban）；`HomeView.vue` / `SettingsView.vue` / `RoomView.vue` 按钮图标改用 SVG 并补 `aria-label`。
+  - 测试基线刷新：`npm test` 50 套件 / 2293 case 全绿，`npm run build` 成功（仅保留 guandan-ai.js 动态 import 提示）。
+
+- 2026-07-13：完成 Plan C Phase 6（工程质量 ENG）与 Phase 7（剩余 UI/UX P2）：
+  - 测试清理：`static-bug-fixes.test.js`、`v0410-bug-fixes.test.js`、`v049-bug-fixes.test.js` 中所有 `createGame` 实例在退出前调用 `destroy()`，避免 AI timer 导致 Node 挂起；同步更新 v0418~v0421 的 "npm test 集成" 断言以接受新的 wrapper 脚本。
+  - npm test 总超时：新增 `scripts/run-all-tests.js`，顺序执行 47 个测试套件并整体 10 分钟超时；`package.json` 的 `test` 脚本改为 `node scripts/run-all-tests.js`。
+  - Vite 构建警告：`vite.config.js` 增加 `build.rollupOptions.external: ['os','http','path','fs','url']`，消除 Node 内置模块的 browser externalized 黄条警告。
+  - E2E 基线：新增 `playwright.config.js` 与 `e2e/room-ready-start.spec.js`、`e2e/exit-flow.spec.js`、`e2e/result-overlay.spec.js` 三个最小 Playwright spec。
+  - HCI-11：新增全局 `ToastOverlay.vue` / `ConfirmDialog.vue` + `dialog-bus.js`，替换 `useGameLogic.js`、`GameViewDesktop.vue`、`GameViewMobile.vue`、`RoomView.vue` 中的原生 `alert()` / `confirm()`。
+  - HCI-12/13：`RoomView.vue` 邀请按钮在 host IP 不可用时 toast 兜底；`RoomView.vue` 与 `GameViewDesktop.vue` 根 `.page` 增加 `env(safe-area-inset-*)` 上下内边距。
+  - HCI-06：`GameViewDesktop.vue` 与 `GameViewMobile.vue` 的结算遮罩仅保留「返回首页」「返回房间」按钮，移除原「下一局/重开一局」动作。
+  - `npm test` 全绿（EXIT 0），`npm run build` 成功（仅保留 guandan-ai.js 动态 import 提示）。
+
+- 2026-07-13：完成 Plan C（彻底还清技术债）Phase 1~4 + ENG-01 收尾：
+  - Phase 1（seat-stable host migration）：`network.js`/`guandan-game.js`/`useGameLogic.js`/`GameViewDesktop.vue` 改成 host 迁移不搬动座位/手牌，新 host 保留原 seat，旧 host 标记 abandoned；相关迁移测试全部刷新。
+  - Phase 2（消息权威与去重）：`network.js` 加 `isAuthorityMessage` 权威校验；`useGameLogic.js` 对 `PLAY`/`PASS` 加 `actionId` 与 2048 条有界去重，`ROUND_END`/`MATCH_RESTART` 强化 sender/seed/phase/isRestartAfterA 校验与 roundId/restartId 去重。
+  - Phase 3（RoomView/HCI + 战绩按实际座位）：`RoomView.vue` 去掉 seat 0 假设，crown/host badge 跟随 `net.getHostSeat()`，队友/对手按 `mySeat` 分色，主按钮拆分为「房主开始游戏」（满人且非房主都准备才可点）与「加入者准备/取消准备」，移除 stale `message:SEAT_SWAP`；`storage.js` 按 `(matchId, roundId, mySeat, myPlayerId)` 去重，`HistoryView.vue` 与 `history.js` 按记录中的 `mySeat` 统计。
+  - Phase 4（game lifecycle）：`useGameLogic.js` `initGame` 支持 `reuse` 避免 `retryDeal` 重复创建 game；`finishDeal` 校验手牌长度必须为 27；`onP2PDeal`/`onUnmounted` 统一销毁旧 game 实例并清理 timers。
+  - ENG-01：`v0410-p2p-regression.test.js` 补充 `game.destroy()` 清理，解决测试结束后 Node 挂起。
+  - `npm test` 全绿（EXIT 0），`npm run build` 成功。
+
 - 2026-07-11：按 `guandan-p2p-vue3-UI修改建议.md` 推进 P0/P1 逻辑修复：
   - LOGIC-04：`useGameLogic` 发牌超时重试不再本地 `initGame()` fork，P2P host 重发 `DEAL`，joiner 向 host 发 `STATE_REQUEST` 请求权威 snapshot；新增 `currentDealId`、`replaceGame`、`clearDealTimeout` 与 `onStateRequest`。
   - LOGIC-08：`guandan-game.js` `applyPass` 一墩结束时识别 leader 是否已出完；若 leader inactive，剩余活跃玩家都 pass 后由对家/下一个活跃玩家接风，避免回合交给已出完玩家导致卡局。
@@ -15,7 +40,7 @@
   - `npm test` 全绿（EXIT 0），`npm run build` 成功。
 
 - 2026-07-09：修复 GameView 桌面端组件重叠问题：隐藏自座位面板（手牌已代表自己），降低操作栏到底部 168px 并加大行间距，主操作按钮允许换行，智能理牌胶囊与「清空」按钮不再压住 action 按钮；新增炸弹/王炸中文语音播报，通过 `window.speechSynthesis` 朗读「炸弹」/「王炸」，并补充 `audio.test.js` 语音 case。`npm test` / `npm run build` 双绿。
-- 2026-07-09：Plan C（彻底还清技术债）Phase 1 引擎/AI/game + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强全部完成。修复内容：鬼牌具象化 `materializeGhosts`、同花顺鬼牌 suit、`canFormWithGhosts` suit 修复；`chooseLead` 成组牌优先；`findMinBeat` 尊重 `ghostCount`；王炸对王炸不再误出；顺子/连对/钢板上限支持 A 高；三张 2 实牌+1 鬼；`findMinThreeStraight` 省鬼；`autoPlayGrouped` 鬼牌补顺子中间缺张；`findMinBeatHard` 修正 `TYPE.KINGS_BOMB` 与鬼牌判定；`nextRound`/`applyRoundEnd` 状态重置与 abandonedSeats 覆盖。网络层：transport.type 稳定字段、WebSocketTransport getHostIp、IPv6 URL 括号、reconnect 计数器复位、Android outbox 保留 msg.to、canHost/hostAddress 在 transport open 后刷新、relayFromClient 保留定向 to、SEAT_SWAP_ACK host 处理与 relay、graceful migration 旁观 peers 同步、selectNextHostCandidate 排除 finished/abandoned、_tickHeartbeatChecker 跳过被踢 seat、self:kicked 去重。UI 层：`useGameLogic` selfSeat 用 getter 替代闭包快照；`afterMatchRestartRefresh` 移除重复 `startDealAnimation`；`onP2PAITakeover` 延迟内重新读取 state；`GameViewDesktop` 补 `useRoute` 并把 `onHostLost` 提到 `onMounted` 外；`GameViewMobile` 补结算遮罩；`GameView.vue` isMobile 只判定一次防反复挂载；所有 setTimeout 统一生命周期清理；`HomeView.vue` kickedToast timer 清理。测试补强：新增 `src/common/network-phase2.test.js`（25 case）、`src/views/game/useGameLogic.test.js`（22 case）、`src/common/network-host-migration-consecutive.test.js`（20 case）。当前 `npm test` 45 套件 / 2156 case 全绿，`npm run build` 成功。
+- 2026-07-09：Plan C（彻底还清技术债）Phase 1 引擎/AI/game + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强全部完成。修复内容：鬼牌具象化 `materializeGhosts`、同花顺鬼牌 suit、`canFormWithGhosts` suit 修复；`chooseLead` 成组牌优先；`findMinBeat` 尊重 `ghostCount`；王炸对王炸不再误出；顺子/连对/钢板上限支持 A 高；三张 2 实牌+1 鬼；`findMinThreeStraight` 省鬼；`autoPlayGrouped` 鬼牌补顺子中间缺张；`findMinBeatHard` 修正 `TYPE.KINGS_BOMB` 与鬼牌判定；`nextRound`/`applyRoundEnd` 状态重置与 abandonedSeats 覆盖。网络层：transport.type 稳定字段、WebSocketTransport getHostIp、IPv6 URL 括号、reconnect 计数器复位、Android outbox 保留 msg.to、canHost/hostAddress 在 transport open 后刷新、relayFromClient 保留定向 to、SEAT_SWAP_ACK host 处理与 relay、graceful migration 旁观 peers 同步、selectNextHostCandidate 排除 finished/abandoned、_tickHeartbeatChecker 跳过被踢 seat、self:kicked 去重。UI 层：`useGameLogic` selfSeat 用 getter 替代闭包快照；`afterMatchRestartRefresh` 移除重复 `startDealAnimation`；`onP2PAITakeover` 延迟内重新读取 state；`GameViewDesktop` 补 `useRoute` 并把 `onHostLost` 提到 `onMounted` 外；`GameViewMobile` 补结算遮罩；`GameView.vue` isMobile 只判定一次防反复挂载；所有 setTimeout 统一生命周期清理；`HomeView.vue` kickedToast timer 清理。测试补强：新增 `src/common/network-phase2.test.js`（25 case）、`src/views/game/useGameLogic.test.js`（22 case）、`src/common/network-host-migration-consecutive.test.js`（20 case）。当前 `npm test` 50 套件 / 2293 case 全绿，`npm run build` 成功。
 - 2026-07-09：按 `guandan-p2p-vue3-UI修改建议.md` 完成 UI 第一阶段（P0 阻断 + 低风险快速优化）：修复 `SettingsView` 缺失 `aiDifficulty` ref 与未闭合根节点；修复 `JoinView` 标签换行并增加返回按钮、隐藏非 DEV「本机模拟」；修复 `MobileTablePreview` 横向溢出并增加竖屏提示；修复 AI 对局发牌偶发卡死（`finishDeal` 同步重试 + 超时弹窗）；`HomeView` 主按钮层级与宽度调整；`SettingsView` 分组卡片化、音乐风格网格化；`HistoryView` 空状态奖杯 + 引导按钮。`npm test` 与 `npm run build` 双绿。
 - 2026-06-28：当前主目录有 MiniMax 与 Codex 并发工作，用户要求改为 `git worktree` 隔离。Codex 已切到独立目录 `/Users/yangyuanhao/Downloads/guandan-p2p-vue3-codex`，分支 `codex/ui-mobile-joker-card-preview-isolated`，后续 UI 预览只在此目录完成。
 - 2026-06-28：用户提供手机掼蛋横屏对局参考图，要求先用代码渲染 UI 方向，再正式修改真实对局页。预览目标：删除「社区任务福利」、用户金币数、右上角「切换 / 牌数统计 / 同花顺」面板；牌面简洁，不出现一张牌两个数字；桌面已出牌远离手牌。
@@ -49,7 +74,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（45 套件 / 2156 通过 / 0 失败，v0.4.21+ 基线）
+# 跑全部测试（50 套件 / 2293 通过 / 0 失败，Phase 3 基线）
 npm test
 
 # 跑单个测试套件
@@ -100,7 +125,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 42 套件 Node assert 单测（1916 case 全过,v0.4.21 收官）
+│   │   └── *.test.js               # 50 套件 Node assert 单测（2293 case 全过,Phase 3 基线）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -147,7 +172,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.21 收官：42 套件 / 1916 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**Phase 3 基线：50 套件 / 2293 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -159,7 +184,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 42 套件 | **1916 / 0 fail** (v0.4.21,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 52 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 25 case) |
+| `npm test` | 全部 50 套件 | **2293 / 0 fail** (Phase 3 基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 25 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 3 UI 95 case) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -419,3 +444,4 @@ Mavis 多 agent 团队配置在 `.harness/`：
 4. 终端输出 —— Vite / Node 错误
 
 **仍然卡住？** 把"做了什么 + 期望什么 + 实际得到什么 + 完整报错"打包给开发者。
+

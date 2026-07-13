@@ -24,7 +24,7 @@
           <circle cx="200" cy="30" r="3" fill="white" />
           <circle cx="80" cy="110" r="3" fill="white" />
           <circle cx="200" cy="110" r="3" fill="white" />
-          <text x="140" y="76" text-anchor="middle" font-size="14" fill="white" stroke="none" font-weight="900" letter-spacing="2">PVP</text>
+          <text x="140" y="76" text-anchor="middle" font-size="14" fill="white" stroke="none" font-weight="900" letter-spacing="2">{{ modeLabel }}</text>
         </svg>
       </div>
       <!-- 桌面顶光(顶部一线亮,底部压暗) -->
@@ -108,6 +108,8 @@ const props = defineProps({
   round: { type: Number, default: 1 },
   // v3.6 信息条:×N 倍
   multiplier: { type: Number, default: 1 },
+  // ★ P1-10 修复:AI 对局不显示 PVP,显示"AI 对局"或"好友对局"
+  modeLabel: { type: String, default: 'PVP' },
 })
 
 /**

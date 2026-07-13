@@ -91,9 +91,9 @@ console.log('\n=== 3. V0416-03: RoomView onNet(\'peer:leave\') 检测 seat=0 跳
   check('RoomView onNet(\'peer:leave\') 监听存在', !!peerLeaveMatch)
   if (peerLeaveMatch) {
     const body = peerLeaveMatch[0]
-    // 3.2 检测 seat === 0(host 离开)分支
-    check('peer:leave 监听含 seat === 0 分支(host 离开检测)',
-      /seat\s*===\s*0/.test(body))
+    // 3.2 检测 seat === hostSeat.value(host 离开)分支(Phase 3 后不再硬编码 0)
+    check('peer:leave 监听含 seat === hostSeat.value 分支(host 离开检测)',
+      /seat\s*(?:===|!==)\s*(?:0|hostSeat\.value|hostSeat)/.test(body))
     // 3.3 host 离开时调 router.push 跳首页 + reason
     check('peer:leave host 离开分支调 router.push', /router\.push\(/.test(body))
     check('peer:leave 跳首页携带 reason=房主已退出',
@@ -110,8 +110,13 @@ console.log('\n=== 3. V0416-03: RoomView onNet(\'peer:leave\') 检测 seat=0 跳
 // ============== 4. V0416-04: 网络层 _DISCONNECT → emit host:lost ==============
 console.log('\n=== 4. V0416-04: 网络层 _DISCONNECT payload.seat=-1 emit host:lost ===')
 {
-  // 4.1 _DISCONNECT 处理块存在
-  const disconnectMatch = networkSrc.match(/msg\.type === ['"]_DISCONNECT['"][\s\S]*?^\s\s\}/m)
+  // 4.1 _DISCONNECT 处理块存在(限定在 joiner 端处理函数内,host 端同样处理 _DISCONNECT 但不应 emit host:lost)
+  const joinerStart = networkSrc.indexOf('function _handleJoinerMessage')
+  const nextFnIdx = networkSrc.indexOf('\nfunction ', joinerStart + 1)
+  const joinerHandlerSrc = joinerStart >= 0
+    ? networkSrc.slice(joinerStart, nextFnIdx >= 0 ? nextFnIdx : undefined)
+    : ''
+  const disconnectMatch = joinerHandlerSrc.match(/msg\.type === ['"]_DISCONNECT['"][\s\S]*?^\s\s\}/m)
   check('_DISCONNECT 处理块存在', !!disconnectMatch)
   if (disconnectMatch) {
     const body = disconnectMatch[0]

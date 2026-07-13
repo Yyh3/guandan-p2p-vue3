@@ -20,7 +20,7 @@
         <span class="card-layer card-front">A</span>
       </div>
       <h1 class="logo-title">掼蛋</h1>
-      <p class="logo-sub">无需服务器，同一热点即可开局</p>
+      <p class="logo-sub">无需服务器，同一热点即可开局（跨手机联机请用 Android App）</p>
     </header>
 
     <!-- 中部:主按钮 + 次级按钮 + 文字入口(按 UI 整改分级) -->
@@ -30,9 +30,12 @@
         data-testid="home-start-btn"
         @click="() => router.push('/room?role=host')"
       >
-        <span class="glass-btn-icon">▶</span>
+        <IconPlay class="glass-btn-icon" :size="22" aria-hidden="true" />
         <span class="glass-btn-text">开始游戏</span>
       </button>
+      <p class="capability-hint" data-testid="home-capability-hint">
+        {{ isNative ? '当前支持跨手机联机' : '当前为浏览器,创建的房间仅支持本机多标签联机;跨手机请用 Android App' }}
+      </p>
 
       <div class="actions-row">
         <button
@@ -40,7 +43,7 @@
           data-testid="home-join-btn"
           @click="() => router.push('/join')"
         >
-          <span class="glass-btn-icon">📱</span>
+          <IconPhone class="glass-btn-icon" :size="20" aria-hidden="true" />
           <span class="glass-btn-text">加入房间</span>
         </button>
         <button
@@ -48,7 +51,7 @@
           data-testid="home-ai-btn"
           @click="() => router.push('/ai')"
         >
-          <span class="glass-btn-icon">🤖</span>
+          <IconRobot class="glass-btn-icon" :size="20" aria-hidden="true" />
           <span class="glass-btn-text">AI 对战</span>
         </button>
       </div>
@@ -68,8 +71,11 @@
         class="gear-btn"
         :data-testid="'home-settings-btn'"
         title="设置"
+        aria-label="设置"
         @click="onSettings"
-      >⚙</button>
+      >
+        <IconGear :size="22" aria-hidden="true" />
+      </button>
 
       <button
         class="user-pill"
@@ -84,9 +90,11 @@
 
     <!-- ★ v2.1 P1 被踢提示 -->
     <div v-if="kickedToast" class="kicked-toast">
-      <span class="kicked-icon">🚫</span>
+      <IconBan class="kicked-icon" :size="18" aria-hidden="true" />
       <span class="kicked-text">{{ kickedToast }}</span>
-      <button class="kicked-close" @click="kickedToast = ''">×</button>
+      <button class="kicked-close" @click="kickedToast = ''" aria-label="关闭提示">
+        <IconClose :size="16" aria-hidden="true" />
+      </button>
     </div>
 
     <NicknameEditor
@@ -101,19 +109,29 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
+import { isNativeCapacitor } from '@/common/ws-server.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
+import IconPlay from '@/components/icons/IconPlay.vue'
+import IconPhone from '@/components/icons/IconPhone.vue'
+import IconRobot from '@/components/icons/IconRobot.vue'
+import IconGear from '@/components/icons/IconGear.vue'
+import IconBan from '@/components/icons/IconBan.vue'
+import IconClose from '@/components/icons/IconClose.vue'
+import IconBack from '@/components/icons/IconBack.vue'
 
 const route = useRoute()
 const router = useRouter()
 const myName = ref('')
 const myAvatar = ref('🀄')
 const showNickEditor = ref(false)
+const isNative = ref(false)
 
 // ★ v2.1 P1 host 主动踢人:被踢的 joiner 跳到 /?force_disconnected=1 → 首页弹提示
 const kickedToast = ref('')
 let kickedToastTimer = null
 
 onMounted(() => {
+  isNative.value = isNativeCapacitor()
   myName.value = storage.getNickname()
   myAvatar.value = storage.getAvatar()
   // ★ v2.1 P1 处理被踢提示
@@ -265,6 +283,14 @@ function onSettings() { router.push('/settings') }
   flex-direction: column;
   gap: 16px;
   margin-bottom: 40px;
+}
+.capability-hint {
+  margin: -8px 0 0;
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.55);
+  text-align: center;
 }
 .actions-row { display: flex; gap: 12px; }
 .actions-row .glass-btn { flex: 1; }

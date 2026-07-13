@@ -43,6 +43,8 @@ let sfxGain = null
 
 let bgmEnabled = true
 let sfxEnabled = true
+// ★ UX 改进:炸弹/王炸中文语音播报独立开关,默认开启
+let voiceEnabled = true
 let bgmVol = 0.25
 let sfxVol = 0.5
 let masterVol = 1.0
@@ -679,6 +681,8 @@ function setBgmStyle(style) {
 
 function isBgmEnabled() { return bgmEnabled }
 function isSfxEnabled() { return sfxEnabled }
+function isVoiceEnabled() { return voiceEnabled }
+function setVoiceEnabled(on) { voiceEnabled = !!on }
 function isBgmStarted() { return bgmStarted }
 function getBgmStyle() { return bgmStyle }
 function isBgmMp3() { return bgmUseMp3 }  // v0.4.8 N-3:用于诊断/测试
@@ -1003,6 +1007,7 @@ function sfxUrgentBeep() {
  * @param {string} text - 默认"炸弹",王炸可传"王炸"
  */
 function speakBomb(text = '炸弹') {
+  if (!voiceEnabled) return
   if (typeof window === 'undefined' || !window.speechSynthesis) return
   try {
     const u = new window.SpeechSynthesisUtterance(text)
@@ -1101,6 +1106,8 @@ export {
   startBgm, stopBgm, setBgmEnabled, setBgmVolume, isBgmEnabled, isBgmStarted,
   setBgmStyle, getBgmStyle, isBgmMp3,
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
+  // ★ UX 改进:炸弹/王炸中文语音播报开关
+  setVoiceEnabled, isVoiceEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
   // ★ v0.4.9:SFX 模式切换(synth / real)
@@ -1115,6 +1122,7 @@ const audio = {
   startBgm, stopBgm, setBgmEnabled, setBgmVolume, isBgmEnabled, isBgmStarted,
   setBgmStyle, getBgmStyle, isBgmMp3,
   playSfxForType, setSfxEnabled, setSfxVolume, isSfxEnabled,
+  setVoiceEnabled, isVoiceEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
   setSfxMode, getSfxMode, isSfxModeReal,

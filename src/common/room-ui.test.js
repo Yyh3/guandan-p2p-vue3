@@ -24,9 +24,16 @@ function check(name, cond, extra = '') {
 function section(s) { console.log('\n=== ' + s + ' ===') }
 
 function extractTemplate(src) {
-  const m = src.match(/<template>([\s\S]*?)<\/template>/)
-  if (!m) throw new Error('找不到 <template> 块')
-  return m[1]
+  // 匹配根 <template> 块:Vue SFC 的根 template 从文件第一个 <template> 开始,
+  // 到 <script setup> 之前的最后一个 </template> 结束。内层 <template v-if> 等条件
+  // 渲染标签不应影响根块边界。
+  const scriptStart = src.indexOf('<script setup>')
+  const firstTemplateStart = src.indexOf('<template>')
+  const lastTemplateEnd = src.lastIndexOf('</template>', scriptStart >= 0 ? scriptStart : undefined)
+  if (firstTemplateStart < 0 || lastTemplateEnd <= firstTemplateStart) {
+    throw new Error('找不到根 <template> 块')
+  }
+  return src.slice(firstTemplateStart + '<template>'.length, lastTemplateEnd)
 }
 function extractStyleScoped(src) {
   const m = src.match(/<style scoped>([\s\S]*?)<\/style>/)
@@ -56,16 +63,14 @@ check('template 包含 class="info-card"',
 check('template 包含 class="cut-card"',
   /class="cut-card"/.test(roomTemplate))
 
-const seatHits = [
-  /class="seat seat-top"/,
-  /class="seat seat-bottom"/,
-  /class="seat seat-left"/,
-  /class="seat seat-right"/,
-]
-const missingSeats = seatHits.filter(rx => !rx.test(roomTemplate))
-check('template 4 座位 (seat-top/bottom/left/right) 都存在',
-  missingSeats.length === 0,
-  missingSeats.length ? '缺: ' + missingSeats.map(rx => rx.source).join(', ') : '')
+const seatClasses = ['seat-top', 'seat-bottom', 'seat-left', 'seat-right']
+const missingSeatClasses = seatClasses.filter(c => !roomTemplate.includes(c))
+check('template 仍包含 4 个位置类名 (seat-top/bottom/left/right)',
+  missingSeatClasses.length === 0,
+  missingSeatClasses.length ? '缺: ' + missingSeatClasses.join(', ') : '')
+check('template 使用 v-for 渲染 4 座位',
+  /v-for=\s*"\s*s\s+in\s+\[\s*0\s*,\s*1\s*,\s*2\s*,\s*3\s*\]"/.test(roomTemplate),
+  '未找到 v-for="s in [0,1,2,3]"')
 
 // =========================================================================
 section('2. host-info-row 已从 template 删除')
@@ -273,8 +278,12 @@ const testIds = [
   'cut-card',
   'copy-toast',
 ]
-const missingTestIds = testIds.filter(id =>
-  !new RegExp('data-testid="' + id + '"').test(roomTemplate))
+const missingTestIds = testIds.filter(id => {
+  const literal = new RegExp('data-testid="' + id + '"').test(roomTemplate)
+  const dynamic = roomTemplate.includes('`seat-' + id.split('-')[1] + '`') ||
+                  roomTemplate.includes("'seat-" + id.split('-')[1] + "'")
+  return !literal && !dynamic
+})
 check('template 含所有 data-testid 测试钩子 (11 个)',
   missingTestIds.length === 0,
   missingTestIds.length ? '缺: ' + missingTestIds.join(', ') : '')

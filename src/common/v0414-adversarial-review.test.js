@@ -38,7 +38,7 @@ console.log('\n=== 1. V0412-01: requestPromoteToHost 实现存在(误报验证) 
 }
 
 // ============== V0412-02: migrateHost 不该让新 host 被 nextTurn 跳过 ==============
-console.log('\n=== 2. V0412-02: migrateHost 后 seat 0 不在 abandonedSeats(新 host 能再次轮转) ===')
+console.log('\n=== 2. V0412-02: migrateHost 后新 host 不被 nextTurn 跳过(座位稳定) ===')
 {
   const game = createGame({ players: [{}, {}, {}, {}], seed: 42, aiPlayers: [] })
   game.deal()
@@ -47,23 +47,24 @@ console.log('\n=== 2. V0412-02: migrateHost 后 seat 0 不在 abandonedSeats(新
   const ok = game.migrateHost(0, 2)
   assert('migrateHost(0, 2) 返回 true', ok === true)
   const st = game.getState()
-  assert('★ hands[0] 是新 host 的手牌(原 seat 2)',
-    JSON.stringify(st.hands[0]) === JSON.stringify(newHostHand))
-  assert('★ 旧 host (seat 0) NOT in abandonedSeats', !st.abandonedSeats.includes(0))
+  // P0-04 修复后:新 host 手牌留在原 seat 2,旧 host seat 0 由 AI 接管继续参与
+  assert('★ hands[2] 是新 host 的手牌(保留在原 seat)',
+    JSON.stringify(st.hands[2]) === JSON.stringify(newHostHand))
+  assert('★ 旧 host (seat 0) 不在 abandonedSeats', !st.abandonedSeats.includes(0))
+  assert('★ 旧 host (seat 0) 在 aiPlayers 中(AI 接管)', game.getAIPlayers().includes(0))
   assert('旧 host (seat 0) NOT in finishedOrder', !st.finishedOrder.includes(0))
 
-  // 关键验证:连续 8 次 nextTurn,seat 0 至少能再次获得回合
+  // 关键验证:连续轮转中,新 host seat 2 至少能再次获得回合
   const seatSeen = new Set([st.currentPlayer])
   for (let i = 0; i < 12; i++) {
-    // 模拟 playerPlay(任意 seat 出单张),触发 nextTurn
     let cur = game.getState().currentPlayer
     const hand = game.getState().hands[cur]
-    if (hand.length === 0) break  // hands[2] 已空,跳过
+    if (hand.length === 0) break
     game.applyPlay(cur, [hand[0]])
     seatSeen.add(game.getState().currentPlayer)
   }
-  assert('★ 12 轮轮转中 seat 0 至少出现 1 次(不会永久跳过)',
-    seatSeen.has(0))
+  assert('★ 12 轮轮转中新 host seat 2 至少出现 1 次(不会永久跳过)',
+    seatSeen.has(2))
 }
 
 // ============== V0412-03: scheduleAI pass 分支 + aiBroadcast 注入回调 ==============

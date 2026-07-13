@@ -183,8 +183,12 @@ console.log('\n=== 5. requestPromoteToHost 集成 selectNextHostCandidate + canH
 console.log('\n=== 6. v0.4.20 版本号与 npm test 集成 ===')
 {
   check('package.json version === 0.4.21', pkg.version === '0.4.21')
-  check('npm test 命令含 v0419-adversarial-fixes.test.js',
-    /v0419-adversarial-fixes\.test\.js/.test(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')))
+  const pkgSrc = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
+  const usesWrapper = /scripts\/run-all-tests\.js/.test(pkgSrc)
+  const wrapperPath = path.join(repoRoot, 'scripts/run-all-tests.js')
+  const wrapperSrc = usesWrapper && fs.existsSync(wrapperPath) ? fs.readFileSync(wrapperPath, 'utf-8') : ''
+  check('npm test 命令含 v0419-adversarial-fixes.test.js 或其 wrapper 引用该文件',
+    /v0419-adversarial-fixes\.test\.js/.test(pkgSrc) || /v0419-adversarial-fixes\.test\.js/.test(wrapperSrc))
 }
 
 console.log(`\n========== v0.4.19 对抗性复查修复测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

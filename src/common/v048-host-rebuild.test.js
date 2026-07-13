@@ -326,7 +326,7 @@ console.log('\n=== 9. Network TRANSPORT_REBUILD_ANNOUNCE 消息处理 (BC 模式
   J1.requestPromoteToHost({ test: 1 })
   await settle()
   assert('J1 升级后 isHost=true', J1.isHost() === true)
-  assert('J1 升级后 selfSeat=0', J1.getSelfSeat() === 0)
+  assert('J1 升级后 selfSeat 保持 1(座位稳定)', J1.getSelfSeat() === 1)
 
   // 现在 Host 端(原 host)还以为是 host,但 J1 已经是新 host
   // 模拟 Host 端收到 J1 broadcast 的 TRANSPORT_REBUILD_ANNOUNCE
@@ -405,7 +405,7 @@ console.log('\n=== 11. Network TRANSPORT_REBUILD_ANNOUNCE 真分发:joiner 升 h
   J1.requestPromoteToHost({ levelRank: 14 })
   await settle(250)
   assert('J1 升级 isHost=true', J1.isHost() === true)
-  assert('J1 升级 selfSeat=0', J1.getSelfSeat() === 0)
+  assert('J1 升级 selfSeat 保持 1(座位稳定)', J1.getSelfSeat() === 1)
 
   // ★ Host 端 peers map 不自动同步(已知设计):
   //   - 生产中,Host 已掉线(close 浏览器 / 6-8s 心跳超时),所以 Host 端根本不会

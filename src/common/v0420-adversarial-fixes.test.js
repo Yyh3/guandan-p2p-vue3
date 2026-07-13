@@ -176,8 +176,12 @@ console.log('\n=== 4. V0420 GameViewDesktop.onMounted 集成 smartReconnectToPee
 console.log('\n=== 5. V0420 版本号与 npm test 集成 ===')
 {
   check('package.json version === 0.4.21', pkg.version === '0.4.21')
-  check('npm test 命令含 v0420-adversarial-fixes.test.js',
-    /v0420-adversarial-fixes\.test\.js/.test(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')))
+  const pkgSrc = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
+  const usesWrapper = /scripts\/run-all-tests\.js/.test(pkgSrc)
+  const wrapperPath = path.join(repoRoot, 'scripts/run-all-tests.js')
+  const wrapperSrc = usesWrapper && fs.existsSync(wrapperPath) ? fs.readFileSync(wrapperPath, 'utf-8') : ''
+  check('npm test 命令含 v0420-adversarial-fixes.test.js 或其 wrapper 引用该文件',
+    /v0420-adversarial-fixes\.test\.js/.test(pkgSrc) || /v0420-adversarial-fixes\.test\.js/.test(wrapperSrc))
 }
 
 // ============== 6. V0420 已知未做(follow-up) ==============

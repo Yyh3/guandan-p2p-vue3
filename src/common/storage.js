@@ -75,7 +75,20 @@ function getHistory() {
 }
 function addHistory(record) {
   const list = getHistory()
-  list.unshift(record)
+  // ★ Phase 3-B:按 (matchId, roundId, mySeat, myPlayerId) 去重;缺字段时退到 time
+  const hasKey = record &&
+    record.matchId != null && record.roundId != null &&
+    record.mySeat != null && record.myPlayerId != null
+  const key = hasKey
+    ? `${record.matchId}-${record.roundId}-${record.mySeat}-${record.myPlayerId}`
+    : record?.time
+  const exists = list.some(r => {
+    if (hasKey) {
+      return r && `${r.matchId}-${r.roundId}-${r.mySeat}-${r.myPlayerId}` === key
+    }
+    return r && r.time === key
+  })
+  if (!exists) list.unshift(record)
   if (list.length > 50) list.length = 50
   try { localStorage.setItem(KEY_HISTORY, JSON.stringify(list)); return true } catch (e) { return false }
 }

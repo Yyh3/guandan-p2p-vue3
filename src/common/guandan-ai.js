@@ -432,15 +432,27 @@ function chooseLead(cards, levelRank) {
   const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
   const cnt = E.countByRank(concrete)
 
-  // 1. 最小对子(cnt===2 的 rank,优先出 rank 小的)
+  // 1. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
+  //    同张数取 rank 最小(避免扔大王炸出 8 炸)
+  // ★ P1-04 修复:炸弹识别应包含 5~8 张同 rank,不能只认恰好 4 张。
+  //   主动出牌时优先出最小 rank 的炸弹;若该 rank 超过 4 张,先出 4 张炸(可拆)。
+  if (concrete.length >= 4) {
+    const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 4 && r <= 15).sort((a, b) => a - b)
+    if (bombRanks.length > 0) {
+      const r = bombRanks[0]
+      return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
+    }
+  }
+
+  // 2. 最小对子(cnt===2 的 rank,优先出 rank 小的)
   const pairRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 2 && r <= 14).sort((a, b) => a - b)
   if (pairRanks.length > 0) {
     const r = pairRanks[0]
     return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 2) }
   }
 
-  // 2. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
-  const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 3 && r <= 14).sort((a, b) => a - b)
+  // 3. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
+  const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 3 && r <= 14).sort((a, b) => a - b)
   if (tripleRanks.length > 0) {
     const r = tripleRanks[0]
     const tripleCards = concrete.filter(c => c.rank === r).slice(0, 3)
@@ -451,16 +463,6 @@ function chooseLead(cards, levelRank) {
       return { type: 'play', cards: [...tripleCards, ...concrete.filter(c => c.rank === r2).slice(0, 2)] }
     }
     return { type: 'play', cards: tripleCards }
-  }
-
-  // 3. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
-  //    同张数取 rank 最小(避免扔大王炸出 8 炸)
-  if (concrete.length >= 4) {
-    const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 4 && r <= 15).sort((a, b) => a - b)
-    if (bombRanks.length > 0) {
-      const r = bombRanks[0]
-      return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
-    }
   }
 
   // 4. 最小顺子(5 张) — 找连续的 5 张
@@ -506,19 +508,21 @@ function chooseLeadHard(cards, levelRank) {
   const cnt = E.countByRank(concrete)
 
   // 炸弹保留:手牌 ≤ 6 张且有炸弹 → 不主动出炸弹(留作关键时刻)
-  const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 4 && r <= 15)
+  // ★ P1-04 修复:炸弹识别应包含 5~8 张同 rank。
+  const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 4 && r <= 15)
   const preserveBomb = bombRanks.length > 0 && cards.length <= 6
 
   // 鬼牌保留:有 2+ 张鬼牌 → 不出鬼牌(留作凑牌)
   const preserveGhosts = ghosts.length >= 2
 
-  // 0. 手牌 > 6 张 + 有 4 张炸 + 不 preserve → 主动出 4 张炸(清牌 + 对手压不住)
+  // 0. 手牌 > 6 张 + 有炸弹 + 不 preserve → 主动出 4 张炸(清牌 + 对手压不住)
   //    这一步优先于"小成组对子",因为 4 张炸能把对手直接炸死,是关键牌
   if (!preserveBomb && bombRanks.length > 0 && cards.length > 6) {
     const r = bombRanks.sort((a, b) => a - b)[0]
     return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
   }
 
+  // 0.5 手牌 ≤ 6 张但有炸弹时,preserveBomb=true,跳过炸弹,继续走小成组
   // 1. 优先出"小成组" — 对子/三张(rank <= 10,避免出大牌)
   //    注意:4 张同 rank 不算 3 张(cnt 区分 3 张 vs 4 张炸)
   if (concrete.length >= 2) {

@@ -33,56 +33,66 @@ function assert(name, cond) {
 // ============== BUG-A:applyRoundEnd 幂等性 ==============
 console.log('\n=== 1. BUG-A: applyRoundEnd 幂等性(已 finished 不重复 round++) ===')
 {
-  const game = createGame({ players: [{}, {}, {}, {}], seed: 1 })
-  // 直接 phase = 'finished' 然后调用 applyRoundEnd
-  const st0 = game.getState()
-  const round0 = st0.round
-  const levelRank0 = st0.levelRank
-  // 先 applyRoundEnd 一次
-  game.applyRoundEnd()
-  const st1 = game.getState()
-  assert('第一次 applyRoundEnd 后 phase=finished', st1.phase === 'finished')
-  const round1 = st1.round
-  const levelRank1 = st1.levelRank
-  eq('第一次 round++', round1, round0 + 1)
-  // 第二次调用应该幂等(直接 return)
-  game.applyRoundEnd()
-  const st2 = game.getState()
-  eq('第二次 applyRoundEnd round 不再增加', st2.round, round1)
-  eq('第二次 applyRoundEnd levelRank 不再变', st2.levelRank, levelRank1)
+  let game = null
+  try {
+    game = createGame({ players: [{}, {}, {}, {}], seed: 1 })
+    // 直接 phase = 'finished' 然后调用 applyRoundEnd
+    const st0 = game.getState()
+    const round0 = st0.round
+    const levelRank0 = st0.levelRank
+    // 先 applyRoundEnd 一次
+    game.applyRoundEnd()
+    const st1 = game.getState()
+    assert('第一次 applyRoundEnd 后 phase=finished', st1.phase === 'finished')
+    const round1 = st1.round
+    const levelRank1 = st1.levelRank
+    eq('第一次 round++', round1, round0 + 1)
+    // 第二次调用应该幂等(直接 return)
+    game.applyRoundEnd()
+    const st2 = game.getState()
+    eq('第二次 applyRoundEnd round 不再增加', st2.round, round1)
+    eq('第二次 applyRoundEnd levelRank 不再变', st2.levelRank, levelRank1)
+  } finally {
+    if (game) game.destroy()
+  }
 }
 
 // ============== BUG-B:trickEnd 补 turn 事件 + scheduleAI ==============
 console.log('\n=== 2. BUG-B: trickEnd 后 emit("turn") + 重新调度 AI ===')
 {
-  // 4 个 AI 玩家,让 1 个出牌后其他 3 个 pass → 应触发 trickEnd + turn + AI
-  const game = createGame({ players: [{}, {}, {}, {}], seed: 2, aiPlayers: [0, 1, 2, 3] })
-  let trickEndCount = 0
-  let turnCount = 0
-  game.on('trickEnd', () => { trickEndCount++ })
-  game.on('turn', () => { turnCount++ })
-  // 构造手牌:每人 1 张单牌 + 玩家 0 先出
-  const st = game._state
-  for (let i = 0; i < 4; i++) {
-    st.hands[i] = [{ suit: 0, rank: 3 + i }]
+  let game = null
+  try {
+    // 4 个 AI 玩家,让 1 个出牌后其他 3 个 pass → 应触发 trickEnd + turn + AI
+    game = createGame({ players: [{}, {}, {}, {}], seed: 2, aiPlayers: [0, 1, 2, 3] })
+    let trickEndCount = 0
+    let turnCount = 0
+    game.on('trickEnd', () => { trickEndCount++ })
+    game.on('turn', () => { turnCount++ })
+    // 构造手牌:每人 1 张单牌 + 玩家 0 先出
+    const st = game._state
+    for (let i = 0; i < 4; i++) {
+      st.hands[i] = [{ suit: 0, rank: 3 + i }]
+    }
+    // P1-02 修复:applyPass 必须 playing 阶段 / seat === currentPlayer;从 seat 1 开始 pass
+    st.phase = 'playing'
+    st.currentPlayer = 1
+    st.leaderPlayer = 0
+    st.firstPlayer = 0
+    st.lastPlay = { who: 0, type: E.TYPE.SINGLE, mainRank: 3, length: 1, cards: [{ suit: 0, rank: 3 }] }
+    st.passCount = 0
+    // 玩家 1/2/3 连续 pass
+    game.applyPass(1)
+    game.applyPass(2)
+    game.applyPass(3)
+    // currentPlayer 应该立刻回到 leader 0(AI 调度前)
+    assert('trickEnd 后 currentPlayer 回到 leader 0', game._state.currentPlayer === 0)
+    // 等异步 AI(setTimeout)
+    await new Promise(r => setTimeout(r, 1500))
+    assert('trickEnd 触发 ≥ 1 次', trickEndCount >= 1)
+    assert('turn 触发 ≥ 1 次(trickEnd 后 emit)', turnCount >= 1)
+  } finally {
+    if (game) game.destroy()
   }
-  // P1-02 修复:applyPass 必须 playing 阶段 / seat === currentPlayer;从 seat 1 开始 pass
-  st.phase = 'playing'
-  st.currentPlayer = 1
-  st.leaderPlayer = 0
-  st.firstPlayer = 0
-  st.lastPlay = { who: 0, type: E.TYPE.SINGLE, mainRank: 3, length: 1, cards: [{ suit: 0, rank: 3 }] }
-  st.passCount = 0
-  // 玩家 1/2/3 连续 pass
-  game.applyPass(1)
-  game.applyPass(2)
-  game.applyPass(3)
-  // currentPlayer 应该立刻回到 leader 0(AI 调度前)
-  assert('trickEnd 后 currentPlayer 回到 leader 0', game._state.currentPlayer === 0)
-  // 等异步 AI(setTimeout)
-  await new Promise(r => setTimeout(r, 1500))
-  assert('trickEnd 触发 ≥ 1 次', trickEndCount >= 1)
-  assert('turn 触发 ≥ 1 次(trickEnd 后 emit)', turnCount >= 1)
 }
 
 // ============== BUG-D:_kickedSeats SYNC 时清理 ==============
@@ -234,30 +244,35 @@ console.log('\n=== 6. BUG-H: package.json version (v0.4.21) ===')
 // ============== BUG-I:AI 先校验后 broadcast(playerPlay 失败时不 broadcast) ==============
 console.log('\n=== 7. BUG-I: scheduleAI 失败不 broadcast(aiBroadcast 不会被调) ===')
 {
-  // 准备 4 个 AI,故意构造让 AI 决策出非法牌型(playA 返回 false)
-  // 通过 aiBroadcast 计数器验证
-  let aiBroadcastCount = 0
-  const game = createGame({ players: [{}, {}, {}, {}], seed: 3, aiPlayers: [0, 1, 2, 3] })
-  game.setAIBroadcast(() => { aiBroadcastCount++ })
-  // AI 0 出牌后其他 AI 自动应对
-  // 我们直接让 AI 0 出 1 张牌,其他 3 个 pass
-  const st = game._state
-  st.hands[0] = [{ suit: 0, rank: 5 }]
-  st.currentPlayer = 0
-  st.leaderPlayer = 0
-  st.firstPlayer = 0
-  st.lastPlay = null
-  st.passCount = 0
-  // 触发 AI 0 自动出牌
-  // 直接调 playerPlay 走正常路径(成功路径)
-  const r = game.playerPlay(0, [{ suit: 0, rank: 5 }])
-  // 不论成功失败,只验证 scheduleAI 路径不重复 broadcast
-  assert('playerPlay 返回结果', r && typeof r === 'object')
-  // 等异步 AI 调度
-  await new Promise(r => setTimeout(r, 2000))
-  // AI 出过牌但 aiBroadcast 调次数应该合理(每个 AI 出牌成功 → 1 次 broadcast)
-  // 关键:不应有"广播了但 playerPlay 失败"的非法路径
-  assert('aiBroadcast 调次数 < 4 次(没重复)', aiBroadcastCount < 4)
+  let game = null
+  try {
+    // 准备 4 个 AI,故意构造让 AI 决策出非法牌型(playA 返回 false)
+    // 通过 aiBroadcast 计数器验证
+    let aiBroadcastCount = 0
+    game = createGame({ players: [{}, {}, {}, {}], seed: 3, aiPlayers: [0, 1, 2, 3] })
+    game.setAIBroadcast(() => { aiBroadcastCount++ })
+    // AI 0 出牌后其他 AI 自动应对
+    // 我们直接让 AI 0 出 1 张牌,其他 3 个 pass
+    const st = game._state
+    st.hands[0] = [{ suit: 0, rank: 5 }]
+    st.currentPlayer = 0
+    st.leaderPlayer = 0
+    st.firstPlayer = 0
+    st.lastPlay = null
+    st.passCount = 0
+    // 触发 AI 0 自动出牌
+    // 直接调 playerPlay 走正常路径(成功路径)
+    const r = game.playerPlay(0, [{ suit: 0, rank: 5 }])
+    // 不论成功失败,只验证 scheduleAI 路径不重复 broadcast
+    assert('playerPlay 返回结果', r && typeof r === 'object')
+    // 等异步 AI 调度
+    await new Promise(res => setTimeout(res, 2000))
+    // AI 出过牌但 aiBroadcast 调次数应该合理(每个 AI 出牌成功 → 1 次 broadcast)
+    // 关键:不应有"广播了但 playerPlay 失败"的非法路径
+    assert('aiBroadcast 调次数 < 4 次(没重复)', aiBroadcastCount < 4)
+  } finally {
+    if (game) game.destroy()
+  }
 }
 
 // ============== BUG-J:handsRemaining 用 includes ==============

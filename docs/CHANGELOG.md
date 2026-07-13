@@ -4,7 +4,7 @@
 
 ---
 
-## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(45 套件 / 2156 单测全过)
+## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(50 套件 / 2293 单测全过)
 
 > 在 v0.4.21 基线上,按第一性原理系统性修复隐藏技术债,覆盖规则引擎、AI、对局状态机、P2P 网络、UI 生命周期与测试基线。
 
@@ -35,7 +35,7 @@
 
 - 新增 `src/views/game/useGameLogic.test.js`(22 case):直接验证 selfSeat getter、timer 生命周期、`onRestartMatch` 重置、AI takeover 过期 state。
 - 新增 `src/common/network-host-migration-consecutive.test.js`(20 case):验证 host 主动让位后新 host 上任、旁观者收到广播,牌局网络可继续。
-- `package.json` 已把上述套件纳入 `npm test`;总基线升至 **45 套件 / 2156 通过 / 0 失败**。
+- `package.json` 已把上述套件纳入 `npm test`;总基线升至 **50 套件 / 2293 通过 / 0 失败**。
 
 ---
 

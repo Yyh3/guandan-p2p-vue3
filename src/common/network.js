@@ -99,6 +99,8 @@ function ensureUuid() {
 const PEER_CACHE_KEY_PREFIX = 'guandan-v0420-peer-cache-'
 const PEER_CACHE_MAX_AGE_MS = 60 * 60 * 1000  // 1 小时
 
+const isValidSeat = (s) => typeof s === 'number' && s >= 0 && s <= 3
+
 function _peerCacheKey(roomNo) { return PEER_CACHE_KEY_PREFIX + (roomNo || 'default') }
 
 function _loadPeerCache(roomNo) {
@@ -310,6 +312,7 @@ function getSelfSeat() { return selfSeat }
 function setSelfSeat(i) { selfSeat = i }
 function getHostSeat() { return hostSeat }
 function isHost() { return isHostFlag }
+function isAuthorityMessage(msg) { return msg && msg.from === hostSeat }
 
 function sendMessage(msg) {
   if (!transport) return false
@@ -582,9 +585,16 @@ function _handleHostMessage(msg) {
       peers.set(msg.from, { ...peers.get(msg.from), ...msg.payload })
     }
   } else if (msg.type === 'READY') {
-    if (peers.has(msg.from)) {
-      peers.set(msg.from, { ...peers.get(msg.from), ready: msg.payload.ready })
-    }
+    // ★ Phase 2:host 端校验 READY payload 合法
+    if (!peers.has(msg.from)) return
+    if (typeof msg.payload?.ready !== 'boolean') return
+    peers.set(msg.from, { ...peers.get(msg.from), ready: msg.payload.ready })
+    // ★ P1-05 修复:host 广播权威 READY_COMMITTED,让所有 joiner 的 ready 状态一致。
+    //   原 READY 消息继续 relay 作为兼容,但 joiner 应以 READY_COMMITTED 为准。
+    broadcast({
+      type: 'READY_COMMITTED',
+      payload: { seat: msg.from, ready: msg.payload.ready }
+    })
   } else if (msg.type === 'SEAT_SWAP_ACK') {
     // ★ Phase 2 修复:host 端应用 joiner 发起的座位交换,再 relay 给其它 joiner
     if (!msg.payload) return
@@ -612,22 +622,19 @@ function _handleHostMessage(msg) {
       // 可选:立即触发 peer:leave(但 joiner 端 close 时也会触发,避免重复)
       // emit('peer:leave', { seat })
     }
-    // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端 ws.onclose (payload.seat === -1 表示
-    //   没有具体 seat — 即 client 端连接关闭) → emit 'host:lost' 让业务层响应。
-    //   旧版只有 _DISCONNECT with valid seat 触发 peer:leave,joiner 端 client 关闭
-    //   (host 崩溃/断电/被杀进程) 不产生业务事件 → joiner 不知道 host 走了,
-    //   只能等 6-8s 心跳超时,而且即使超时也只是看 STALE 状态,不会跳页或提示。
-    //   现在 emit host:lost 一次,GameView/RoomView 监听后明确提示 + 跳回首页。
-    //   防御:如果是 host 自己被踢/自己 close,不应该 emit host:lost(避免提示自己) —
-    //   host 端 isHostFlag=true,所以下面条件天然排除。
-    if (msg.payload && msg.payload.seat === -1 && !isHostFlag && !_kickedSeats.has(-1)) {
-      emit('host:lost', { reason: 'client_disconnect', ts: Date.now() })
-    }
   }
 }
 
 function _handleJoinerMessage(msg) {
-  if (msg.type === 'SEAT_SWAP_ACK') {
+  if (msg.type === '_DISCONNECT') {
+    // ★ P0-02 修复:joiner 端 transport(client)关闭时 payload.seat === -1,
+    //   说明与 host 的 WebSocket 已断开(host 崩溃/断电/杀进程/网络中断)。
+    //   原逻辑错误地写在 _handleHostMessage 中,因 isHostFlag 永远为 true 而不会触发;
+    //   现在放到 joiner 端处理,emit host:lost 让 GameView/RoomView 提示并跳回首页。
+    if (msg.payload && msg.payload.seat === -1 && !isHostFlag && !_kickedSeats.has(-1)) {
+      emit('host:lost', { reason: 'client_disconnect', ts: Date.now() })
+    }
+  } else if (msg.type === 'SEAT_SWAP_ACK') {
     // ★ v2.4-p4 BUG-006:joiner 端收到 host 的 SEAT_SWAP_ACK,本地同步 swap
     //   _applySeatSwapLocal 内部会更新 peers Map + selfSeat + emit 'peer:seat_swap'
     if (!msg.payload) return
@@ -640,6 +647,16 @@ function _handleJoinerMessage(msg) {
     //   是 idempotent 的——a/b swap 两次等于原样)。安全起见我们让 host 端也调一次
     //   来保持 emit 事件对称(joiner 端通过 emit 'peer:seat_swap' 同步 UI)。
     _applySeatSwapLocal(a, b)
+  } else if (msg.type === 'READY_COMMITTED') {
+    // ★ P1-05 修复:joiner 只接受 host 权威的 ready 状态提交。
+    if (!isAuthorityMessage(msg)) return
+    if (!msg.payload) return
+    const { seat, ready } = msg.payload
+    if (!isValidSeat(seat)) return
+    if (typeof ready !== 'boolean') return
+    if (peers.has(seat)) {
+      peers.set(seat, { ...peers.get(seat), ready })
+    }
   } else if (msg.type === 'KICKED') {
     // ★ v2.4-p4 BUG-007:joiner 端收到 host 定向发的 KICKED,立即跳页
     //   KICKED 比 PEER_LEAVE 优先级更高,因为它直达被踢者,不需要根据 seat 字段匹配
@@ -649,6 +666,8 @@ function _handleJoinerMessage(msg) {
     // ★ 通知 host 端 transport 关闭(joiner 端 transport 自己 close 会触发 _DISCONNECT)
     //   不在这里主动 close transport,留给 ws.onclose 自然路径,避免与 _DISCONNECT 重复
   } else if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
+    // ★ Phase 2:SYNC 只能由 host 权威发出
+    if (!isAuthorityMessage(msg)) return
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
       peers.set(seat, info)
@@ -696,32 +715,30 @@ function _handleJoinerMessage(msg) {
       //   之前收到 PEER_LEAVE 时也跳页,所以 self:kicked 必须有完整 payload)
       _emitSelfKicked(msg.payload?.reason, msg.payload?.ts)
     }
-    // ★ v2.1 P3:host 迁移标记 — joiner 收到 PEER_LEAVE { seat: 0, migrate: true }
-    //   如果自己是被选中的新 host(newHostSeat) → 升级
-    if (migrate && seat === 0) {
+    // ★ v2.1 P3:host 迁移标记 — joiner 收到 PEER_LEAVE { seat: oldHostSeat, migrate: true }
+    //   座位稳定:新旧 host 都保持各自逻辑 seat 不变,只切换 isHostFlag / hostSeat。
+    if (migrate) {
+      const oldHostSeat = seat
       const newHostSeat = msg.payload?.newHostSeat
       // v3.x P2-23 修复(N-3):从 PEER_LEAVE 消息里直接拿 snapshot(优先),
       //   fallback 到 NEW_HOST 后手广播(announceNewHost 路径)
       const snap = msg.payload?.snapshot ?? null
       if (newHostSeat != null && newHostSeat === selfSeat) {
-        // 我就是新 host:把自己升到 seat 0
-        const myInfo = peers.get(selfSeat) || selfInfo
-        peers.delete(selfSeat)
-        peers.set(0, myInfo)
-        selfSeat = 0
+        // 我就是新 host:权威切换到本 seat,不搬动 selfSeat
+        peers.delete(oldHostSeat)
+        hostSeat = selfSeat
         isHostFlag = true
-        emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: true })
+        emit('host:migrated', { oldHostSeat, newHostSeat, snapshot: snap, isMyself: true })
       } else if (newHostSeat != null) {
-        // 旁观者:同步 peers Map,把新 host 升到 seat 0
-        if (peers.has(newHostSeat)) {
-          const newHostInfo = peers.get(newHostSeat)
-          peers.delete(newHostSeat)
-          peers.set(0, newHostInfo)
-        }
-        emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
+        // 旁观者:同步 hostSeat,保留新 host peer 在原 seat
+        peers.delete(oldHostSeat)
+        hostSeat = newHostSeat
+        emit('host:migrated', { oldHostSeat, newHostSeat, snapshot: snap, isMyself: false })
       }
     }
   } else if (msg.type === 'AI_TAKEOVER') {
+    // ★ Phase 2:AI_TAKEOVER 只能由 host 权威发出
+    if (!isAuthorityMessage(msg)) return
     // ★ v2.0 BUG-7:joiner 端收到 AI_TAKEOVER → 触发本地 ai:takeover
     const seat = msg.payload?.seat
     if (seat != null) {
@@ -729,56 +746,45 @@ function _handleJoinerMessage(msg) {
     }
   } else if (msg.type === 'NEW_HOST') {
     // ★ v2.1 P3:某 joiner 升级为新 host,广播通知所有 joiner
+    //   座位稳定:新 host 保持原逻辑 seat,只同步 hostSeat。
     const newHostSeat = msg.payload?.newHostSeat
     if (newHostSeat == null) return
     // 检查自己是否就是新 host(自己已经处理过,跳过)
     if (selfSeat === newHostSeat) return
-    // 旁观 joiner:更新 host 信息(peers 里 seat 0 = 新 host)
     if (peers.has(newHostSeat)) {
-      // 旧 host 已被踢出(在 PEER_LEAVE 时清理),这里把新 host 升到 seat 0
-      const newHostInfo = peers.get(newHostSeat)
-      peers.delete(newHostSeat)
-      peers.set(0, newHostInfo)
-      // 新 host 那个 joiner 端之前 setSelfSeat 已经是 0 了(他在 announceNewHost 之前就调了)
-      // 旁观者的 selfSeat 不变
-      emit('host:migrated', { newHostSeat, snapshot: msg.payload?.snapshot })
+      hostSeat = newHostSeat
+      emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: msg.payload?.snapshot })
     }
   } else if (msg.type === 'PROMOTE_HOST_REQUEST') {
     // ★ v3.x P2-29(N-3 闭环):joiner 端兜底提升
-    //   触发场景:原 host 掉线,joiner 端 GameView 监听到 peer:leave { seat: 0 }
+    //   触发场景:原 host 掉线,joiner 端 GameView 监听到 peer:leave { seat: hostSeat }
     //     后调 requestPromoteToHost(snapshot) 广播本消息
     //   竞态保护:_promotedHostSeat 全局标记记录第一个升级的 seat,后续到者让位
+    //   座位稳定:不搬动任何 peer 的 seat,只切换 hostSeat / isHostFlag。
     const newHostSeat = msg.payload?.newHostSeat
     const snap = msg.payload?.snapshot ?? null
     if (newHostSeat == null || newHostSeat < 1 || newHostSeat > 3) return
     // 全局去重:已有别的新 host 升级 → 这次请求让位
     if (_promotedHostSeat != null && _promotedHostSeat !== newHostSeat) {
-      // 让位分支:旁观者更新 peers(让先到的 _promotedHostSeat 升到 seat 0)
+      // 让位分支:旁观者同步 hostSeat,保留先到的 _promotedHostSeat peer 在原 seat
       if (peers.has(_promotedHostSeat)) {
-        const newHostInfo = peers.get(_promotedHostSeat)
-        peers.delete(_promotedHostSeat)
-        peers.set(0, newHostInfo)
+        hostSeat = _promotedHostSeat
       }
-      emit('host:migrated', { newHostSeat: _promotedHostSeat, snapshot: snap, isMyself: false })
+      emit('host:migrated', { oldHostSeat: null, newHostSeat: _promotedHostSeat, snapshot: snap, isMyself: false })
       return
     }
     if (selfSeat === newHostSeat) {
       // 我就是被选中的新 host
       if (isHostFlag) return  // 防御:本端已经升过
       _promotedHostSeat = newHostSeat
-      const myInfo = peers.get(selfSeat) || selfInfo
-      peers.delete(selfSeat)
-      peers.set(0, myInfo)
-      selfSeat = 0
+      hostSeat = selfSeat
       isHostFlag = true
-      emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: true })
+      emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: snap, isMyself: true })
     } else if (peers.has(newHostSeat)) {
-      // 旁观:更新 peers Map(让 newHostSeat 升到 seat 0)
-      const newHostInfo = peers.get(newHostSeat)
-      peers.delete(newHostSeat)
-      peers.set(0, newHostInfo)
+      // 旁观:同步 hostSeat,保留新 host peer 在原 seat
+      hostSeat = newHostSeat
       _promotedHostSeat = newHostSeat
-      emit('host:migrated', { newHostSeat, snapshot: snap, isMyself: false })
+      emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: snap, isMyself: false })
     }
   } else if (msg.type === 'TRANSPORT_REBUILD_ANNOUNCE') {
     // v0.4.8 N-1:新 host 端 broadcast 自己的新 IP:port,其它 joiner 收到后
@@ -800,13 +806,11 @@ function _handleJoinerMessage(msg) {
     const newHostAddress = msg.payload?.newHostAddress
     const announceHostSeat = msg.payload?.newHostSeat
     if (typeof newHostAddress !== 'string') return
-    // BC 模式:不需要 transport rebuild,但需要把新 hostSeat 同步到 peers Map
+    // BC 模式:不需要 transport rebuild,但需要同步 hostSeat
     if (transport && transport.type === 'bc') {
-      // joiner 端:把 announceHostSeat 的 peer 信息搬到 seat 0
-      if (announceHostSeat && announceHostSeat !== 0 && peers.has(announceHostSeat)) {
-        const newHostInfo = peers.get(announceHostSeat)
-        peers.delete(announceHostSeat)
-        peers.set(0, newHostInfo)
+      // joiner 端:保留新 host peer 在原 seat,只改 hostSeat
+      if (announceHostSeat != null && peers.has(announceHostSeat)) {
+        hostSeat = announceHostSeat
       }
       emit('transport:rebuild:announce', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
       emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
@@ -826,11 +830,9 @@ function _handleJoinerMessage(msg) {
     ;(async () => {
       try {
         await transport.rebuildAsClient(parsed.host, parsed.port)
-        // 同步 peers Map(joiner 端把 announceHostSeat → 0)
-        if (announceHostSeat && announceHostSeat !== 0 && peers.has(announceHostSeat)) {
-          const newHostInfo = peers.get(announceHostSeat)
-          peers.delete(announceHostSeat)
-          peers.set(0, newHostInfo)
+        // 同步 hostSeat(joiner 端保留新 host peer 在原 seat)
+        if (announceHostSeat != null && peers.has(announceHostSeat)) {
+          hostSeat = announceHostSeat
         }
         emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'ws' })
       } catch (e) {
@@ -1445,16 +1447,17 @@ function selectNextHostBySeat() {
  * @returns {boolean} true=成功发起
  */
 function requestHostMigration(newHostSeat, snapshot) {
+  const oldHostSeat = hostSeat
   if (!isHostFlag) return false
   if (![1, 2, 3].includes(newHostSeat)) {
     // 调用方没传 → 自动选
     newHostSeat = selectNextHostBySeat()
     if (newHostSeat === 0) return false  // 没人了,牌局结束
   }
-  // 广播 PEER_LEAVE + 迁移标记 + 快照
+  // 广播 PEER_LEAVE + 迁移标记 + 快照(座位稳定:seat 用 oldHostSeat,不用 0)
   sendMessage({
     type: 'PEER_LEAVE',
-    payload: { seat: 0, migrate: true, newHostSeat, snapshot: snapshot || null },
+    payload: { seat: oldHostSeat, migrate: true, newHostSeat, snapshot: snapshot || null },
   })
   return true
 }
@@ -1561,12 +1564,12 @@ async function rebuildAsHost() {
     if (typeof transport.sendMessage === 'function') {
       transport.sendMessage({
         type: 'TRANSPORT_REBUILD_ANNOUNCE',
-        payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
+        payload: { newHostSeat: selfSeat, newHostAddress, ts: Date.now() },
       })
     } else {
       sendMessage({
         type: 'TRANSPORT_REBUILD_ANNOUNCE',
-        payload: { newHostSeat: 0, newHostAddress, ts: Date.now() },
+        payload: { newHostSeat: selfSeat, newHostAddress, ts: Date.now() },
       })
     }
   } catch (e) {
@@ -1578,8 +1581,8 @@ async function rebuildAsHost() {
   transport = newTransport
   transport.onMessage(_onTransportMessage)
   // 5) emit 本端事件
-  emit('transport:rebuild:announce', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
-  emit('transport:rebuild:done', { newHostSeat: 0, newHostAddress, mode: 'ws', isMyself: true })
+  emit('transport:rebuild:announce', { newHostSeat: selfSeat, newHostAddress, mode: 'ws', isMyself: true })
+  emit('transport:rebuild:done', { newHostSeat: selfSeat, newHostAddress, mode: 'ws', isMyself: true })
   // 6) 重启心跳
   startHeartbeatChecker()
   return { ok: true, newHostAddress }
@@ -1589,31 +1592,23 @@ async function rebuildAsHost() {
  * v3.x P2-29(N-3 闭环):joiner 端主动请求"提升自己为新 host"
  *
  * 触发场景:原 host 6-8s 心跳掉线 / 主动 close / 浏览器关掉
- *   - joiner 端 network 检测到 PEER_LEAVE { seat: 0 } 后,由 GameView 调本函数
+ *   - joiner 端 network 检测到 PEER_LEAVE { seat: hostSeat } 后,由 GameView 调本函数
  *   - 广播 PROMOTE_HOST_REQUEST { newHostSeat: selfSeat, snapshot }
  *   - 所有 joiner 收到后:
  *     - 如果 payload.newHostSeat === selfSeat:自己升为 host(emit host:migrated { isMyself: true, snapshot })
- *     - 否则:旁观,更新 peers Map(让 newHostSeat 升到 seat 0)
+ *     - 否则:旁观,同步 hostSeat(保留新 host peer 在原 seat)
  *
  * 竞态:多个 joiner 同时调本函数时,各自广播自己的 PROMOTE_HOST_REQUEST。
- *   第一个到达的 joiner 把自己升为 host,后续到达的 joiner 由于 `peers.get(0)` 已存在新 host,
+ *   第一个到达的 joiner 把自己升为 host,后续到达的 joiner 由于 _promotedHostSeat 已记录,
  *   会"认新主"不升级(避免一房多主)。本实现简单可靠,不需要复杂去重。
  *
- * 调用方:GameView useGameLogic.js 监听 `peer:leave { seat: 0 }` 后调本函数。
+ * 调用方:GameView useGameLogic.js 监听 `peer:leave { seat: hostSeat }` 后调本函数。
  *
  * @param {object} [snapshot] 当前 game state 快照(可选)
  * @returns {boolean} true=成功发起
  */
 function requestPromoteToHost(snapshot) {
-  if (selfSeat === 0) return false  // 防御性:已经显示是 host 不用调
-  if (isHostFlag) {
-    // 已经是 host 但仍要广播(让旁观者同步状态),本端不再 emit host:migrated
-    sendMessage({
-      type: 'PROMOTE_HOST_REQUEST',
-      payload: { newHostSeat: selfSeat, snapshot: snapshot || null, ts: Date.now() },
-    })
-    return true
-  }
+  if (isHostFlag) return false  // 已经是 host 不需要再提升自己
   // 广播 PROMOTE_HOST_REQUEST(可能因旧 host transport 死掉失败,失败不致命)
   try {
     sendMessage({
@@ -1849,7 +1844,7 @@ function _getTransportType() {
 export {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007:swapSeats 网络层权威 + kickPlayer 统一踢人协议
   swapSeats, kickPlayer,
@@ -1886,7 +1881,7 @@ export {
 const net = {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007
   swapSeats, kickPlayer,

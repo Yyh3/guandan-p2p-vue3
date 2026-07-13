@@ -6,6 +6,7 @@
     :is-p2-p-mode="isP2PMode"
     :difficulty="difficulty"
     :initial-level-rank="initialLevelRank"
+    :first-seat="firstSeat"
   />
 </template>
 
@@ -45,8 +46,6 @@ const route = useRoute()
 //   原因:游戏中反复切换横竖屏会导致 <component :is> 重新挂载 GameViewDesktop /
 //   GameViewMobile,useGameLogic 生命周期重新执行,游戏状态丢失。
 //   进入对局页时的设备形态即决定本次渲染用 desktop 或 mobile 布局。
-const isMobile = ref(false)
-
 function _computeIsMobile() {
   if (typeof window === 'undefined' || !window.matchMedia) return false
   const portrait = window.matchMedia('(orientation: portrait)').matches
@@ -55,9 +54,9 @@ function _computeIsMobile() {
   return (portrait && narrow) || (!portrait && shortH)
 }
 
-onMounted(() => {
-  isMobile.value = _computeIsMobile()
-})
+// ★ P0-01 修复:首帧同步判定移动端,避免先挂载 desktop 再卸载换 mobile,
+//   导致重复初始化 game / 重复发牌 / 旧 AI timer 残留。
+const isMobile = ref(_computeIsMobile())
 
 // ===== 2. 路由 query 解析 =====
 const selfSeat = computed(() => {
@@ -91,5 +90,12 @@ const initialLevelRank = computed(() => {
   if (v === undefined || v === null) return undefined
   const n = Number(v)
   return Number.isFinite(n) ? n : undefined
+})
+// ★ Phase3 同步切牌:RoomView host 切牌后通过 URL 透传首家座位
+const firstSeat = computed(() => {
+  const v = route.query.firstSeat
+  if (v === undefined || v === null) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 && n <= 3 ? n : undefined
 })
 </script>

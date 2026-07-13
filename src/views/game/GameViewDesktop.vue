@@ -36,6 +36,7 @@
         :level-label="levelLabel"
         :round="round"
         :multiplier="multiplier"
+        :mode-label="isP2PMode ? '好友对局' : 'AI 对局'"
       />
     </div>
 
@@ -170,11 +171,26 @@
           </div>
         </div>
         <div class="result-actions">
-          <button class="r-btn ghost" @click="onBack">退出</button>
-          <!-- ★ v0.4.9:isRestartAfterA 时按钮文案/动作切到「重开一局」 -->
-          <button class="r-btn primary" @click="onPrimaryResultAction">
-            {{ isRestartAfterA ? '重开一局' : '下一局' }}
+          <button class="r-btn ghost" @click="onBack">返回首页</button>
+          <!-- ★ P1-01 修复:恢复明确的「下一局/重开一轮」按钮,但保留不点击遮罩自动下一局的行为 -->
+          <button
+            v-if="!isP2PMode"
+            class="r-btn primary"
+            @click="isRestartAfterA ? onRestartMatch() : onNext()"
+          >
+            {{ isRestartAfterA ? '重开一轮' : '下一局' }}
           </button>
+          <button
+            v-else-if="isNetworkHost"
+            class="r-btn primary"
+            @click="isRestartAfterA ? onRestartMatch() : onNext()"
+          >
+            {{ isRestartAfterA ? '重开一轮' : '开始下一局' }}
+          </button>
+          <button v-else class="r-btn primary" disabled>
+            等待房主开始下一局
+          </button>
+          <button v-if="isP2PMode" class="r-btn ghost" @click="onBackToRoom">返回房间</button>
         </div>
       </div>
     </div>
@@ -226,6 +242,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
+import { showConfirm } from '@/common/dialog-bus.js'
 
 import HudTop from '@/components/HudTop.vue'
 import TableCenter from '@/components/TableCenter.vue'
@@ -258,6 +275,8 @@ const props = defineProps({
   difficulty: { type: String, default: 'medium' },
   // ★ LOGIC-01 修复:AI 页传入的起始级牌
   initialLevelRank: { type: Number, default: undefined },
+  // ★ Phase3 同步切牌:首家座位
+  firstSeat: { type: Number, default: undefined },
 })
 
 // v2.4 task 1:纯逻辑抽到 useGameLogic.js composable
@@ -356,7 +375,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
-  onPrimaryResultAction, onRestartMatch, isRestartAfterA,  // ★ v0.4.9
+  onRestartMatch, isRestartAfterA,  // ★ v0.4.9
   onIcon, initGame, retryDeal,
 } = useGameLogic({
   mainActionsRef,
@@ -367,6 +386,7 @@ const {
   difficulty: props.difficulty,
   // ★ LOGIC-01 修复:AI 页传入的起始级牌
   initialLevelRank: props.initialLevelRank,
+  firstSeat: props.firstSeat,
 })
 
 // 路由相关的 UI 跳转(只能组件层做)
@@ -376,28 +396,57 @@ function exitGame() {
 }
 function onBack() { exitGame() }
 function goHome() { exitGame() }
+// ★ P1-02 修复:返回房间时携带原 room/role/host 等 query,避免 RoomView 把 joiner 误判为 host。
+function onBackToRoom() {
+  router.push({
+    path: '/room',
+    query: {
+      roomNo: route.query.roomNo,
+      role: route.query.role,
+      host: route.query.host,
+      nick: route.query.nick,
+      avatar: route.query.avatar,
+    },
+  })
+}
 function showMenu() {
-  if (!confirm('退出对局?')) return
-  // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,先把对局让给队友(seat 2)
-  //   之前 host 直接关掉 net → joiner 端走兜底(6-8s 心跳超时感知 host 掉线),
-  //   现在 host 主动调 requestHostMigration 把当前 game state 传给新 host,
-  //   joiner 端实时收到 host:migrated 事件,牌局无缝继续。
-  //   仅当:isP2P 模式 + 本机是网络 host + 对局进行中
-  if (isP2PMode.value && isNetworkHost.value && game.value) {
-    const st = game.value.getState()
-    if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
-      const snapshot = {
-        hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
-        firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
-        lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
-        trickHistory: st.trickHistory, passCount: st.passCount,
-        tribute: st.tribute, ghost: st.ghost,
-        levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
+  showConfirm({
+    title: '退出对局',
+    message: '确定要退出对局吗？',
+    confirmText: '退出',
+    cancelText: '取消',
+    onConfirm: () => {
+      // ★ 静态审查 v0.4.5 N-3 闭环:host 主动退出时,先把对局让给队友(seat 2)
+      //   之前 host 直接关掉 net → joiner 端走兜底(6-8s 心跳超时感知 host 掉线),
+      //   现在 host 主动调 requestHostMigration 把当前 game state 传给新 host,
+      //   joiner 端实时收到 host:migrated 事件,牌局无缝继续。
+      //   仅当:isP2P 模式 + 本机是网络 host + 对局进行中
+      if (isP2PMode.value && isNetworkHost.value && game.value) {
+        const st = game.value.getState()
+        if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
+          const snapshot = {
+            hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
+            firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
+            lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
+            trickHistory: st.trickHistory, passCount: st.passCount,
+            tribute: st.tribute, ghost: st.ghost,
+            levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
+          }
+          // Phase 1:座位稳定选新 host — 优先队友,其次其它在线 peer
+          const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
+          const peers = net.getPeers ? net.getPeers() : new Map()
+          const candidates = [
+            (selfSeat + 2) % 4,
+            (selfSeat + 1) % 4,
+            (selfSeat + 3) % 4,
+          ]
+          const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
+          try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+        }
       }
-      try { net.requestHostMigration && net.requestHostMigration(2, snapshot) } catch (e) { /* swallow */ }
-    }
-  }
-  exitGame()
+      exitGame()
+    },
+  })
 }
 // NicknameEditor 用 — 仅占位保留挂载点(永远 false,见 template v-if="false")
 function onNickEditorConfirmed(p) {
@@ -424,6 +473,8 @@ function onNickEditorConfirmed(p) {
   min-height: 100vh;
   overflow: hidden;
   color: #fff;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ============================================================
@@ -883,8 +934,11 @@ function onNickEditorConfirmed(p) {
   border-radius: var(--radius-pill);
   padding: 4px;
   backdrop-filter: blur(4px);
+  /* ★ P1-06 修复:透明背景区域不拦截背后的手牌点击 */
+  pointer-events: none;
 }
 .suit-tab {
+  pointer-events: auto;
   width: 36px; height: 36px;
   background: transparent;
   border: none;
@@ -911,6 +965,11 @@ function onNickEditorConfirmed(p) {
   align-items: center;
   gap: 14px;
   z-index: 7;
+  /* ★ P1-06 修复:容器透明区域不拦截背后的手牌点击,按钮自身恢复点击 */
+  pointer-events: none;
+}
+.action-bar-wrap :deep(.main-actions) {
+  pointer-events: auto;
 }
 
 /* ============================================================

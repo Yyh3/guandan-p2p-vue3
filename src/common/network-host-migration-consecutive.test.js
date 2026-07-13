@@ -83,9 +83,11 @@ console.log('\n=== host 迁移后连续对局:网络层行为 ===')
   assert('J2 payload.newHostSeat = 2', j2Migrated.payload?.newHostSeat === 2)
   assert('J1 payload 携带 snapshot', j1Migrated.payload?.snapshot?.testSnapshot === true)
 
-  assert('J2 迁移后 selfSeat = 0', J2.getSelfSeat() === 0)
+  assert('J2 迁移后 selfSeat 保持 2(座位稳定)', J2.getSelfSeat() === 2)
+  assert('J2 迁移后 hostSeat = 2', J2.getHostSeat() === 2)
   assert('J2 迁移后 isHost = true', J2.isHost() === true)
   assert('J1 迁移后 selfSeat 仍为 1', J1.getSelfSeat() === 1)
+  assert('J1 迁移后 hostSeat = 2', J1.getHostSeat() === 2)
   assert('J1 迁移后 isHost = false', J1.isHost() === false)
 
   // 6. 新 host(J2) 广播一条游戏消息,验证旁观者 J1 能收到 → 牌局网络可继续
@@ -97,10 +99,10 @@ console.log('\n=== host 迁移后连续对局:网络层行为 ===')
   assert('J1 收到新 host 的 TEST_CONTINUE 广播', j1Msg.received === true)
   assert('广播 payload 完整', j1Msg.payload?.from === 'new-host' && j1Msg.payload?.round === 2)
 
-  // 7. 新 host peers Map 仍包含所有人(含旧 host seat)
+  // 7. 新 host peers Map 仍包含剩余在线玩家;旧 host 已离场,不应再出现在 peers
   const j2Peers = J2.getPeers()
   assert('新 host peers 仍含 J1(seat 1)', j2Peers.has(1) === true)
-  assert('新 host peers 仍含旧 host 信息(seat 0)', j2Peers.has(0) === true)
+  assert('旧 host 已离场,新 host peers 不含 seat 0', j2Peers.has(0) === false)
 
   // cleanup
   try { Host.close() } catch (e) {}

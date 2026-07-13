@@ -57,108 +57,121 @@ console.log('\n=== 1. V049-01: onHintToggle 函数体含 diff 局部变量声明
 // ============== V049-02: isRestartAfterA 贯通 roundEnd + ROUND_END payload + refreshUi ==============
 console.log('\n=== 2. V049-02: isRestartAfterA 贯通验证 ===')
 {
-  const fs = await import('fs')
-  const src = fs.readFileSync('src/views/game/useGameLogic.js', 'utf-8')
-  // 2.1 roundEnd handler 解构 isRestartAfterA + previousLevelRank
-  const roundEndMatch = src.match(/game\.value\.on\('roundEnd', \(\{([^}]+)\}\) => \{/)
-  assert('roundEnd handler 解构含 isRestartAfterA + previousLevelRank',
-    !!roundEndMatch && /isRestartAfterA\s*:?\s*\w+/.test(roundEndMatch[1]) && /previousLevelRank/.test(roundEndMatch[1])
-  )
-  // 2.2 roundEnd handler 内设置 isRestartAfterA.value(抓整个 on('roundEnd') handler 函数体)
-  // 用非贪婪 + 末尾定位:到下个 `game.value.deal()` 或同层语句结束
-  const roundEndFullMatch = src.match(/game\.value\.on\('roundEnd'[\s\S]*?\n\s{4}\}\)\s*\n\s{4}game\.value\.deal\(\)/)
-  assert('roundEnd handler 函数体内含 isRestartAfterA.value = ira',
-    !!roundEndFullMatch && /isRestartAfterA\.value\s*=\s*ira/.test(roundEndFullMatch[0])
-  )
-  // 2.3 ROUND_END payload 含 isRestartAfterA + previousLevelRank
-  const payloadMatch = src.match(/const payload = \{([\s\S]*?)\n\s{10}\}/)
-  assert('ROUND_END payload 含 isRestartAfterA 字段',
-    !!payloadMatch && /isRestartAfterA:\s*!!\s*ira/.test(payloadMatch[1])
-  )
-  assert('ROUND_END payload 含 previousLevelRank 字段',
-    !!payloadMatch && /previousLevelRank:/.test(payloadMatch[1])
-  )
-  // 2.4 refreshUiFromGameState 同步 isRestartAfterA
-  const refreshFnMatch = src.match(/function refreshUiFromGameState\(\) \{([\s\S]*?)\n\s{2}\}/)
-  assert('refreshUiFromGameState 同步 isRestartAfterA',
-    !!refreshFnMatch && /isRestartAfterA\.value\s*=\s*st\.isRestartAfterA/.test(refreshFnMatch[1])
-  )
-  // 2.5 game 层 state.isRestartAfterA 在 restartMatch 内被重置
-  const gameSrc = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
-  const restartFnMatch = gameSrc.match(/function restartMatch\([\s\S]*?\n\s{2}\}/)
-  assert('restartMatch 清空 state.isRestartAfterA = false',
-    !!restartFnMatch && /state\.isRestartAfterA\s*=\s*false/.test(restartFnMatch[0])
-  )
-  // 2.6 行为验证:完成一局后 state.isRestartAfterA 字段存在(bool)
-  const game = createGame({
-    players: [{ name: 'p0' }, { name: 'p1' }, { name: 'p2' }, { name: 'p3' }],
-    seed: 42,
-    aiPlayers: [0, 1, 2, 3],
-  })
-  game.applyRoundEnd()
-  const stAfter = game.getState()
-  assert('finishRound 后 state.isRestartAfterA 字段存在(bool)',
-    typeof stAfter.isRestartAfterA === 'boolean'
-  )
+  let game = null
+  try {
+    const fs = await import('fs')
+    const src = fs.readFileSync('src/views/game/useGameLogic.js', 'utf-8')
+    // 2.1 roundEnd handler 解构 isRestartAfterA + previousLevelRank
+    const roundEndMatch = src.match(/game\.value\.on\('roundEnd', \(\{([^}]+)\}\) => \{/)
+    assert('roundEnd handler 解构含 isRestartAfterA + previousLevelRank',
+      !!roundEndMatch && /isRestartAfterA\s*:?\s*\w+/.test(roundEndMatch[1]) && /previousLevelRank/.test(roundEndMatch[1])
+    )
+    // 2.2 roundEnd handler 内设置 isRestartAfterA.value(抓整个 on('roundEnd') handler 函数体)
+    // 用非贪婪 + 末尾定位:到 roundEnd handler 结束的 `})` 为止
+    const roundEndFullMatch = src.match(/game\.value\.on\('roundEnd'[\s\S]*?\n\s{4}\}\)\s*\n/)
+    assert('roundEnd handler 函数体内含 isRestartAfterA.value = ira',
+      !!roundEndFullMatch && /isRestartAfterA\.value\s*=\s*ira/.test(roundEndFullMatch[0])
+    )
+    // 2.3 ROUND_END payload 含 isRestartAfterA + previousLevelRank
+    const payloadMatch = src.match(/const payload = \{([\s\S]*?)\n\s{10}\}/)
+    assert('ROUND_END payload 含 isRestartAfterA 字段',
+      !!payloadMatch && /isRestartAfterA:\s*!!\s*ira/.test(payloadMatch[1])
+    )
+    assert('ROUND_END payload 含 previousLevelRank 字段',
+      !!payloadMatch && /previousLevelRank:/.test(payloadMatch[1])
+    )
+    // 2.4 refreshUiFromGameState 同步 isRestartAfterA
+    const refreshFnMatch = src.match(/function refreshUiFromGameState\(\) \{([\s\S]*?)\n\s{2}\}/)
+    assert('refreshUiFromGameState 同步 isRestartAfterA',
+      !!refreshFnMatch && /isRestartAfterA\.value\s*=\s*st\.isRestartAfterA/.test(refreshFnMatch[1])
+    )
+    // 2.5 game 层 state.isRestartAfterA 在 restartMatch 内被重置
+    const gameSrc = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
+    const restartFnMatch = gameSrc.match(/function restartMatch\([\s\S]*?\n\s{2}\}/)
+    assert('restartMatch 清空 state.isRestartAfterA = false',
+      !!restartFnMatch && /state\.isRestartAfterA\s*=\s*false/.test(restartFnMatch[0])
+    )
+    // 2.6 行为验证:完成一局后 state.isRestartAfterA 字段存在(bool)
+    game = createGame({
+      players: [{ name: 'p0' }, { name: 'p1' }, { name: 'p2' }, { name: 'p3' }],
+      seed: 42,
+      aiPlayers: [0, 1, 2, 3],
+    })
+    game.applyRoundEnd()
+    const stAfter = game.getState()
+    assert('finishRound 后 state.isRestartAfterA 字段存在(bool)',
+      typeof stAfter.isRestartAfterA === 'boolean'
+    )
+  } finally {
+    if (game) game.destroy()
+  }
 }
 
 // ============== V049-03: restartMatch 支持 seed 参数 + MATCH_RESTART 携带新 seed ==============
 console.log('\n=== 3. V049-03: restartMatch seed 参数 + MATCH_RESTART 携带 ===')
 {
-  const fs = await import('fs')
-  const gameSrc = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
-  // 3.1 restartMatch 签名支持 seed
-  const sigMatch = gameSrc.match(/function restartMatch\(\{([^}]+)\}/)
-  assert('restartMatch 解构支持 seed: forcedSeed',
-    !!sigMatch && /seed\s*:\s*forcedSeed/.test(sigMatch[1])
-  )
-  // 3.2 restartMatch 内 deal(forcedSeed) 分支
-  const restartFnBody = gameSrc.match(/function restartMatch\([\s\S]*?\n\s{2}\}/)
-  assert('restartMatch 函数体内有 deal(forcedSeed) / deal() 分支',
-    !!restartFnBody && /deal\(forcedSeed\)/.test(restartFnBody[0]) && /deal\(\)/.test(restartFnBody[0])
-  )
-  // 3.3 useGameLogic onRestartMatch 生成新 seed 并放入 MATCH_RESTART
-  const logicSrc = fs.readFileSync('src/views/game/useGameLogic.js', 'utf-8')
-  const onRestartMatch = logicSrc.match(/function onRestartMatch\(\) \{([\s\S]*?)\n\s{2}\}/)
-  assert('onRestartMatch 含 _newRestartSeed / newSeed 变量',
-    !!onRestartMatch && /newSeed/.test(onRestartMatch[1])
-  )
-  assert('onRestartMatch 调 restartMatch({ levelRank: 15, seed: newSeed })',
-    !!onRestartMatch && /restartMatch\(\{[^}]*levelRank:\s*15[^}]*seed:\s*newSeed/.test(onRestartMatch[1])
-  )
-  assert('onRestartMatch 广播 MATCH_RESTART 含 seed',
-    !!onRestartMatch && /MATCH_RESTART[\s\S]*?payload[\s\S]*?seed:\s*newSeed/.test(onRestartMatch[1])
-  )
-  // 3.4 onP2PMatchRestart 接收 seed
-  const onP2PMatchRestart = logicSrc.match(/function onP2PMatchRestart\(payload[^)]*\) \{([\s\S]*?)\n\s{2}\}/)
-  assert('onP2PMatchRestart 提取 payload.seed 传给 restartMatch',
-    !!onP2PMatchRestart && /payload\.seed/.test(onP2PMatchRestart[1]) && /seed/.test(onP2PMatchRestart[1])
-  )
+  const games = []
+  try {
+    const fs = await import('fs')
+    const gameSrc = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
+    // 3.1 restartMatch 签名支持 seed
+    const sigMatch = gameSrc.match(/function restartMatch\(\{([^}]+)\}/)
+    assert('restartMatch 解构支持 seed: forcedSeed',
+      !!sigMatch && /seed\s*:\s*forcedSeed/.test(sigMatch[1])
+    )
+    // 3.2 restartMatch 内 deal(forcedSeed) 分支
+    const restartFnBody = gameSrc.match(/function restartMatch\([\s\S]*?\n\s{2}\}/)
+    assert('restartMatch 函数体内有 deal(forcedSeed) / deal() 分支',
+      !!restartFnBody && /deal\(forcedSeed\)/.test(restartFnBody[0]) && /deal\(\)/.test(restartFnBody[0])
+    )
+    // 3.3 useGameLogic onRestartMatch 生成新 seed 并放入 MATCH_RESTART
+    const logicSrc = fs.readFileSync('src/views/game/useGameLogic.js', 'utf-8')
+    const onRestartMatch = logicSrc.match(/function onRestartMatch\(\) \{([\s\S]*?)\n\s{2}\}/)
+    assert('onRestartMatch 含 _newRestartSeed / newSeed 变量',
+      !!onRestartMatch && /newSeed/.test(onRestartMatch[1])
+    )
+    assert('onRestartMatch 调 restartMatch({ levelRank: 15, seed: newSeed })',
+      !!onRestartMatch && /restartMatch\(\{[^}]*levelRank:\s*15[^}]*seed:\s*newSeed/.test(onRestartMatch[1])
+    )
+    assert('onRestartMatch 广播 MATCH_RESTART 含 seed',
+      !!onRestartMatch && /MATCH_RESTART[\s\S]*?payload[\s\S]*?seed:\s*newSeed/.test(onRestartMatch[1])
+    )
+    // 3.4 onP2PMatchRestart 接收 seed
+    const onP2PMatchRestart = logicSrc.match(/function onP2PMatchRestart\(payload[^)]*\) \{([\s\S]*?)\n\s{2}\}/)
+    assert('onP2PMatchRestart 提取 payload.seed 传给 restartMatch',
+      !!onP2PMatchRestart && /payload\.seed/.test(onP2PMatchRestart[1]) && /seed/.test(onP2PMatchRestart[1])
+    )
 
-  // 3.5 行为验证:restartMatch({seed: 100}) 用相同 seed 产生相同手牌
-  const game1 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
-  game1.applyRoundEnd()  // 推到 finished 以便能 restart
-  game1.restartMatch({ levelRank: 15, seed: 12345 })
-  const hands1 = game1.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
+    // 3.5 行为验证:restartMatch({seed: 100}) 用相同 seed 产生相同手牌
+    const game1 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
+    games.push(game1)
+    game1.applyRoundEnd()  // 推到 finished 以便能 restart
+    game1.restartMatch({ levelRank: 15, seed: 12345 })
+    const hands1 = game1.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
 
-  const game2 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
-  game2.applyRoundEnd()
-  game2.restartMatch({ levelRank: 15, seed: 12345 })
-  const hands2 = game2.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
+    const game2 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
+    games.push(game2)
+    game2.applyRoundEnd()
+    game2.restartMatch({ levelRank: 15, seed: 12345 })
+    const hands2 = game2.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
 
-  eq('restartMatch 同 seed 产生同手牌(seat 0)', hands1[0], hands2[0])
-  eq('restartMatch 同 seed 产生同手牌(seat 1)', hands1[1], hands2[1])
-  eq('restartMatch 同 seed 产生同手牌(seat 2)', hands1[2], hands2[2])
-  eq('restartMatch 同 seed 产生同手牌(seat 3)', hands1[3], hands2[3])
+    eq('restartMatch 同 seed 产生同手牌(seat 0)', hands1[0], hands2[0])
+    eq('restartMatch 同 seed 产生同手牌(seat 1)', hands1[1], hands2[1])
+    eq('restartMatch 同 seed 产生同手牌(seat 2)', hands1[2], hands2[2])
+    eq('restartMatch 同 seed 产生同手牌(seat 3)', hands1[3], hands2[3])
 
-  // 3.6 不同 seed 产生不同手牌
-  const game3 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
-  game3.applyRoundEnd()
-  game3.restartMatch({ levelRank: 15, seed: 99999 })
-  const hands3 = game3.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
-  assert('restartMatch 不同 seed 产生不同手牌',
-    hands1[0] !== hands3[0] || hands1[1] !== hands3[1] || hands1[2] !== hands3[2] || hands1[3] !== hands3[3]
-  )
+    // 3.6 不同 seed 产生不同手牌
+    const game3 = createGame({ players: [{}, {}, {}, {}], seed: 99 })
+    games.push(game3)
+    game3.applyRoundEnd()
+    game3.restartMatch({ levelRank: 15, seed: 99999 })
+    const hands3 = game3.getState().hands.map(h => h.map(c => `${c.suit}-${c.rank}`).join(','))
+    assert('restartMatch 不同 seed 产生不同手牌',
+      hands1[0] !== hands3[0] || hands1[1] !== hands3[1] || hands1[2] !== hands3[2] || hands1[3] !== hands3[3]
+    )
+  } finally {
+    for (const g of games) g.destroy()
+  }
 }
 
 // ============== V049-04: MATCH_RESTART 加入 RELAY_TYPES 白名单 ==============

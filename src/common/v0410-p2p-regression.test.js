@@ -154,6 +154,9 @@ console.log('\n=== 2. V0410-02: state.isRestartAfterA 写回 + 多次 apply 幂�
   const snap = JSON.parse(JSON.stringify(game2.getState()))
   eq('snapshot 包含 isRestartAfterA=true', snap.isRestartAfterA, true)
   eq('snapshot 包含 previousLevelRank=14', snap.previousLevelRank, 14)
+
+  game.destroy()
+  game2.destroy()
 }
 
 // ============================================================
@@ -335,6 +338,9 @@ console.log('\n=== 6. V0410-07: scheduleAI 传 state.difficulty ===')
   const gameMed = createGame({ players: [{}, {}, {}, {}], seed: 1, difficulty: 'medium' })
   eq('createGame({difficulty:medium}).getState().difficulty=medium',
     gameMed.getState().difficulty, 'medium')
+
+  gameHard.destroy()
+  gameMed.destroy()
 }
 
 // ============================================================

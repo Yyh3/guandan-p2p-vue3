@@ -19,6 +19,7 @@
           class="input"
         />
       </div>
+      <p v-if="addressError" class="form-error">{{ addressError }}</p>
       <!-- ★ v0.4.9:扫一扫按钮(真机才显示) -->
       <div class="qr-row">
         <button class="action-btn-small" @click="openScanner">📷 扫一扫</button>
@@ -75,6 +76,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { isNativeCapacitor } from '@/common/ws-server.js'
 import { parseQrScanResult } from '@/common/qr-fallback.js'
+import net from '@/common/network.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -107,10 +109,31 @@ onUnmounted(() => {
   closeScanner()
 })
 
+// ★ P1-11 修复:IP 地址校验不只检查形状,还检查有效范围与端口。
+const addressError = computed(() => {
+  if (!isNative.value) return ''
+  const text = hostAddress.value.trim()
+  if (!text) return ''
+  try {
+    const { host, port } = net.parseHostAddress(text)
+    const octets = host.split('.').map(Number)
+    if (
+      octets.length !== 4 ||
+      octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)
+    ) {
+      return 'IP 地址格式不正确'
+    }
+    if (port < 1 || port > 65535) {
+      return '端口应在 1～65535 之间'
+    }
+    return ''
+  } catch (e) {
+    return e?.message || '地址格式不正确'
+  }
+})
 const canJoin = computed(() => {
   if (isNative.value) {
-    // 校验 IP:端口 形式
-    return /^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(hostAddress.value.trim())
+    return !addressError.value && hostAddress.value.trim().length > 0
   }
   return roomNo.value.length >= 4
 })

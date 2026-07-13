@@ -83,7 +83,7 @@
           </div>
         </div>
         <div class="item-team">
-          <span v-if="isMyTeamWin(rec, 0)" class="win">🏆 你方获胜</span>
+          <span v-if="isMyTeamWin(rec, rec.mySeat ?? 0)" class="win">🏆 你方获胜</span>
           <span v-else class="lose">💀 对方获胜</span>
         </div>
       </div>
@@ -99,6 +99,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
+import { showConfirm, showToast } from '@/common/dialog-bus.js'
 
 const router = useRouter()
 import HistoryChart from '@/components/HistoryChart.vue'
@@ -108,7 +109,9 @@ import { computeSummary, isMyTeamWin } from '@/common/history.js'
 const history = ref([])
 
 // ★ v0.4.9:用 computeSummary 一次拿全部统计
-const summary = computed(() => computeSummary(history.value, 0))
+// ★ Phase 3-B:战绩按本局记录的 mySeat 计算,缺省时回退到 0
+const mySeatForSummary = computed(() => history.value[0]?.mySeat ?? 0)
+const summary = computed(() => computeSummary(history.value, mySeatForSummary.value))
 const streakClass = computed(() => {
   const s = summary.value.streak
   if (s > 0) return 'streak-win'
@@ -126,11 +129,19 @@ function formatTime(t) {
   const m = String(d.getMinutes()).padStart(2, '0')
   return `${M}-${D} ${h}:${m}`
 }
+// ★ P2-03 修复:战绩页清空统一走项目 ConfirmDialog / ToastOverlay,不用原生弹窗。
 function onClear() {
-  if (confirm('清空所有战绩?此操作不可恢复')) {
-    storage.clearHistory()
-    history.value = []
-  }
+  showConfirm({
+    title: '清空战绩',
+    message: '清空所有战绩?此操作不可恢复',
+    confirmText: '清空',
+    cancelText: '取消',
+    onConfirm: () => {
+      storage.clearHistory()
+      history.value = []
+      showToast('战绩已清空')
+    },
+  })
 }
 </script>
 

@@ -143,6 +143,7 @@
         :level-label="levelLabel"
         :round="round"
         :multiplier="multiplier"
+        :mode-label="isP2PMode ? '好友对局' : 'AI 对局'"
       />
     </div>
 
@@ -190,10 +191,26 @@
           </div>
         </div>
         <div class="result-actions-mobile">
-          <button class="r-btn-mobile ghost" @click="exitGame">退出</button>
-          <button class="r-btn-mobile primary" @click="onPrimaryResultAction">
-            {{ isRestartAfterA ? '重开一局' : '下一局' }}
+          <button class="r-btn-mobile ghost" @click="exitGame">返回首页</button>
+          <!-- ★ P1-01 修复:恢复明确的「下一局/重开一轮」按钮 -->
+          <button
+            v-if="!isP2PMode"
+            class="r-btn-mobile primary"
+            @click="isRestartAfterA ? onRestartMatch() : onNext()"
+          >
+            {{ isRestartAfterA ? '重开一轮' : '下一局' }}
           </button>
+          <button
+            v-else-if="isNetworkHost"
+            class="r-btn-mobile primary"
+            @click="isRestartAfterA ? onRestartMatch() : onNext()"
+          >
+            {{ isRestartAfterA ? '重开一轮' : '开始下一局' }}
+          </button>
+          <button v-else class="r-btn-mobile primary" disabled>
+            等待房主开始下一局
+          </button>
+          <button v-if="isP2PMode" class="r-btn-mobile ghost" @click="onBackToRoom">返回房间</button>
         </div>
       </div>
     </div>
@@ -209,7 +226,7 @@
       <span class="ss-text">理牌</span>
     </button>
     <div class="hand-area" :class="{ disabled: !myTurn || isDealing, 'is-urgent': urgent && myTurn }">
-      <div class="hand-inner">
+      <div class="hand-inner" :style="{ '--overlap': handOverlap + 'px' }">
         <div
           v-for="col in handColumns"
           :key="columnKey(col)"
@@ -324,7 +341,7 @@
  *   - 不动 useGameLogic.js / 子组件 props / 路由 / 旋转公式
  *   - 不引入新依赖
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 import PlayerSeat from '@/components/PlayerSeat.vue'
 import TableCenter from '@/components/TableCenter.vue'
@@ -333,11 +350,26 @@ import CardPlay from '@/components/CardPlay.vue'
 import ChatQuickPanel from '@/components/ChatQuickPanel.vue'
 
 import { useGameLogic } from './useGameLogic.js'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import net from '@/common/network.js'
+import { showConfirm } from '@/common/dialog-bus.js'
 
 const router = useRouter()
+const route = useRoute()
 function goHome() { router.push('/') }
+// ★ P1-02 修复:返回房间时携带原 query,避免被误判为 host。
+function onBackToRoom() {
+  router.push({
+    path: '/room',
+    query: {
+      roomNo: route.query.roomNo,
+      role: route.query.role,
+      host: route.query.host,
+      nick: route.query.nick,
+      avatar: route.query.avatar,
+    },
+  })
+}
 function exitGame() {
   try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
   router.replace('/')
@@ -352,6 +384,8 @@ const props = defineProps({
   difficulty: { type: String, default: 'medium' },
   // ★ LOGIC-01 修复:AI 页传入的起始级牌
   initialLevelRank: { type: Number, default: undefined },
+  // ★ Phase3 同步切牌:首家座位
+  firstSeat: { type: Number, default: undefined },
 })
 
 // 占位:给 useGameLogic 注入 mainActionsRef(虽然 mobile 不渲染桌面版 MainActions,
@@ -366,7 +400,7 @@ const {
   isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
-  isRestartAfterA,
+  isRestartAfterA, isNetworkHost, game,
   // computed
   myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
   seatData, handColumns, selectedCount,
@@ -376,7 +410,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
   selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
-  onPrimaryResultAction, onRestartMatch,
+  onRestartMatch,
   onIcon, retryDeal,
 } = useGameLogic({
   mainActionsRef,
@@ -387,9 +421,59 @@ const {
   difficulty: props.difficulty,
   // ★ LOGIC-01 修复:AI 页传入的起始级牌
   initialLevelRank: props.initialLevelRank,
+  // ★ Phase3 同步切牌:首家座位
+  firstSeat: props.firstSeat,
 })
 
-function showMenu() { exitGame() }
+// ★ P1-09 修复:动态计算手牌列重叠量,列数多时自动收紧,
+//   避免固定 -16px 重叠导致总宽度超出 viewport 被 .page overflow:hidden 裁切。
+//   首列 margin-left 强制为 0,保证最左列完整可见。
+const handOverlap = computed(() => {
+  const count = handColumns.value.length
+  if (count <= 1) return 0
+  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 390
+  const leftPad = 16
+  const rightSafe = 74 // 70px 智能理牌胶囊 + 4px 缓冲
+  const available = Math.max(0, viewportW - leftPad - rightSafe)
+  const naturalWidth = count * 56
+  if (naturalWidth <= available) return 0
+  return Math.min(28, Math.floor((naturalWidth - available) / (count - 1)))
+})
+
+// ★ P1-03 修复:移动端 host 退出与桌面端行为一致,先尝试 host 迁移再退出。
+function showMenu() {
+  showConfirm({
+    title: '退出对局',
+    message: '确定要退出对局吗？',
+    confirmText: '退出',
+    cancelText: '取消',
+    onConfirm: () => {
+      if (isP2PMode.value && isNetworkHost.value && game.value) {
+        const st = game.value.getState()
+        if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
+          const snapshot = {
+            hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
+            firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
+            lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
+            trickHistory: st.trickHistory, passCount: st.passCount,
+            tribute: st.tribute, ghost: st.ghost,
+            levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
+          }
+          const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
+          const peers = net.getPeers ? net.getPeers() : new Map()
+          const candidates = [
+            (selfSeat + 2) % 4,
+            (selfSeat + 1) % 4,
+            (selfSeat + 3) % 4,
+          ]
+          const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
+          try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+        }
+      }
+      exitGame()
+    },
+  })
+}
 
 // 名字省略(对手 pill 用,最多 4 字)
 function truncateName(s) {
@@ -399,6 +483,30 @@ function truncateName(s) {
 
 // emit:让父级 GameView 也能响应 seatClick(用于调试 / 后续扩展)
 defineEmits(['seatClick', 'menu'])
+
+// ★ P0-03 修复:移动端同样监听 host:lost,host 崩溃/断电/网络中断时提示并跳回首页,
+//   避免手机玩家静默卡死。逻辑与 GameViewDesktop.vue 保持一致。
+const onHostLost = async () => {
+  try {
+    const self = (() => {
+      try { return net.getSelfInfo && net.getSelfInfo() } catch (e) { return null }
+    })()
+    if (self && typeof net.smartReconnectToPeers === 'function') {
+      const routeRoomNo = String(route.query.roomNo || '')
+      if (routeRoomNo) {
+        const r = await net.smartReconnectToPeers(routeRoomNo, { self })
+        if (r && r.ok) {
+          console.info('[mobile host:lost] smartReconnectToPeers 找到新 host:', r.hostAddress)
+          return
+        }
+        console.warn('[mobile host:lost] smartReconnectToPeers 失败:', r)
+      }
+    }
+  } catch (e) {
+    console.warn('[mobile host:lost] smartReconnectToPeers 异常:', e?.message || e)
+  }
+  router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
+}
 
 // v2.5:横屏检测 → 给 .page 加 .is-landscape class,让 CSS 在 scoped 内直接覆盖
 // 横屏标准:landscape + max-height: 500px(手机横屏 h ≤ 430)
@@ -420,6 +528,7 @@ onMounted(() => {
       mqLandscape.addListener(updateLandscape)
     }
   }
+  net.on('host:lost', onHostLost)
 })
 onUnmounted(() => {
   if (mqLandscape) {
@@ -428,6 +537,9 @@ onUnmounted(() => {
     } else if (mqLandscape.removeListener) {
       mqLandscape.removeListener(updateLandscape)
     }
+  }
+  if (typeof net.off === 'function') {
+    try { net.off('host:lost', onHostLost) } catch (e) { /* swallow */ }
   }
 })
 </script>
@@ -946,7 +1058,8 @@ button {
   flex-wrap: nowrap;
   min-height: 110px;
   /* v2.5:左右 padding 4 → 16,加 12px 黑边(用户反馈"左右两侧留一些空间") */
-  padding: 8px 16px;
+  /* ★ P1-06 修复:右侧留出 ≥60px 安全区,避免智能理牌胶囊压住最右列 */
+  padding: 8px 70px 8px 16px;
   gap: 0;
   /* v3.9:overflow-x auto + overflow-y visible 会被 CSS spec 强制升级为 auto
    *   (如果 overflow-x 不是 visible,overflow-y 必须也非 visible),导致竖叠多张同 rank
@@ -967,7 +1080,7 @@ button {
   min-height: 84px;
   flex-shrink: 0;
   margin: 0;
-  margin-left: -16px;      /* v2.5: -10 → -16,列视觉更紧 */
+  margin-left: calc(-1 * var(--overlap, 16px)); /* v2.5: 动态重叠,列数多时自动收紧避免裁切 */
   padding: 12px 0 2px;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.04);
@@ -983,7 +1096,7 @@ button {
   transition: transform var(--t-fast, 120ms) var(--ease-out, ease),
               background var(--t-fast, 120ms) var(--ease-out, ease);
 }
-.hand-column:first-child { margin-left: 0; }
+.hand-column:first-child { margin-left: 0 !important; }
 .hand-column:active { background: rgba(255, 255, 255, 0.07); }
 .hand-column:last-child { border-right: none; }
 .hand-column.is-selected {
@@ -1099,6 +1212,8 @@ button {
 }
 .smart-sort-float:active:not(:disabled) { transform: scale(0.95); }
 .smart-sort-float:disabled { opacity: 0.4; cursor: not-allowed; }
+/* ★ P1-06 修复:悬浮按钮本身可点击 */
+.smart-sort-float { pointer-events: auto; }
 .ss-icon { font-size: 14px; line-height: 1; }
 .ss-text { line-height: 1; }
 
@@ -1115,9 +1230,12 @@ button {
   -webkit-backdrop-filter: blur(6px);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   z-index: 8;
+  /* ★ P1-06 修复:底栏透明区域不拦截其上方手牌区下沿的点击 */
+  pointer-events: none;
 }
 
 .action-bar button {
+  pointer-events: auto;
   height: 56px;
   min-height: 44px;
   border: none;

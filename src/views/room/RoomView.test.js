@@ -32,10 +32,18 @@ function section(s) { console.log('\n=== ' + s + ' ===') }
 let roomTemplate = '', roomStyle = '', roomFull = ''
 try {
   roomFull = readFileSync(ROOM_VUE, 'utf8')
-  const t = roomFull.match(/<template>([\s\S]*?)<\/template>/)
+  // 匹配根 <template> 块:Vue SFC 的根 template 从文件第一个 <template> 开始,
+  // 到 <script setup> 之前的最后一个 </template> 结束。内层 <template v-if> 等条件
+  // 渲染标签不应影响根块边界。
+  const scriptStart = roomFull.indexOf('<script setup>')
+  const firstTemplateStart = roomFull.indexOf('<template>')
+  const lastTemplateEnd = roomFull.lastIndexOf('</template>', scriptStart >= 0 ? scriptStart : undefined)
+  if (firstTemplateStart < 0 || lastTemplateEnd <= firstTemplateStart) {
+    throw new Error('找不到根 <template> 块')
+  }
+  roomTemplate = roomFull.slice(firstTemplateStart + '<template>'.length, lastTemplateEnd)
   const s = roomFull.match(/<style scoped>([\s\S]*?)<\/style>/)
-  if (!t || !s) throw new Error('找不到 <template> 或 <style scoped> 块')
-  roomTemplate = t[1]
+  if (!s) throw new Error('找不到 <style scoped> 块')
   roomStyle    = s[1]
 } catch (e) {
   console.error('读 RoomView.vue 失败:', e.message)
@@ -136,6 +144,36 @@ const newOverlays = (roomStyle.match(newOverlayRx) || []).filter(m => !m.include
 check('不出现新的浮层类名 (.modal/.dialog/.overlay/.popup/.drawer 等)',
   newOverlays.length === 0,
   newOverlays.length ? '新浮层: ' + newOverlays.join(' | ') : '')
+
+// =========================================================================
+section('6. P0-06 浏览器 host 不展示虚假跨设备邀请')
+// =========================================================================
+
+check('template 使用 canInviteCrossDevice 控制 IP 显示',
+  /canInviteCrossDevice/.test(roomTemplate))
+check('template 含浏览器仅本机多标签提示文案',
+  /浏览器仅本机多标签/.test(roomTemplate))
+check('template 中复制 IP 按钮带 canInviteCrossDevice 守卫',
+  /v-if="isHost && canInviteCrossDevice"/.test(roomTemplate))
+check('script 中订阅 message:READY_COMMITTED(P1-05)',
+  /onNet\('message:READY_COMMITTED'/.test(roomFull))
+
+// =========================================================================
+section('7. Phase3 同步切牌契约')
+// =========================================================================
+
+check('template 包含同步切牌覆盖层 .cut-overlay',
+  /class="cut-overlay"/.test(roomTemplate))
+check('template 包含切牌面板 .cut-panel',
+  /class="cut-panel"/.test(roomTemplate))
+check('template 切牌面板用 v-for 渲染 4 张扣牌 .cut-card-back',
+  /v-for="i in 4"[\s\S]*?class="cut-card-back"/.test(roomTemplate))
+check('script 中 GAME_START 广播携带 firstSeat',
+  /type:\s*'GAME_START'[\s\S]*?firstSeat/.test(roomFull))
+check('script 中 GAME_START 监听解析 firstSeat 并加入 URL',
+  /payload\.firstSeat/.test(roomFull) && /firstSeat/.test(roomFull))
+check('script 中 performCutAndStart 函数存在',
+  /function performCutAndStart\(\)/.test(roomFull))
 
 // =========================================================================
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')

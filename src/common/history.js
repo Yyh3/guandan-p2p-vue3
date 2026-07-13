@@ -10,13 +10,13 @@
  *
  * 输入:历史战绩数组(由 storage.getHistory() 返回)
  *   格式:[
- *     { time, ranks: [seatA, seatB, seatC, seatD], players: {seat: {name, avatar}}, levelUp, ... }
+ *     { time, ranks: [seatA, seatB, seatC, seatD], players: {seat: {name, avatar}}, levelUp, mySeat, ... }
  *   ]
- * 玩家自己座位固定 0(自己),用 ranks 数组判定胜负
+ * 玩家自己座位随每局记录保存在 mySeat 中;所有函数都接受 mySeatIndex 参数,默认 0。
  *
  * 用法:
  *   import { computeWinRate, ... } from '@/common/history.js'
- *   const wr = computeWinRate(history, 0)
+ *   const wr = computeWinRate(history, mySeatIndex)
  */
 
 /**

@@ -80,9 +80,10 @@ console.log('\n=== 2. joiner 端调 requestPromoteToHost → 自己升为 host =
   assert('joiner 调 requestPromoteToHost 返回 true', r === true)
   await settle()
 
-  // J1 应该升为 host(selfSeat=0, isHost=true)
+  // J1 应该升为 host,但 logical seat 保持 1(座位稳定)
   assert('J1 升级后 isHost=true', J1.isHost() === true)
-  assert('J1 升级后 selfSeat=0', J1.getSelfSeat() === 0)
+  assert('J1 升级后 selfSeat 保持 1', J1.getSelfSeat() === 1)
+  assert('J1 升级后 hostSeat = 1', J1.getHostSeat() === 1)
   assert('J1 收到 host:migrated', migratedPayload !== null)
   assert('host:migrated.isMyself=true', migratedPayload?.isMyself === true)
   assert('host:migrated.snapshot 含 hands', migratedPayload?.snapshot?.hands === 'mock')
@@ -117,6 +118,7 @@ console.log('\n=== 3. 旁观者 joiner 收到 PROMOTE_HOST_REQUEST → 更新 pe
   assert('J2 旁观者收到 host:migrated', j2MigratedPayload !== null)
   assert('J2 旁观者 isMyself=false', j2MigratedPayload?.isMyself === false)
   assert('J2 旁观者 newHostSeat=1', j2MigratedPayload?.newHostSeat === 1)
+  assert('J2 旁观者 hostSeat = 1', J2.getHostSeat() === 1)
 }
 
 console.log('\n=== 4. 竞态:seat 0 已有新 host 时后到 joiner 让位 ===')
@@ -142,7 +144,8 @@ console.log('\n=== 4. 竞态:seat 0 已有新 host 时后到 joiner 让位 ===')
   J1.requestPromoteToHost({ first: true })
   await settle()
   assert('J1 先到升 host', J1.isHost() === true)
-  assert('J1 selfSeat=0', J1.getSelfSeat() === 0)
+  assert('J1 selfSeat 保持 1(座位稳定)', J1.getSelfSeat() === 1)
+  assert('J1 hostSeat = 1', J1.getHostSeat() === 1)
 
   // J2 后调,seat 0 已被 J1 占 → J2 不应升级
   const j2SeatBefore = J2.getSelfSeat()
@@ -150,6 +153,7 @@ console.log('\n=== 4. 竞态:seat 0 已有新 host 时后到 joiner 让位 ===')
   await settle()
   assert('J2 后到不升级,seat 不变', J2.getSelfSeat() === j2SeatBefore)
   assert('J2 后到仍 isHost=false', J2.isHost() === false)
+  assert('J2 后到 hostSeat 指向 J1(seat 1)', J2.getHostSeat() === 1)
 }
 
 console.log('\n=== 5. requestPromoteToHost 接受 null snapshot ===')
@@ -167,6 +171,7 @@ console.log('\n=== 5. requestPromoteToHost 接受 null snapshot ===')
   assert('joiner 不传 snapshot 调也返回 true', r === true)
   await settle()
   assert('J1 仍升为 host', J1.isHost() === true)
+  assert('J1 selfSeat 仍保持 1(座位稳定)', J1.getSelfSeat() === 1)
 }
 
 console.log(`\n========== network-host-promote 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

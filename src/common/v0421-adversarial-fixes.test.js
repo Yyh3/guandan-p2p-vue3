@@ -164,8 +164,12 @@ console.log('\n=== 4. BUG-AI-1 修复:findMinStraightFlush 允许 A(14) ===')
 console.log('\n=== 5. 版本号与 npm test 集成 ===')
 {
   check('package.json version === 0.4.21', pkg.version === '0.4.21')
-  check('npm test 命令含 v0421-adversarial-fixes.test.js',
-    (pkg.scripts?.test || '').includes('v0421-adversarial-fixes.test.js'))
+  const pkgSrc = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
+  const usesWrapper = /scripts\/run-all-tests\.js/.test(pkgSrc)
+  const wrapperPath = path.join(repoRoot, 'scripts/run-all-tests.js')
+  const wrapperSrc = usesWrapper && fs.existsSync(wrapperPath) ? fs.readFileSync(wrapperPath, 'utf-8') : ''
+  check('npm test 命令含 v0421-adversarial-fixes.test.js 或其 wrapper 引用该文件',
+    /v0421-adversarial-fixes\.test\.js/.test(pkgSrc) || /v0421-adversarial-fixes\.test\.js/.test(wrapperSrc))
 }
 
 // ============== 6. 关键回归验证(修复不应破坏既有功能) ==============

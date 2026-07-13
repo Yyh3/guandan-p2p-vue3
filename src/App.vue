@@ -1,8 +1,12 @@
 <template>
   <router-view />
+  <ToastOverlay />
+  <ConfirmDialog />
 </template>
 
 <script setup>
+import ToastOverlay from '@/components/ToastOverlay.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 </script>
 
 <style>

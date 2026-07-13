@@ -51,54 +51,61 @@ console.log('\n=== 1. V0410-01: ROUND_END 广播加 isNetworkHost 守卫 + round
 // ============== V0410-02: applyRoundEndFromPayload 写回 state.isRestartAfterA ==============
 console.log('\n=== 2. V0410-02: applyRoundEndFromPayload 写回 state ===')
 {
-  // 2.1 源码:state.isRestartAfterA = isRestart + state.previousLevelRank 写回
-  const fs = await import('fs')
-  const src = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
-  // 抓整个 applyRoundEndFromPayload 函数体(到函数结尾)
-  const applyRoundEndMatch = src.match(/applyRoundEndFromPayload\(p\) \{([\s\S]*?)\n\s{4}\},/)
-  assert('applyRoundEndFromPayload 函数体存在', !!applyRoundEndMatch)
-  if (applyRoundEndMatch) {
-    const body = applyRoundEndMatch[1]
-    assert('applyRoundEndFromPayload 写回 state.isRestartAfterA',
-      /state\.isRestartAfterA\s*=\s*isRestart/.test(body)
+  let game = null
+  let game2 = null
+  try {
+    // 2.1 源码:state.isRestartAfterA = isRestart + state.previousLevelRank 写回
+    const fs = await import('fs')
+    const src = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
+    // 抓整个 applyRoundEndFromPayload 函数体(到函数结尾)
+    const applyRoundEndMatch = src.match(/applyRoundEndFromPayload\(p\) \{([\s\S]*?)\n\s{4}\},/)
+    assert('applyRoundEndFromPayload 函数体存在', !!applyRoundEndMatch)
+    if (applyRoundEndMatch) {
+      const body = applyRoundEndMatch[1]
+      assert('applyRoundEndFromPayload 写回 state.isRestartAfterA',
+        /state\.isRestartAfterA\s*=\s*isRestart/.test(body)
+      )
+      assert('applyRoundEndFromPayload 写回 state.previousLevelRank',
+        /state\.previousLevelRank\s*=\s*\(typeof p\.previousLevelRank/.test(body)
+      )
+    }
+
+    // 2.2 行为:远端调用 applyRoundEndFromPayload({isRestartAfterA: true}) 后 getState() 看到 true
+    game = createGame({ players: [{}, {}, {}, {}], seed: 99, aiPlayers: [0, 1, 2, 3] })
+    // 先让 game 走完一局,phase 变 finished
+    game.applyRoundEnd()
+    // 模拟远端 host 重发(带 isRestartAfterA + previousLevelRank)
+    game.applyRoundEndFromPayload({
+      roundId: 'r-v0410-test',
+      ranks: [0, 2, 1, 3],
+      levelUp: 3,
+      previousLevelRank: 14,  // A 级
+      newLevelRank: 15,        // 升到 2
+      isRestartAfterA: true,
+    })
+    const st = game.getState()
+    eq('applyRoundEndFromPayload 后 state.isRestartAfterA=true', st.isRestartAfterA, true)
+    eq('applyRoundEndFromPayload 后 state.previousLevelRank=14', st.previousLevelRank, 14)
+
+    // 2.3 缺 isRestartAfterA 时,从 previousLevelRank + levelUp 推断
+    game2 = createGame({ players: [{}, {}, {}, {}], seed: 100, aiPlayers: [0, 1, 2, 3] })
+    game2.applyRoundEnd()
+    game2.applyRoundEndFromPayload({
+      roundId: 'r-v0410-test2',
+      ranks: [0, 2, 1, 3],
+      levelUp: 3,
+      previousLevelRank: 14,
+      newLevelRank: 15,
+      // 不带 isRestartAfterA,让函数内部推断
+    })
+    const st2 = game2.getState()
+    eq('payload 缺 isRestartAfterA + previousLevelRank=14 + levelUp>0 时推断 true',
+      st2.isRestartAfterA, true
     )
-    assert('applyRoundEndFromPayload 写回 state.previousLevelRank',
-      /state\.previousLevelRank\s*=\s*\(typeof p\.previousLevelRank/.test(body)
-    )
+  } finally {
+    if (game) game.destroy()
+    if (game2) game2.destroy()
   }
-
-  // 2.2 行为:远端调用 applyRoundEndFromPayload({isRestartAfterA: true}) 后 getState() 看到 true
-  const game = createGame({ players: [{}, {}, {}, {}], seed: 99, aiPlayers: [0, 1, 2, 3] })
-  // 先让 game 走完一局,phase 变 finished
-  game.applyRoundEnd()
-  // 模拟远端 host 重发(带 isRestartAfterA + previousLevelRank)
-  game.applyRoundEndFromPayload({
-    roundId: 'r-v0410-test',
-    ranks: [0, 2, 1, 3],
-    levelUp: 3,
-    previousLevelRank: 14,  // A 级
-    newLevelRank: 15,        // 升到 2
-    isRestartAfterA: true,
-  })
-  const st = game.getState()
-  eq('applyRoundEndFromPayload 后 state.isRestartAfterA=true', st.isRestartAfterA, true)
-  eq('applyRoundEndFromPayload 后 state.previousLevelRank=14', st.previousLevelRank, 14)
-
-  // 2.3 缺 isRestartAfterA 时,从 previousLevelRank + levelUp 推断
-  const game2 = createGame({ players: [{}, {}, {}, {}], seed: 100, aiPlayers: [0, 1, 2, 3] })
-  game2.applyRoundEnd()
-  game2.applyRoundEndFromPayload({
-    roundId: 'r-v0410-test2',
-    ranks: [0, 2, 1, 3],
-    levelUp: 3,
-    previousLevelRank: 14,
-    newLevelRank: 15,
-    // 不带 isRestartAfterA,让函数内部推断
-  })
-  const st2 = game2.getState()
-  eq('payload 缺 isRestartAfterA + previousLevelRank=14 + levelUp>0 时推断 true',
-    st2.isRestartAfterA, true
-  )
 }
 
 // ============== V0410-03: MATCH_RESTART 去重 + sender authority + phase gate ==============
@@ -228,43 +235,52 @@ console.log('\n=== 6. V0410-06: applySettingsToAudio 同步 bgmStyle + sfxMode =
 // ============== V0410-07: scheduleAI 传入 state.difficulty ==============
 console.log('\n=== 7. V0410-07: scheduleAI 传入 state.difficulty ===')
 {
-  const fs = await import('fs')
-  const src = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
-  const scheduleAIMatch = src.match(/function scheduleAI\(\) \{[\s\S]*?AI\.decide\([^)]+\)/)
-  assert('scheduleAI 函数体内有 AI.decide 调用', !!scheduleAIMatch)
-  if (scheduleAIMatch) {
-    assert('AI.decide 第 5 个参数传 state.difficulty',
-      /AI\.decide\([^)]*,\s*state\.difficulty\)/.test(scheduleAIMatch[0])
-    )
-  }
+  let gameHard = null
+  let gameMed = null
+  let gameDefault = null
+  try {
+    const fs = await import('fs')
+    const src = fs.readFileSync('src/common/guandan-game.js', 'utf-8')
+    const scheduleAIMatch = src.match(/function scheduleAI\(\) \{[\s\S]*?AI\.decide\([^)]+\)/)
+    assert('scheduleAI 函数体内有 AI.decide 调用', !!scheduleAIMatch)
+    if (scheduleAIMatch) {
+      assert('AI.decide 第 5 个参数传 state.difficulty',
+        /AI\.decide\([^)]*,\s*state\.difficulty\)/.test(scheduleAIMatch[0])
+      )
+    }
 
-  // 行为验证:hard difficulty game 的 state.difficulty = 'hard'
-  const gameHard = createGame({
-    players: [{}, {}, {}, {}],
-    seed: 7,
-    aiPlayers: [0, 1, 2, 3],
-    difficulty: 'hard',
-  })
-  eq('createGame({difficulty:"hard"}) 后 state.difficulty=hard',
-    gameHard.getState().difficulty, 'hard'
-  )
-  const gameMed = createGame({
-    players: [{}, {}, {}, {}],
-    seed: 8,
-    aiPlayers: [0, 1, 2, 3],
-    difficulty: 'medium',
-  })
-  eq('createGame({difficulty:"medium"}) 后 state.difficulty=medium',
-    gameMed.getState().difficulty, 'medium'
-  )
-  const gameDefault = createGame({
-    players: [{}, {}, {}, {}],
-    seed: 9,
-    aiPlayers: [0, 1, 2, 3],
-  })
-  eq('createGame() 无 difficulty 参数,state.difficulty 默认 medium',
-    gameDefault.getState().difficulty, 'medium'
-  )
+    // 行为验证:hard difficulty game 的 state.difficulty = 'hard'
+    gameHard = createGame({
+      players: [{}, {}, {}, {}],
+      seed: 7,
+      aiPlayers: [0, 1, 2, 3],
+      difficulty: 'hard',
+    })
+    eq('createGame({difficulty:"hard"}) 后 state.difficulty=hard',
+      gameHard.getState().difficulty, 'hard'
+    )
+    gameMed = createGame({
+      players: [{}, {}, {}, {}],
+      seed: 8,
+      aiPlayers: [0, 1, 2, 3],
+      difficulty: 'medium',
+    })
+    eq('createGame({difficulty:"medium"}) 后 state.difficulty=medium',
+      gameMed.getState().difficulty, 'medium'
+    )
+    gameDefault = createGame({
+      players: [{}, {}, {}, {}],
+      seed: 9,
+      aiPlayers: [0, 1, 2, 3],
+    })
+    eq('createGame() 无 difficulty 参数,state.difficulty 默认 medium',
+      gameDefault.getState().difficulty, 'medium'
+    )
+  } finally {
+    if (gameHard) gameHard.destroy()
+    if (gameMed) gameMed.destroy()
+    if (gameDefault) gameDefault.destroy()
+  }
 }
 
 // ============== V0410-08: SettingsView 从 package.json 读版本号 ==============

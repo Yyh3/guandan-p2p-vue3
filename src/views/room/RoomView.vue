@@ -42,87 +42,92 @@
       <div class="info-main">
         <div class="info-roomno">{{ roomNo }}</div>
         <div class="info-host-ip">
-          <span class="info-host-label">{{ isHost ? '本机 IP' : '房间号' }}</span>
-          <code class="info-host-value">{{ isHost ? formatHostAddr() : roomNo }}</code>
+          <template v-if="isHost">
+            <template v-if="canInviteCrossDevice">
+              <span class="info-host-label">本机 IP</span>
+              <code class="info-host-value">{{ formatHostAddr() }}</code>
+            </template>
+            <template v-else>
+              <span class="info-host-label">联机模式</span>
+              <code class="info-host-value info-host-value-disabled">浏览器仅本机多标签,跨手机请用 Android App</code>
+            </template>
+          </template>
+          <template v-else>
+            <span class="info-host-label">房间号</span>
+            <code class="info-host-value">{{ roomNo }}</code>
+          </template>
         </div>
       </div>
       <div class="info-side">
         <div class="info-count"><strong>{{ peers.size }}</strong>/4 人</div>
-        <button class="info-copy-btn" @click="onCopyIp" title="复制" data-testid="copy-ip-btn">📋</button>
+        <button
+          v-if="isHost && canInviteCrossDevice"
+          class="info-copy-btn"
+          @click="onCopyIp"
+          title="复制房主地址"
+          aria-label="复制房主地址"
+          data-testid="copy-ip-btn"
+        >📋</button>
       </div>
     </div>
 
     <!-- 4 座位 -->
-    <div class="seat seat-top" :class="seatClass(0)" data-testid="seat-top">
-      <div class="seat-badge seat-badge-crown" aria-label="房主">👑</div>
+    <div
+      v-for="s in [0, 1, 2, 3]"
+      :key="s"
+      class="seat"
+      :class="[['seat-top', 'seat-left', 'seat-bottom', 'seat-right'][s], seatClass(s)]"
+      :data-testid="['seat-top', 'seat-left', 'seat-bottom', 'seat-right'][s]"
+    >
+      <div v-if="isHostSeat(s)" class="seat-badge seat-badge-crown" aria-label="房主">👑</div>
       <div class="seat-avatar-wrap">
         <div class="seat-avatar">
-          <span class="avatar-icon">{{ getPeer(0)?.avatar || '🀄' }}</span>
-          <div v-if="getPeer(0)?.ready" class="ready-mark" aria-label="已准备">✓</div>
+          <span class="avatar-icon">{{ getPeer(s)?.avatar || '🀄' }}</span>
+          <div v-if="getPeer(s)?.ready" class="ready-mark" aria-label="已准备">✓</div>
         </div>
       </div>
-      <div class="seat-name">{{ getPeer(0)?.nickname || '等待加入' }}</div>
-      <button v-if="isSelfSeat(0)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-0">
+      <div class="seat-name">{{ getPeer(s)?.nickname || '等待加入' }}</div>
+      <button v-if="isSelfSeat(s) && !isHost" class="seat-ready-btn" @click="onToggleReady" :data-testid="`seat-ready-btn-${s}`">
         {{ myReady ? '取消准备' : '准备' }}
       </button>
-    </div>
-
-    <div class="seat seat-left" :class="seatClass(1)" data-testid="seat-left">
-      <div class="seat-avatar-wrap">
-        <div class="seat-avatar">
-          <span class="avatar-icon">{{ getPeer(1)?.avatar || '' }}</span>
-          <div v-if="getPeer(1)?.ready" class="ready-mark" aria-label="已准备">✓</div>
-        </div>
-      </div>
-      <div class="seat-name">{{ getPeer(1)?.nickname || '等待加入' }}</div>
-      <button v-if="isSelfSeat(1)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-1">
-        {{ myReady ? '取消准备' : '准备' }}
-      </button>
-      <button v-if="isHost && getPeer(1)" class="seat-kick" @click="onKickPlayer(1)" title="踢出房间" data-testid="kick-seat-1">✕</button>
-    </div>
-
-    <div class="seat seat-right" :class="seatClass(3)" data-testid="seat-right">
-      <div class="seat-avatar-wrap">
-        <div class="seat-avatar">
-          <span class="avatar-icon">{{ getPeer(3)?.avatar || '' }}</span>
-          <div v-if="getPeer(3)?.ready" class="ready-mark" aria-label="已准备">✓</div>
-        </div>
-      </div>
-      <div class="seat-name">{{ getPeer(3)?.nickname || '等待加入' }}</div>
-      <button v-if="isSelfSeat(3)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-3">
-        {{ myReady ? '取消准备' : '准备' }}
-      </button>
-      <button v-if="isHost && getPeer(3)" class="seat-kick" @click="onKickPlayer(3)" title="踢出房间" data-testid="kick-seat-3">✕</button>
-    </div>
-
-    <div class="seat seat-bottom" :class="seatClass(2)" data-testid="seat-bottom">
-      <div class="seat-avatar-wrap">
-        <div class="seat-avatar">
-          <span class="avatar-icon">{{ getPeer(2)?.avatar || '' }}</span>
-          <div v-if="getPeer(2)?.ready" class="ready-mark" aria-label="已准备">✓</div>
-        </div>
-      </div>
-      <div class="seat-name">{{ getPeer(2)?.nickname || '等待加入' }}</div>
-      <button v-if="isSelfSeat(2)" class="seat-ready-btn" @click="onToggleReady" data-testid="seat-ready-btn-2">
-        {{ myReady ? '取消准备' : '准备' }}
-      </button>
-      <button v-if="isHost && getPeer(2)" class="seat-swap" @click="onSwapWithTeammate" data-testid="swap-btn">换队友</button>
+      <div v-else-if="isSelfSeat(s) && isHost" class="seat-host-label">房主</div>
+      <button v-if="isHost && canKick(s)" class="seat-kick" @click="onKickPlayer(s)" title="踢出房间" :data-testid="`kick-seat-${s}`">✕</button>
+      <button v-if="isHost && isTeammateSeat(s) && getPeer(s)" class="seat-swap" @click="onSwapWithTeammate" data-testid="swap-btn">换队友</button>
     </div>
 
     <!-- 底部操作 -->
     <div class="actions-row" data-testid="actions-row">
-      <button class="app-btn app-btn-primary" @click="onToggleReady" data-testid="btn-start">
-        <span class="btn-icon">▶</span>
+      <button class="app-btn app-btn-primary" :disabled="primaryBtnDisabled" @click="isHost ? tryStartGame() : onToggleReady()" data-testid="btn-start">
+        <IconPlay class="btn-icon" :size="18" aria-hidden="true" />
         <span class="btn-text">{{ primaryBtnText }}</span>
       </button>
       <button class="app-btn app-btn-secondary" @click="openInvite" data-testid="btn-invite">
-        <span class="btn-icon">🔗</span>
+        <IconLink class="btn-icon" :size="18" aria-hidden="true" />
         <span class="btn-text">邀请好友</span>
       </button>
     </div>
 
     <!-- 切牌（保留但弱化） -->
     <div class="cut-card" @click="onCut" data-testid="cut-card">♠♦♣♥<br/><span class="cut-card-text">切牌</span></div>
+
+    <!-- 同步切牌覆盖层 -->
+    <div v-if="isCutting" class="cut-overlay" role="dialog" aria-modal="true" aria-label="切牌定首家">
+      <div class="cut-panel">
+        <h3 class="cut-title">切牌定首家</h3>
+        <div class="cut-deck">
+          <div
+            v-for="i in 4"
+            :key="i"
+            class="cut-card-back"
+            :class="{ 'cut-revealed': cutRevealed && cutFirstSeat === i - 1 }"
+          >
+            <span v-if="cutRevealed && cutFirstSeat === i - 1" class="cut-result">首家</span>
+          </div>
+        </div>
+        <p v-if="cutRevealed" class="cut-status">座位 {{ cutFirstSeat }} 先出</p>
+        <p v-else class="cut-status">切牌中…</p>
+      </div>
+    </div>
 
     <NicknameEditor
       v-if="showNickEditor"
@@ -154,6 +159,9 @@ import net from '@/common/network.js'
 import WsServer, { isNativeCapacitor } from '@/common/ws-server.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 import InviteDialog from '@/components/InviteDialog.vue'
+import { showConfirm, showToast } from '@/common/dialog-bus.js'
+import IconPlay from '@/components/icons/IconPlay.vue'
+import IconLink from '@/components/icons/IconLink.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -164,7 +172,21 @@ const hostPort = ref(8848)
 const qrDataUrl = ref('')
 const qrLibOk = ref(true)
 
-if (typeof window !== 'undefined') window.__gd_net = net
+// ★ P1-07 修复:生产环境不暴露调试接口,避免用户通过开发者工具伪造消息/踢人/换座。
+if (typeof window !== 'undefined' && import.meta.env?.DEV) {
+  window.__gd_net = net
+}
+
+// ★ P0-06/P1-06 修复:判断当前 host 是否具备真正的跨设备邀请能力。
+//   普通浏览器 host 默认使用 BroadcastChannel,只能同源多标签联机,不能跨手机;
+//   只有 Android App(native WebSocket server)才显示可访问的 IP / 二维码。
+function isLoopback(host) {
+  if (!host) return true
+  return ['localhost', '127.0.0.1', '::1'].includes(host.toLowerCase())
+}
+const canInviteCrossDevice = computed(() => {
+  return isNative.value && !!hostIp.value && !isLoopback(hostIp.value)
+})
 
 const disposers = []
 function onNet(event, handler) {
@@ -177,6 +199,7 @@ function cleanupRoomListeners() {
   while (disposers.length) {
     try { disposers.pop()() } catch (e) { /* swallow */ }
   }
+  clearCutTimers()
 }
 
 function genStars() {
@@ -240,14 +263,36 @@ const myAvatar = ref('🀄')
 const myReady = ref(false)
 const mySuit = ref(0)
 const mySeat = ref(isHost.value ? 0 : null)
+const hostSeat = ref(0)
 const showNickEditor = ref(false)
 const showInvite = ref(false)
 const netStatus = ref('⏺')
 const peers = reactive(new Map())
 
+// ★ Phase3 同步切牌状态
+const isCutting = ref(false)
+const cutFirstSeat = ref(0)
+const cutRevealed = ref(false)
+let cutTimer = null
+let cutInterval = null
+
+// ★ P1-04 修复:房主座位不显示准备按钮;★ P1-14 修复:主按钮根据状态显示具体提示。
 const primaryBtnText = computed(() => {
-  if (isHost.value) return '开始游戏'
-  return myReady.value ? '取消准备' : '准备'
+  if (!isHost.value) return myReady.value ? '取消准备' : '准备'
+  if (peers.size < 4) {
+    return `还差 ${4 - peers.size} 人`
+  }
+  const notReady = Array.from(peers.entries())
+    .filter(([seat, p]) => seat !== hostSeat.value && !p.ready).length
+  if (notReady > 0) {
+    return `等待 ${notReady} 人准备`
+  }
+  return '开始游戏'
+})
+const primaryBtnDisabled = computed(() => {
+  if (!isHost.value) return false
+  if (peers.size < 4) return true
+  return !Array.from(peers.entries()).every(([seat, p]) => seat === hostSeat.value || p.ready)
 })
 const netStatusClass = computed(() => {
   if (netStatus.value === '🟢') return 'net-ok'
@@ -268,8 +313,15 @@ async function generateQr() {
 }
 
 function getPeer(seat) { return peers.get(seat) }
-function seatClass(idx) { return peers.has(idx) ? 'filled' : 'empty' }
+function seatClass(idx) {
+  const filled = peers.has(idx) ? 'filled' : 'empty'
+  const team = (idx % 2) === (mySeat.value % 2) ? 'team-mate' : 'team-opp'
+  return `${filled} ${team}`
+}
 function isSelfSeat(idx) { return idx === mySeat.value }
+function isHostSeat(idx) { return idx === hostSeat.value }
+function isTeammateSeat(idx) { return idx === (hostSeat.value + 2) % 4 }
+function canKick(idx) { return !isHostSeat(idx) && !isTeammateSeat(idx) && peers.has(idx) }
 function formatHostAddr() {
   if (!hostIp.value) return '获取中...'
   return `${hostIp.value}:${hostPort.value}`
@@ -278,25 +330,30 @@ function formatHostAddr() {
 async function initNetwork() {
   onNet('connect', ({ seat, info }) => {
     netStatus.value = '🟢'
-    if (seat != null && seat !== 0 && info) {
+    if (seat != null && info) {
       peers.set(seat, { ...info, ready: false })
-      if (!isHost.value) mySeat.value = seat
     }
+    try {
+      const ns = net.getSelfSeat ? net.getSelfSeat() : null
+      if (ns != null && ns >= 0 && ns <= 3) mySeat.value = ns
+      const nh = net.getHostSeat ? net.getHostSeat() : null
+      if (nh != null && nh >= 0 && nh <= 3) hostSeat.value = nh
+    } catch (e) { /* swallow */ }
   })
   onNet('error', (e) => {
     netStatus.value = '🔴'
     console.error('network error:', e)
   })
-  onNet('peer:leave', ({ seat, reason }) => {
+  onNet('peer:leave', ({ seat, reason, migrate }) => {
     if (seat == null) return
     peers.delete(seat)
-    if (seat === 0) {
-      const isMyself = (() => { try { return net.getSelfSeat && net.getSelfSeat() === 0 } catch { return false } })()
-      if (isMyself) return
-      cleanupRoomListeners()
-      try { net.close() } catch (e) { /* swallow */ }
-      router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已退出,房间解散'))
-    }
+    if (migrate === true) return
+    if (seat !== hostSeat.value) return
+    const isMyself = (() => { try { return net.getSelfSeat && net.getSelfSeat() === seat } catch { return false } })()
+    if (isMyself) return
+    cleanupRoomListeners()
+    try { net.close() } catch (e) { /* swallow */ }
+    router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已退出,房间解散'))
   })
   onNet('self:kicked', ({ reason }) => {
     cleanupRoomListeners()
@@ -312,17 +369,29 @@ async function initNetwork() {
   onNet('message:READY', (payload, from) => {
     // ★ LOGIC-14 修复:READY 消息必须来自已知 peer 且 payload 合法
     if (typeof payload?.ready !== 'boolean') return
-    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
-    if (from !== hostSeat && !isHost.value) return
+    const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hs && !isHost.value) return
     if (peers.has(from)) {
       peers.set(from, { ...peers.get(from), ready: payload.ready })
       tryStartGame()
     }
   })
+  onNet('message:READY_COMMITTED', (payload, from) => {
+    // ★ P1-05 修复:只接受 host 权威的 ready 提交,同步所有客户端的 ready 状态。
+    if (typeof payload?.ready !== 'boolean') return
+    const seat = payload.seat
+    if (typeof seat !== 'number') return
+    const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hs) return
+    if (peers.has(seat)) {
+      peers.set(seat, { ...peers.get(seat), ready: payload.ready })
+      tryStartGame()
+    }
+  })
   onNet('message:SYNC', (payload, from) => {
     // ★ LOGIC-14 修复:SYNC 只能由 host 权威发出
-    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
-    if (from !== hostSeat) return
+    const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hs) return
     if (payload && payload.peers) {
       peers.clear()
       for (const [s, info] of payload.peers) peers.set(s, info)
@@ -331,10 +400,12 @@ async function initNetwork() {
   })
   onNet('message:GAME_START', (payload, from) => {
     // ★ LOGIC-14 修复:GAME_START 只能由 host 权威发出
-    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
-    if (from !== hostSeat) return
+    const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    if (from !== hs) return
     if (!isHost.value) {
-      router.push('/game?roomNo=' + roomNo.value + '&role=joiner')
+      const firstSeat = payload && typeof payload.firstSeat === 'number' ? payload.firstSeat : undefined
+      const qs = firstSeat != null ? '&firstSeat=' + firstSeat : ''
+      router.push('/game?roomNo=' + roomNo.value + '&role=joiner' + qs)
     }
   })
   onNet('peer:seat_swap', (payload) => {
@@ -364,16 +435,9 @@ async function initNetwork() {
           myReady.value = !!me.ready
         }
       }
+      const netHostSeat = net.getHostSeat ? net.getHostSeat() : null
+      if (netHostSeat != null && netHostSeat >= 0 && netHostSeat <= 3) hostSeat.value = netHostSeat
     } catch (e) { /* swallow */ }
-  })
-  onNet('message:SEAT_SWAP', (payload) => {
-    if (!payload || !Array.isArray(payload.between) || payload.between.length !== 2) return
-    const [a, b] = payload.between
-    if (a == null || b == null) return
-    const infoA = peers.get(a)
-    const infoB = peers.get(b)
-    if (infoA) peers.set(b, infoA)
-    if (infoB) peers.set(a, infoB)
   })
 
   if (isHost.value) {
@@ -392,8 +456,10 @@ async function initNetwork() {
         hostIp.value = '(获取失败)'
       }
     } else {
-      hostIp.value = (typeof location !== 'undefined' && location.hostname) || '127.0.0.1'
-      await generateQr()
+      // ★ P0-06 修复:浏览器 BroadcastChannel 模式不能跨设备,不显示可用 IP/二维码,
+      //   避免用户把 127.0.0.1 或局域网 IP 发给朋友后始终连不上。
+      hostIp.value = ''
+      qrDataUrl.value = ''
     }
   } else {
     const hostParam = route.query.host ? String(route.query.host) : null
@@ -405,6 +471,12 @@ async function initNetwork() {
       netStatus.value = r.ok ? '🟢' : '🔴'
     }
   }
+  try {
+    const ns = net.getSelfSeat ? net.getSelfSeat() : null
+    if (ns != null && ns >= 0 && ns <= 3) mySeat.value = ns
+    const nh = net.getHostSeat ? net.getHostSeat() : null
+    if (nh != null && nh >= 0 && nh <= 3) hostSeat.value = nh
+  } catch (e) { /* swallow */ }
 }
 
 onMounted(() => {
@@ -419,10 +491,17 @@ onUnmounted(() => {
 })
 
 function showMenu() {
-  if (!confirm('退出房间?')) return
-  cleanupRoomListeners()
-  try { net.close(isHost.value ? { broadcast: true } : {}) } catch (e) { /* swallow */ }
-  router.push('/')
+  showConfirm({
+    title: '退出房间',
+    message: '确定要退出房间吗？',
+    confirmText: '退出',
+    cancelText: '取消',
+    onConfirm: () => {
+      cleanupRoomListeners()
+      try { net.close(isHost.value ? { broadcast: true } : {}) } catch (e) { /* swallow */ }
+      router.push('/')
+    },
+  })
 }
 function onEditMyInfo() { showNickEditor.value = true }
 function onNickConfirm({ nickname, avatar }) {
@@ -431,30 +510,62 @@ function onNickConfirm({ nickname, avatar }) {
   showNickEditor.value = false
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname, avatar } })
 }
-function onCopyIp() {
-  if (isHost.value && hostIp.value) {
-    const text = `${hostIp.value}:${hostPort.value}`
-    navigator.clipboard.writeText(text).then(
-      () => showCopyToast(`已复制 ${text}`),
-      () => showCopyToast(`复制失败,IP: ${text}`)
-    )
-  } else {
-    navigator.clipboard.writeText(roomNo.value).then(
-      () => showCopyToast(`已复制房间号: ${roomNo.value}`),
-      () => showCopyToast(`房间号: ${roomNo.value}`)
-    )
+async function copyTextFallback(text) {
+  // ★ UX 改进:navigator.clipboard 在 HTTP/旧浏览器/某些 WebView 中不可用,
+  //   先尝试现代 API,失败则退回到 document.execCommand。
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (_) { /* fallback */ }
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch (_) {
+    return false
   }
 }
-function openInvite() { showInvite.value = true }
+async function onCopyIp() {
+  if (isHost.value && !canInviteCrossDevice.value) {
+    // ★ P0-06 兜底:即使按钮已隐藏,也防止键盘/辅助技术触发复制 loopback IP
+    showToast('当前模式仅支持本机多标签联机,跨手机请用 Android App 开房')
+    return
+  }
+  if (isHost.value && hostIp.value) {
+    const text = `${hostIp.value}:${hostPort.value}`
+    const ok = await copyTextFallback(text)
+    showCopyToast(ok ? `已复制 ${text}` : `请手动复制 IP: ${text}`)
+  } else {
+    const ok = await copyTextFallback(roomNo.value)
+    showCopyToast(ok ? `已复制房间号: ${roomNo.value}` : `房间号: ${roomNo.value}`)
+  }
+}
+function openInvite() {
+  if (isHost.value && !canInviteCrossDevice.value) {
+    // ★ P0-06 修复:浏览器 BC 模式明确提示不能跨设备邀请。
+    showToast('当前模式仅支持本机多标签联机,跨手机请用 Android App 开房')
+    return
+  }
+  if (isHost.value && !hostIp.value) {
+    showToast('本机 IP 暂未获取，已改用房间号邀请')
+  }
+  showInvite.value = true
+}
 
 const copyToast = ref('')
 let _copyToastTimer = null
-function onCopied(text) {
+async function onCopied(text) {
   if (!text) return
-  navigator.clipboard.writeText(text).then(
-    () => showCopyToast(`已复制 ${text}`),
-    () => showCopyToast(`复制失败,IP: ${text}`)
-  )
+  const ok = await copyTextFallback(text)
+  showCopyToast(ok ? `已复制 ${text}` : `请手动复制: ${text}`)
 }
 function showCopyToast(msg) {
   copyToast.value = msg
@@ -462,6 +573,8 @@ function showCopyToast(msg) {
   _copyToastTimer = setTimeout(() => { copyToast.value = '' }, 1800)
 }
 function onToggleReady() {
+  // ★ Phase 3:房主不显示准备/取消准备,点击自己座位的准备按钮无操作
+  if (isHost.value) return
   myReady.value = !myReady.value
   const myCurrentSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
   if (myCurrentSeat != null && peers.has(myCurrentSeat)) {
@@ -473,36 +586,95 @@ function onToggleReady() {
 function tryStartGame() {
   if (!isHost.value) return
   if (peers.size < 4) return
-  const allReady = Array.from(peers.values()).every(p => p.ready)
+  // ★ Phase 3:除房主外的 3 个 peer 都准备后才能开始
+  const allReady = Array.from(peers.entries()).every(([seat, p]) => seat === hostSeat.value || p.ready)
   if (allReady) {
-    net.broadcast({ type: 'GAME_START', payload: { roomNo: roomNo.value } })
-    router.push('/game?roomNo=' + roomNo.value + '&role=host')
+    performCutAndStart()
   }
 }
-function onSwapWithTeammate() {
-  if (!peers.has(2)) return
-  if (!confirm('和队友换座?')) return
-  const r = net.swapSeats(0, 2)
-  if (!r.ok) {
-    console.warn('swapSeats 失败:', r.error)
+function canStartGame() {
+  if (!isHost.value) return false
+  if (peers.size < 4) return false
+  return Array.from(peers.entries()).every(([seat, p]) => seat === hostSeat.value || p.ready)
+}
+function clearCutTimers() {
+  if (cutTimer) { clearTimeout(cutTimer); cutTimer = null }
+  if (cutInterval) { clearInterval(cutInterval); cutInterval = null }
+}
+function performCutAndStart() {
+  if (isCutting.value) return
+  isCutting.value = true
+  cutRevealed.value = false
+  clearCutTimers()
+  let steps = 0
+  cutInterval = setInterval(() => {
+    cutFirstSeat.value = (cutFirstSeat.value + 1) % 4
+    steps++
+    if (steps >= 12) {
+      clearInterval(cutInterval)
+      cutInterval = null
+      const finalSeat = Math.floor(Math.random() * 4)
+      cutFirstSeat.value = finalSeat
+      cutRevealed.value = true
+      cutTimer = setTimeout(() => {
+        clearCutTimers()
+        isCutting.value = false
+        net.broadcast({ type: 'GAME_START', payload: { roomNo: roomNo.value, firstSeat: finalSeat } })
+        router.push('/game?roomNo=' + roomNo.value + '&role=host' + '&firstSeat=' + finalSeat)
+      }, 1200)
+    }
+  }, 120)
+}
+function onCut() {
+  if (!isHost.value) {
+    showToast('等待房主切牌')
     return
   }
-  net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
+  if (!canStartGame()) {
+    showToast('满员且全部准备后即可切牌开局')
+    return
+  }
+  performCutAndStart()
 }
-function onCut() { alert('切牌完成') }
+function onSwapWithTeammate() {
+  const teammateSeat = (hostSeat.value + 2) % 4
+  if (!peers.has(teammateSeat)) return
+  showConfirm({
+    title: '换座位',
+    message: '确定要和队友换座吗？',
+    confirmText: '换座',
+    cancelText: '取消',
+    onConfirm: () => {
+      const r = net.swapSeats(hostSeat.value, teammateSeat)
+      if (!r.ok) {
+        console.warn('swapSeats 失败:', r.error)
+        return
+      }
+      net.broadcast({ type: 'NICK_UPDATE', payload: { nickname: myName.value, avatar: myAvatar.value } })
+    },
+  })
+}
 function onKickPlayer(seat) {
   if (!isHost.value) return
-  if (seat !== 1 && seat !== 3) return
+  // ★ Phase 3:只能踢对手(非房主、非队友)
+  if (!canKick(seat)) return
   const target = peers.get(seat)
   if (!target) return
   const nickname = target.nickname || `座位 ${seat}`
-  if (!confirm(`确定要踢出 ${nickname} 吗?\n\n该玩家将立即断开连接。`)) return
-  const r = net.kickPlayer(seat, 'kicked')
-  if (!r || !r.ok) {
-    console.warn('kickPlayer 失败:', r && r.error)
-    return
-  }
-  peers.delete(seat)
+  showConfirm({
+    title: '踢出玩家',
+    message: `确定要踢出 ${nickname} 吗？\n\n该玩家将立即断开连接。`,
+    confirmText: '踢出',
+    cancelText: '取消',
+    onConfirm: () => {
+      const r = net.kickPlayer(seat, 'kicked')
+      if (!r || !r.ok) {
+        console.warn('kickPlayer 失败:', r && r.error)
+        return
+      }
+      peers.delete(seat)
+    },
+  })
 }
 </script>
 
@@ -514,6 +686,8 @@ function onKickPlayer(seat) {
   background: var(--bg-page, #071426);
   color: var(--text-primary, #fff);
   font: var(--font-body);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* 背景层 — 更克制的深蓝 + 底部 felt */
@@ -664,6 +838,11 @@ function onKickPlayer(seat) {
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
+.info-host-value-disabled {
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.5);
+  font-family: inherit;
+}
 .info-side {
   display: flex;
   align-items: center;
@@ -760,6 +939,17 @@ function onKickPlayer(seat) {
   border-color: #b45ef4;
   box-shadow: 0 0 0 3px rgba(180, 94, 244, 0.22);
 }
+/* ★ Phase 3:按“我”的座位区分队友/对手,高特异度覆盖默认位置色 */
+.seat.team-mate.filled .seat-avatar {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 0 3px rgba(244, 196, 94, 0.25), 0 0 18px rgba(244, 196, 94, 0.25);
+}
+.seat.team-opp.filled .seat-avatar {
+  border-color: #b45ef4;
+  box-shadow: 0 0 0 3px rgba(180, 94, 244, 0.22);
+}
+.seat.team-mate.filled { border-color: rgba(244, 196, 94, 0.45); }
+.seat.team-opp.filled { border-color: rgba(180, 94, 244, 0.55); }
 .seat-avatar .avatar-icon { font-size: 34px; line-height: 1; }
 .seat.empty .seat-avatar .avatar-icon { font-size: 28px; opacity: 0.6; }
 .seat-name {
@@ -903,6 +1093,70 @@ function onKickPlayer(seat) {
 .cut-card-text {
   font-size: 9px;
   margin-top: 2px;
+}
+
+/* 同步切牌覆盖层 */
+.cut-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+}
+.cut-panel {
+  background: linear-gradient(180deg, rgba(30,30,46,0.96), rgba(18,18,32,0.98));
+  border: 1px solid rgba(255,215,120,0.25);
+  border-radius: 24px;
+  padding: 28px 32px;
+  width: min(420px, 100%);
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.cut-title {
+  margin: 0 0 22px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--gold-text, #ffeab6);
+}
+.cut-deck {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.cut-card-back {
+  width: 56px;
+  height: 78px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3b4d7a, #1f2b4d);
+  border: 2px solid rgba(255,255,255,0.12);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.cut-card-back.cut-revealed {
+  border-color: var(--gold-metallic, #ffd166);
+  box-shadow: 0 0 18px rgba(255,209,102,0.45);
+  transform: translateY(-8px) scale(1.05);
+  background: linear-gradient(135deg, #5c4a1e, #3a2d0b);
+}
+.cut-result {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.cut-status {
+  margin: 0;
+  font-size: 15px;
+  color: rgba(255,255,255,0.85);
+  font-weight: 600;
 }
 
 /* copy toast — 全局唯一 position: fixed */
