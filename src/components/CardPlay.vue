@@ -44,15 +44,19 @@
       <!-- 中央装饰 -->
       <div class="center-area">
         <template v-if="isJoker">
-          <!-- v0.4.3:卡通小丑 PNG,占满牌面 ~90%,无文字
-                 红鼻子橙帽 = 大王 / 紫鼻子蓝帽 = 小王,颜色即可区分 -->
+          <!-- v0.4.3:卡通小丑 PNG,占满牌面 ~90%
+               新增大王/小王文字角标,解决小尺寸牌面难以区分问题 -->
           <div class="joker-content">
             <img
               class="joker-face"
               :src="isBigJoker ? bigJokerImg : smallJokerImg"
-              :alt="isBigJoker ? '大王' : '小王'"
+              :alt="jokerLabel"
               draggable="false"
             />
+          </div>
+          <div class="joker-labels" aria-hidden="true">
+            <span class="joker-rank joker-rank-tl">{{ jokerLabel }}</span>
+            <span class="joker-rank joker-rank-br">{{ jokerLabel }}</span>
           </div>
         </template>
         <template v-else>
@@ -117,6 +121,7 @@ const isRed = computed(() => !isJoker.value && (suit.value === 1 || suit.value =
 const isBlack = computed(() => !isJoker.value && (suit.value === 0 || suit.value === 2))
 const suitSymbol = computed(() => SUIT_SYM[suit.value] || '?')
 const displayRank = computed(() => RANK_LABEL[rank.value] || '?')
+const jokerLabel = computed(() => isBigJoker.value ? '大王' : (isSmallJoker.value ? '小王' : ''))
 const sizeClass = computed(() => `size-${props.size}`)
 </script>
 
@@ -276,7 +281,7 @@ const sizeClass = computed(() => `size-${props.size}`)
 .is-small-joker .card-pattern { opacity: 0.12; }
 .is-small-joker .joker-content { color: #1a1a1a; }
 
-/* ----- 大小王中央内容(v0.4.3 卡通小丑 PNG 占满牌面 ~90%,无字)----- */
+/* ----- 大小王中央内容(v0.4.3 卡通小丑 PNG 占满牌面 ~90%,带文字角标)----- */
 .joker-content {
   display: flex;
   align-items: center;
@@ -286,9 +291,19 @@ const sizeClass = computed(() => `size-${props.size}`)
   width: 100%;
   height: 100%;
 }
+/* 增加一层柔光晕,让 PNG 从金属渐变背景里浮出来 */
+.joker-content::before {
+  content: '';
+  position: absolute;
+  left: 50%; top: 55%;
+  transform: translate(-50%, -50%);
+  width: 70%; height: 70%;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), transparent 70%);
+  border-radius: 50%;
+  z-index: 0;
+  pointer-events: none;
+}
 .joker-face {
-  /* v0.4.3:卡通小丑占满牌面,无文字。
-     object-fit: contain 保证透明 PNG 居中显示且不被裁切。*/
   width: 92%;
   height: 88%;
   object-fit: contain;
@@ -296,7 +311,32 @@ const sizeClass = computed(() => `size-${props.size}`)
   user-select: none;
   -webkit-user-drag: none;
   pointer-events: none;
+  position: relative;
+  z-index: 1;
 }
+/* 大小王文字角标 */
+.joker-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.joker-rank {
+  position: absolute;
+  font-size: 0.78em;
+  font-weight: 900;
+  line-height: 1;
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.45);
+  letter-spacing: 0.5px;
+}
+.joker-rank-tl { top: 4px; left: 4px; }
+.joker-rank-br { bottom: 4px; right: 4px; transform: rotate(180deg); }
+/* 小尺寸牌面(sm/移动)缩小角标,避免拥挤 */
+.size-sm .joker-rank { font-size: 0.55em; top: 2px; left: 2px; }
+.size-sm .joker-rank-br { display: none; }
+.size-md .joker-rank { font-size: 0.72em; }
+.size-lg .joker-rank { font-size: 0.85em; }
 
 /* ----- 选中态(桌面端)spec §5.5 ----- */
 .card-play.selected {

@@ -18,6 +18,16 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:8848',
     trace: 'on-first-retry',
+    actionTimeout: 15_000,
+  },
+  expect: {
+    timeout: 10_000,
+  },
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:8848',
+    timeout: 60_000,
+    reuseExistingServer: !process.env.CI,
   },
   projects: [
     {

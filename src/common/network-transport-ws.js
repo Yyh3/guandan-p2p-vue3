@@ -113,6 +113,7 @@ export class WebSocketTransport {
     this._reconnectTimer = null
     this._url = null              // client 端 ws URL,重连用
     this._lastSenderWs = null // host 端最近一次发消息的 ws（用于 bindLastSenderSeat）
+    this._roomInfoProvider = null // v0.4.22 P1:扫描发现 /room-info 数据源
   }
 
   /**
@@ -168,6 +169,19 @@ export class WebSocketTransport {
           const html = fs.readFileSync(path.join(docRoot, 'index.html'))
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': html.length })
           res.end(html)
+          return
+        }
+        // /room-info —— v0.4.22 P1:局域网扫描发现端点
+        if (safePath === '/room-info') {
+          const info = this._getRoomInfo()
+          const body = JSON.stringify(info || { roomNo: '', playerCount: 0, maxPlayers: 4 })
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Content-Length': new TextEncoder().encode(body).length,
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          })
+          res.end(body)
           return
         }
         // /assets/* 静态资源
@@ -226,7 +240,8 @@ export class WebSocketTransport {
           const msg = JSON.parse(data.toString())
           // ★ P0-02:server 端必须按 socket 绑定的 seat 覆盖客户端伪造的 msg.from
           const boundSeat = this._clients.get(ws)?.seat ?? ws._seat ?? -1
-          if (boundSeat < 0 && msg.type !== 'JOIN') return
+          // v0.4.22 P1:允许未绑定 seat 的 ROOM_PROBE 扫描请求
+          if (boundSeat < 0 && msg.type !== 'JOIN' && msg.type !== 'ROOM_PROBE') return
           msg.from = boundSeat
           this._lastSenderWs = ws
           this._emit(msg)
@@ -455,6 +470,19 @@ export class WebSocketTransport {
     this._lastSenderWs._seat = seat
     const meta = this._clients.get(this._lastSenderWs)
     if (meta) meta.seat = seat
+  }
+
+  /**
+   * v0.4.22 P1:设置 /room-info 数据源,扫描端通过 HTTP 获取房间摘要。
+   * @param {Function|null} fn —— () => { roomNo, playerCount, maxPlayers, hostNickname? }
+   */
+  setRoomInfoProvider(fn) {
+    this._roomInfoProvider = typeof fn === 'function' ? fn : null
+  }
+
+  _getRoomInfo() {
+    if (!this._roomInfoProvider) return null
+    try { return this._roomInfoProvider() } catch (e) { return null }
   }
 
   /**

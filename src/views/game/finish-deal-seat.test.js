@@ -96,46 +96,48 @@ console.log('\n=== 2. finishDeal 修复前(写死 hands[0])会让 selfSeat=1/2/3
 }
 
 // ============================================================
-// 块 3: 4 个 client 模拟联机 — 固定 seed,各自初始化 game,各自 finishDeal
+// 块 3: 4 client 模拟联机 — host 逐座 DEAL,joiner 只收到自己的手牌
 // ============================================================
-console.log('\n=== 3. 4 client 模拟联机:固定 seed → 4 hands 拼成完整 108 张牌 ===')
+console.log('\n=== 3. 4 client 模拟联机:host 逐座 DEAL → 4 人各自 27 张拼成 108 张 ===')
 {
-  // 真机 4 人联机:host 决定 seed,broadcast DEAL,所有 client 用同 seed 调 initGame
-  // 每个 client 的 game instance 自己 deal,得到的 hands 数组是一样的
-  // 关键断言:client[i].myHand === game.getState().hands[i]
+  // Phase 2:host 发完整牌,然后给每个 seat 单独发送 hands[seat] + handCounts。
+  // joiner 端 game 以 joiner 模式创建,收到 DEAL 后用 dealData 填充自己的手牌。
   const SEED = 999
+  const hostGame = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
+  hostGame.deal()
+  const hostSt = hostGame.getState()
+  const handCounts = hostSt.hands.map(h => h.length)
+
   const clients = [0, 1, 2, 3].map((selfSeat) => {
-    // 模拟 useGameLogic.initGame:每个 client 都有自己的 game 实例 + selfSeat
-    // ★ P2P 模式:只有 selfSeat=0 是 host,其它 joiner 的 game 不是 host (但 seed 相同)
+    // 每个 client 收到只含自己手牌的 dealData
+    const hands = hostSt.hands.map((h, i) => (i === selfSeat ? h.slice() : []))
     const game = createGame({
       seats: 4,
       levelRank: 15,
-      isHost: selfSeat === 0,  // 联机时只有 selfSeat=0 是 host
+      isHost: false,
+      selfSeat,
       aiPlayers: [],
       seed: SEED,
     })
-    game.deal()
+    game.deal(null, hostSt.firstPlayer, { hands, handCounts })
     return { selfSeat, game }
   })
 
   // 验证:每个 client finishDeal 读自己的 hands[seat]
   for (const c of clients) {
     const myHand = finishDealFixed(c.game, c.selfSeat)
-    const expected = E.sortHandGrouped(c.game.getState().hands[c.selfSeat].slice())
+    const expected = E.sortHandGrouped(hostSt.hands[c.selfSeat].slice())
     eq(`client[${c.selfSeat}] finishDeal 读 hands[${c.selfSeat}]`,
       myHand.length, expected.length)
     assert(`client[${c.selfSeat}] 牌数 = 27 (每人 27 张)`, myHand.length === 27)
   }
 
-  // 验证:任一 client 的 hands 拼起来 = 完整 108 张牌
-  // (注意:每张牌有 2 张(同 rank + suit 不同花色或大小王),所以 unique key 只有 54 个)
-  const oneClientHands = clients[0].game.getState().hands
-  const allCardKeys = oneClientHands.flatMap(h => h.map(c => `${c.suit}-${c.rank}`))
-  eq('单 client × 4 hands 总张数', allCardKeys.length, 108)
-  // 用 sortGrouped + length 比对:108 张牌必须有 2 个 A / 2 个 2 / 4 个 3-10 / 2 个 J / 2 个 Q / 2 个 K / 2 王
-  // 简单验证:每 rank 一共出现 8 张(4 花色 × 2),王出现 2 张
+  // 验证:4 个 client 的 own hand 拼起来 = 完整 108 张牌
+  const allOwnHands = clients.map(c => finishDealFixed(c.game, c.selfSeat))
+  const allCardKeys = allOwnHands.flatMap(h => h.map(c => `${c.suit}-${c.rank}`))
+  eq('4 client own hands 总张数', allCardKeys.length, 108)
   const rankCounts = {}
-  for (const h of oneClientHands) {
+  for (const h of allOwnHands) {
     for (const c of h) {
       rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1
     }
@@ -147,12 +149,11 @@ console.log('\n=== 3. 4 client 模拟联机:固定 seed → 4 hands 拼成完整
     assert(`rank=${r} (王) 总共 2 张`, rankCounts[r] === 2)
   }
 
-  // 验证:sortGrouped(myHand) === sortGrouped(hands[selfSeat]) (每个 client 独立验证)
+  // 验证:sortGrouped(myHand) === sortGrouped(hostHands[selfSeat])
   for (const c of clients) {
     const myHand = finishDealFixed(c.game, c.selfSeat)
-    const expected = E.sortHandGrouped(c.game.getState().hands[c.selfSeat].slice())
-    // 用 sortGrouped 比较,顺序一致
-    eq(`client[${c.selfSeat}] sortGrouped(myHand) === sortGrouped(hands[${c.selfSeat}])`,
+    const expected = E.sortHandGrouped(hostSt.hands[c.selfSeat].slice())
+    eq(`client[${c.selfSeat}] sortGrouped(myHand) === sortGrouped(hostHands[${c.selfSeat}])`,
       myHand.map(c => `${c.suit}-${c.rank}`),
       expected.map(c => `${c.suit}-${c.rank}`))
   }
@@ -181,24 +182,25 @@ console.log('\n=== 4. 边界:selfSeat 非法值时走 fallback ===')
 }
 
 // ============================================================
-// 块 5: 4 个 selfSeat 同时创建 game 实例,seed 相同,view 一致性
+// 块 5: Phase 2 hand hiding:joiner 只持有自己的手牌,看不到他人手牌
 // ============================================================
-console.log('\n=== 5. 4 个 selfSeat 视角:自己看的 myHand 等于真实 hands[selfSeat] ===')
+console.log('\n=== 5. Phase 2 hand hiding:joiner 只持有自己的手牌,看不到他人手牌 ===')
 {
-  // 实际场景:host 发牌,joiner 收到 DEAL {seed} 后 initGame({seed}) → finishDeal
-  // joiner 的 selfSeat 由 SYNC 决定 (1/2/3)
-  // ★ 关键:joiner 不能读 host 的牌 (修复前 bug)
+  // 实际场景:host 发牌后逐座 sendTo DEAL {hands, handCounts},joiner 收到后
+  // 用 dealData 填充自己的手牌,再 finishDeal 读 hands[selfSeat]。
   const SEED = 4242
   const hostGame = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
   hostGame.deal()
   const hostSt = hostGame.getState()
+  const handCounts = hostSt.hands.map(h => h.length)
 
-  // 模拟 3 joiner,各自 initGame 同 seed
-  const joiners = [1, 2, 3].map((seat) => ({
-    selfSeat: seat,
-    game: createGame({ seats: 4, levelRank: 15, isHost: false, aiPlayers: [], seed: SEED }),
-  }))
-  for (const j of joiners) j.game.deal()
+  // 模拟 3 joiner,各自收到 host 发来的只含自己手牌的 dealData
+  const joiners = [1, 2, 3].map((seat) => {
+    const hands = hostSt.hands.map((h, i) => (i === seat ? h.slice() : []))
+    const game = createGame({ seats: 4, levelRank: 15, isHost: false, selfSeat: seat, aiPlayers: [], seed: SEED })
+    game.deal(null, hostSt.firstPlayer, { hands, handCounts })
+    return { selfSeat: seat, game }
+  })
 
   // host 视角:read hands[0]
   const hostView = finishDealFixed(hostGame, 0)
@@ -210,14 +212,21 @@ console.log('\n=== 5. 4 个 selfSeat 视角:自己看的 myHand 等于真实 han
     // joiner 看到的 = 它自己 seat 的牌,不是 host 的牌
     const expectedHand = j.game.getState().hands[j.selfSeat]
     assert(`joiner seat=${j.selfSeat} view = hands[${j.selfSeat}] (${expectedHand.length} 张)`,
-      jView.length === expectedHand.length)
+      jView.length === expectedHand.length && jView.length === 27)
 
-    // ★ 关键:joiner 不应该看到 host 的牌 (修复前会)
+    // ★ 关键:joiner 不应该看到 host 的牌 (Phase 2 hand hiding)
     const hostHandSorted = E.sortHandGrouped(hostSt.hands[0].slice())
     const joinerHandSorted = jView
     const sameAsHost = JSON.stringify(hostHandSorted) === JSON.stringify(joinerHandSorted)
-    assert(`joiner seat=${j.selfSeat} 不应该等于 host 的牌 (修复前 bug 表现)`,
+    assert(`joiner seat=${j.selfSeat} 不应该等于 host 的牌 (Phase 2 hand hiding)`,
       sameAsHost === false)
+
+    // Phase 2:其它 seat 的 hand 为空占位
+    for (let s = 0; s < 4; s++) {
+      if (s === j.selfSeat) continue
+      assert(`joiner seat=${j.selfSeat} 不持有 seat=${s} 的手牌`,
+        j.game.getState().hands[s].length === 0)
+    }
   }
 }
 

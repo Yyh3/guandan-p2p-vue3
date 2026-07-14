@@ -26,7 +26,12 @@ import * as AI from './guandan-ai.js'
 const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
 
 function createGame(opts) {
-  const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null, difficulty = 'medium' } = opts
+  const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null, difficulty = 'medium', selfSeat = 0 } = opts
+  // ★ Phase 2:hand hiding / host authority
+  //   'host' = 持有完整 hands,运行 AI,权威来源
+  //   'joiner' = 只持有自己的手牌,其他 seat 用 handCounts 占位,被动接受 host 权威消息
+  const mode = isHost ? 'host' : 'joiner'
+  const ownSeat = isValidSeat(selfSeat) ? selfSeat : 0
   // ★ v3.8 P1:aiPlayers 用可变数组(支持运行时加 seat,例如断线 AI 接管)
   let aiPlayers = initialAI.slice()
   // ★ v3.8 P1:AI 出的牌要广播给其他 tab(由 GameView 注入)
@@ -47,7 +52,8 @@ function createGame(opts) {
     levelRank,               // 当前级牌 rank
     // ★ v0.4.9:AI 难度等级(随 snapshot 同步)
     difficulty,              // 'medium' | 'hard'
-    hands: [[], [], [], []], // 4 个玩家手牌
+    hands: [[], [], [], []], // 4 个玩家手牌(host 完整;joiner 仅 ownSeat 有效)
+    handCounts: [0, 0, 0, 0], // Phase 2:joiner 模式用 counts 代替其他 seat 的真实手牌
     tableCards: [],          // 当前桌面已出牌(一轮)
     lastPlay: null,          // 当前桌面牌型 {type, mainRank, length, who, cards}
     currentPlayer: 0,        // 当前出牌的玩家(座位)
@@ -161,12 +167,17 @@ function createGame(opts) {
    *   - 性能:一次 deal 后 state < 5KB,JSON round-trip ~1ms,host 迁移 / 重连
    *     路径用得起
    *
+   * ★ Phase 2:若指定 forSeat,快照中只保留该座位的真实手牌,其他座位用空数组
+   *   占位,并附上手牌张数 handCounts。用于 STATE_SNAPSHOT / host 迁移时防止
+   *   手牌泄露。
+   *
+   * @param {number} [forSeat] - 请求快照的座位
    * @returns {object} 深拷贝的 state(字段全集)
    */
-  function getSnapshot() {
+  function getSnapshot(forSeat) {
     // ★ P1-13:白名单克隆,只暴露必要字段,避免把内部临时变量/函数带入快照
     const keys = [
-      'hands', 'tableCards', 'lastPlay', 'currentPlayer', 'firstPlayer', 'leaderPlayer',
+      'hands', 'handCounts', 'tableCards', 'lastPlay', 'currentPlayer', 'firstPlayer', 'leaderPlayer',
       'trickHistory', 'finishedOrder', 'abandonedSeats', 'passCount', 'tribute', 'ghost',
       'levelUp', 'levelRank', 'teamLevels', 'round', 'phase',
       'isRestartAfterA', 'previousLevelRank', 'lastAppliedRoundId', 'difficulty',
@@ -179,6 +190,10 @@ function createGame(opts) {
       return JSON.parse(JSON.stringify(v))
     }
     for (const k of keys) snap[k] = clone(state[k])
+    // Phase 2:按目标座位过滤手牌,避免泄露他人真实手牌
+    if (isValidSeat(forSeat)) {
+      snap.hands = snap.hands.map((h, i) => (i === forSeat ? h : []))
+    }
     snap.schemaVersion = 2
     if ('matchId' in state) snap.matchId = state.matchId
     return snap
@@ -188,11 +203,23 @@ function createGame(opts) {
   // ★ v3.8 P1 修复:4-tab 联机用 host 广播的 seed 发同一手牌
   // 不传 seed → 走引擎的随机(单机模式兼容)
   // ★ UX 改进:支持 host 切牌指定首家(firstSeat)
-  function deal(forcedSeed, firstSeat) {
+  // ★ Phase 2:joiner 模式由 host 通过 dealData 传入自己的手牌 + 全局 handCounts,
+  //   不再本地用 seed 还原四家完整手牌,实现手牌隐藏。
+  function deal(forcedSeed, firstSeat, dealData) {
     const alive = ensureAlive(); if (alive) return alive
     const useSeed = forcedSeed != null ? forcedSeed : seed
-    const result = useSeed == null ? E.deal() : E.deal(useSeed)
-    state.hands = result.hands
+    if (mode === 'host') {
+      const result = useSeed == null ? E.deal() : E.deal(useSeed)
+      state.hands = result.hands
+      state.handCounts = result.hands.map(h => h.length)
+    } else if (dealData && Array.isArray(dealData.hands) && Array.isArray(dealData.handCounts)) {
+      state.hands = dealData.hands
+      state.handCounts = dealData.handCounts
+    } else {
+      // joiner 模式但未收到手牌(不应发生),用空占位
+      state.hands = [[], [], [], []]
+      state.handCounts = [0, 0, 0, 0]
+    }
     state.phase = 'dealing'
     state.tableCards = []
     state.lastPlay = null
@@ -207,19 +234,19 @@ function createGame(opts) {
     // 切牌指定首家 > seeded 随机 > 纯随机
     if (isValidSeat(firstSeat)) {
       state.firstPlayer = firstSeat
-    } else if (useSeed != null && E.mulberry32) {
+    } else if (mode === 'host' && useSeed != null && E.mulberry32) {
       const rng = E.mulberry32(useSeed ^ 0x5A5A5A5A)
       state.firstPlayer = Math.floor(rng() * 4)
-    } else {
+    } else if (mode === 'host') {
       state.firstPlayer = Math.floor(Math.random() * 4)
     }
     state.currentPlayer = state.firstPlayer
     state.leaderPlayer = state.firstPlayer
     state.phase = 'playing'
-    emit('dealt', { hands: state.hands.map(h => h.length), firstPlayer: state.firstPlayer, levelRank: state.levelRank })
+    emit('dealt', { hands: state.handCounts.slice(), firstPlayer: state.firstPlayer, levelRank: state.levelRank })
     emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
-    // AI 自动出(联机模式 aiPlayers 空则跳过)
-    if (aiPlayers.length > 0) scheduleAI()
+    // AI 自动出(联机模式 aiPlayers 空则跳过;joiner 模式不应有 AI)
+    if (mode === 'host' && aiPlayers.length > 0) scheduleAI()
   }
 
   // ============ 出牌 ============
@@ -262,23 +289,25 @@ function applyPlay(seat, cards, hand, rec) {
     if (state.phase !== 'playing') return { ok: false, error: 'not_playing' }
     if (seat !== state.currentPlayer) return { ok: false, error: 'not_your_turn' }
 
-    // ★ v0.4.13 对抗性审查 (P1-4):防御性 — 重复 applyPlay(WS 重传 / 多次 broadcast)
-    //   会让 hand 已空时 splice(-1, 1) 静默删末尾那张牌(silent bug)。
-    //   修法:cards 任何一张不在 state.hands[seat] 里 → 直接 return,跳过这次 apply。
-    //   防御场景:joiner 端已经 apply 过同一 PLAY,手牌已删,再 apply 时 hand 里查不到 cards。
-    const sourceHand = state.hands[seat].slice()
-    let allFound = true
-    for (const card of cards) {
-      const idx = sourceHand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
-      if (idx < 0) {
-        allFound = false
-        break
+    // ★ Phase 2:joiner 模式下,远程 seat 的真实手牌不在本地,跳过手牌存在性校验,
+    //   直接信任 host 权威消息;只更新该座位的 handCounts。
+    const shouldCheckHand = mode === 'host' || seat === ownSeat
+    let sourceHand = null
+    if (shouldCheckHand) {
+      sourceHand = state.hands[seat].slice()
+      let allFound = true
+      for (const card of cards) {
+        const idx = sourceHand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
+        if (idx < 0) {
+          allFound = false
+          break
+        }
+        sourceHand.splice(idx, 1)
       }
-      sourceHand.splice(idx, 1)
-    }
-    if (!allFound) {
-      // cards 中至少一张不在 hand 里 — 重复 apply 或错误数据,跳过
-      return
+      if (!allFound) {
+        // cards 中至少一张不在 hand 里 — 重复 apply 或错误数据,跳过
+        return
+      }
     }
 
     // P1-02 修复:不信任外部传入的 rec,必须重新走 materializeGhosts 校验
@@ -288,16 +317,21 @@ function applyPlay(seat, cards, hand, rec) {
     }
     rec = materialized.rec
 
-    // 使用从 state.hands[seat] 移除 cards 后的手牌(忽略外部传入的 hand)
-    hand = sourceHand
-    state.hands[seat] = hand
+    if (shouldCheckHand) {
+      // 使用从 state.hands[seat] 移除 cards 后的手牌(忽略外部传入的 hand)
+      hand = sourceHand
+      state.hands[seat] = hand
+    } else {
+      // joiner 远程 seat:只减张数,不动空 hand 数组
+      state.handCounts[seat] = Math.max(0, (state.handCounts[seat] || 0) - cards.length)
+    }
     state.tableCards = cards
     state.lastPlay = { ...rec, who: seat, cards }
     state.passCount = 0
     state.trickHistory.push({ seat, cards, type: rec.type })
     emit('play', { seat, cards, type: rec.type })
 
-    if (hand.length === 0) {
+    if (shouldCheckHand ? hand.length === 0 : state.handCounts[seat] === 0) {
       state.finishedOrder.push(seat)
       emit('playerFinished', { seat, order: state.finishedOrder.length })
       // v3.x P0-5 修复:掼蛋标准规则 — 3 人出完(任意组合)即结束本局,因为
@@ -374,9 +408,11 @@ function applyPlay(seat, cards, hand, rec) {
         leader: nextLeader,
         originalLeader: leader,
         wind: leaderInactive,
-        handsRemaining: state.hands.map((h, i) =>
-          (state.finishedOrder.includes(i) || state.abandonedSeats.includes(i)) ? 0 : h.length
-        ),
+        handsRemaining: state.hands.map((h, i) => {
+          if (state.finishedOrder.includes(i) || state.abandonedSeats.includes(i)) return 0
+          // Phase 2:joiner 模式下远程 seat 的 h 是空占位,用 handCounts 读真实张数
+          return h.length || state.handCounts[i] || 0
+        }),
       })
       // ★ 静态审查 BUG-B 修复:一墩结束后只 emit('trickEnd') 不 emit('turn'),
       //   useGameLogic 主要通过 'turn' 事件同步 currentPlayer / lastPlay /
@@ -804,6 +840,10 @@ function applyPlay(seat, cards, hand, rec) {
       if ('hands' in snap) {
         if (!Array.isArray(snap.hands) || snap.hands.length !== 4) return
         next.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
+      }
+      if ('handCounts' in snap) {
+        if (!Array.isArray(snap.handCounts) || snap.handCounts.length !== 4 || !snap.handCounts.every(n => typeof n === 'number')) return
+        next.handCounts = snap.handCounts.slice()
       }
       if ('tableCards' in snap) {
         if (!Array.isArray(snap.tableCards)) return

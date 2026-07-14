@@ -15,6 +15,7 @@ test.describe('移动端对局', () => {
 
   test('iPhone 视口下渲染移动布局', async ({ page }) => {
     await page.context().addInitScript(() => {
+      window.__gd_e2e = true
       window.__gd_skipDealAnim = true
     })
 

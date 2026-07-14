@@ -63,6 +63,10 @@ function check(name, cond) {
 
 setupGlobals()
 
+// Phase 2 测试辅助:把 net.isHost 恒定为 true,让 P2P 测试路径按 host 模式发牌,
+// 从而 myHand 有 27 张牌。单机路径不受此影响(!isP2P 时仍然按 host 处理)。
+net.isHost = () => true
+
 // ===== 1. API 导出完整性 =====
 console.log('\n=== 1. useGameLogic API 导出完整性 ===')
 {
@@ -213,15 +217,15 @@ console.log('\n=== 7. AI takeover 在延迟内读取最新 state ===')
   net.isHost = origIsHost
 }
 
-// ===== 8. Batch 1:调试全局变量只在 DEV 暴露 =====
-console.log('\n=== 8. Batch 1:window.__gd_game 只在 DEV 暴露 ===')
+// ===== 8. Batch 1:调试全局变量收敛 =====
+console.log('\n=== 8. Batch 1:window.__gd_game 不再暴露完整 game ref ===')
 {
   const logic = useGameLogic({ mainActionsRef: ref(null) })
   logic.selfSeat.value = 0
   logic.initGame()
   await sleep(50)
-  // Node 测试环境 import.meta.env 未定义,应不暴露
-  check('非 DEV 环境不暴露 window.__gd_game', typeof global.window.__gd_game === 'undefined')
+  // 任何环境都不应暴露完整 game ref(P0-3 收敛)
+  check('不暴露 window.__gd_game', typeof global.window.__gd_game === 'undefined')
 }
 
 // ===== 9. Batch 1:onP2PPlay 拒绝错误发送方 =====

@@ -49,7 +49,7 @@ assert('cancel() 不抛错', threw === false)
 
 console.log('\n=== 6. __gd_skipDealAnim hook (v2.4 t3 加,v2.4-p1 回归) ===')
 // 模拟生产 headless/真机 WebView 跳过动画场景:onComplete 必须下个 microtask 触发
-globalThis.window = { __gd_skipDealAnim: true }
+globalThis.window = { __gd_skipDealAnim: true, __gd_e2e: true }
 const skipped = new Promise((resolve) => {
   const inst2 = new DealAnimation()
   inst2.start({

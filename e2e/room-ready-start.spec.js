@@ -8,6 +8,12 @@ import { test, expect } from '@playwright/test'
  * 因此改从房间头部直接读取房间号。
  */
 test('host creates room, three joiners ready and host starts game', async ({ page, context }) => {
+  // Phase 2:跳过发牌动画，让手牌立即渲染，避免 E2E 等待动画
+  await context.addInitScript(() => {
+    window.__gd_e2e = true
+    window.__gd_skipDealAnim = true
+  })
+
   // 房主页
   const hostPage = page
   await hostPage.goto('/#/')
@@ -38,13 +44,19 @@ test('host creates room, three joiners ready and host starts game', async ({ pag
     await expect(jp.locator('[data-testid="btn-start"]')).toContainText('取消准备')
   }
 
-  // 房主视角开始按钮变为可用，点击开始游戏
+  // 房主视角开始按钮变为可用；点击后开始切牌覆盖层，覆盖层会自动消失并进入对局页
   await expect(hostPage.getByTestId('btn-start')).toBeEnabled({ timeout: 10000 })
-  await hostPage.getByTestId('btn-start').click()
+  await hostPage.getByTestId('btn-start').click({ force: true })
 
   // 房主与所有加入者都应进入对局页
   await expect(hostPage).toHaveURL(/#\/game/)
   for (const jp of joiners) {
     await expect(jp).toHaveURL(/#\/game/)
+  }
+
+  // Phase 2:host 持有完整手牌，joiner 只收到自己的手牌；验证每页都渲染了自己的手牌列
+  await expect(hostPage.locator('.hand-column').first()).toBeVisible({ timeout: 10000 })
+  for (const jp of joiners) {
+    await expect(jp.locator('.hand-column').first()).toBeVisible({ timeout: 10000 })
   }
 })

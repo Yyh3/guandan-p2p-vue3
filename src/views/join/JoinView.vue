@@ -25,6 +25,18 @@
         <button class="action-btn-small" @click="openScanner">📷 扫一扫</button>
         <p class="card-hint">对准房主手机上的二维码</p>
       </div>
+      <div class="scan-row">
+        <button class="action-btn-small" :class="{ disabled: scanning }" @click="scanRooms">
+          {{ scanning ? '扫描中...' : '🔍 扫描局域网房间' }}
+        </button>
+        <p class="card-hint">自动搜索同一 Wi-Fi 下的房主</p>
+      </div>
+      <p v-if="scanError" class="form-error">{{ scanError }}</p>
+      <ul v-if="discovered.length" class="discovered-list">
+        <li v-for="room in discovered" :key="room.key" @click="selectRoom(room)">
+          {{ room.name }}
+        </li>
+      </ul>
       <div class="qr-row" v-if="route.query.scanHost">
         <p class="card-hint">扫到的房主地址:{{ route.query.scanHost }}</p>
         <button class="action-btn-small" @click="useScan">使用该地址</button>
@@ -39,6 +51,18 @@
         <input v-model="roomNo" maxlength="6" placeholder="6 位数字" class="input" />
       </div>
       <p class="card-hint">房主开热点后,会显示一个 6 位数字房间号</p>
+      <div class="scan-row">
+        <button class="action-btn-small" :class="{ disabled: scanning }" @click="scanRooms">
+          {{ scanning ? '扫描中...' : '🔍 扫描局域网房间' }}
+        </button>
+        <p class="card-hint">自动搜索同一 Wi-Fi 下的房主</p>
+      </div>
+      <p v-if="scanError" class="form-error">{{ scanError }}</p>
+      <ul v-if="discovered.length" class="discovered-list">
+        <li v-for="room in discovered" :key="room.key" @click="selectRoom(room)">
+          {{ room.name }}
+        </li>
+      </ul>
     </div>
 
     <!-- 本机模拟说明仅在开发环境显示,避免干扰普通用户 -->
@@ -89,6 +113,11 @@ const roomNo = ref(route.query.roomNo ? String(route.query.roomNo) : '')
 const showScanner = ref(false)
 const scannerError = ref('')
 let scannerInstance = null  // html5-qrcode Html5Qrcode 实例(避免热重载 leak)
+
+// v0.4.22 P1:局域网扫描发现
+const scanning = ref(false)
+const scanError = ref('')
+const discovered = ref([])
 
 onMounted(() => {
   isNative.value = isNativeCapacitor()
@@ -149,6 +178,28 @@ function onJoin() {
     router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddress.value.trim())}`)
   } else {
     router.push(`/room?role=joiner&roomNo=${roomNo.value}`)
+  }
+}
+
+async function scanRooms() {
+  scanning.value = true
+  scanError.value = ''
+  try {
+    discovered.value = await net.scanLanRooms()
+  } catch (e) {
+    discovered.value = []
+    scanError.value = `扫描失败: ${e?.message || e}`
+  } finally {
+    scanning.value = false
+  }
+}
+
+function selectRoom(room) {
+  if (!room) return
+  if (isNative.value) {
+    hostAddress.value = `${room.ip}:${room.port}`
+  } else if (room.roomNo) {
+    roomNo.value = room.roomNo
   }
 }
 
@@ -273,6 +324,21 @@ async function closeScanner() {
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .action-btn.disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
+.scan-row { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+.discovered-list {
+  list-style: none; margin: 10px 0 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.discovered-list li {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #fff;
+  cursor: pointer;
+}
+.discovered-list li:hover { background: rgba(255, 210, 78, 0.18); }
 
 /* ★ v0.4.9:扫码 Modal 样式 */
 .scanner-modal {

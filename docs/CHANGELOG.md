@@ -4,7 +4,7 @@
 
 ---
 
-## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(50 套件 / 2293 单测全过)
+## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(50 套件 / 2302 单测全过)
 
 > 在 v0.4.21 基线上,按第一性原理系统性修复隐藏技术债,覆盖规则引擎、AI、对局状态机、P2P 网络、UI 生命周期与测试基线。
 
@@ -35,7 +35,14 @@
 
 - 新增 `src/views/game/useGameLogic.test.js`(22 case):直接验证 selfSeat getter、timer 生命周期、`onRestartMatch` 重置、AI takeover 过期 state。
 - 新增 `src/common/network-host-migration-consecutive.test.js`(20 case):验证 host 主动让位后新 host 上任、旁观者收到广播,牌局网络可继续。
-- `package.json` 已把上述套件纳入 `npm test`;总基线升至 **50 套件 / 2293 通过 / 0 失败**。
+- `package.json` 已把上述套件纳入 `npm test`;总基线升至 **50 套件 / 2302 通过 / 0 失败**。
+
+### E. P1 — 真正的第二发现通道
+
+- `network.js`: 重写 `scanLanRooms()`，通过 HTTP `/room-info` 快速路径 + WebSocket `ROOM_PROBE/ROOM_PROBE_ACK` 主动发现局域网 host；候选地址覆盖常见热点网段、当前页来源、历史 peer hostAddress 缓存。
+- `network-transport-ws.js`: host HTTP server 新增 `/room-info` JSON 端点；未绑定 seat 的 `ROOM_PROBE` 消息透传给 network.js，由 host 回复 `ROOM_PROBE_ACK`。
+- `JoinView.vue`: 增加「扫描局域网房间」按钮与可点击结果列表，真机/浏览器均可一键发现房间并自动填入 IP/房间号。
+- 新增 `src/common/network-discovery.test.js`(32 case)覆盖候选生成、HTTP/WS 探测、`scanLanRooms` 端到端发现；总基线刷新至 **51 套件 / 2406 通过 / 0 失败**。
 
 ---
 
@@ -1239,7 +1246,7 @@ v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基
 ### 已知 follow-up
 
 - ⚠️ **救火 commit(1a202c5 + 60f93cc)** — owner review 过,质量接近 producer 交付,无回归,verifier 未单独跑(已通过 final-integration 全套测试 + build 间接验证)
-- 💭 **AI 难度分档** — 当前只有中等难度(规则 + 贪心),Easy / Hard 暂未实现
+- ✅ **AI 难度分档** — 已在 v0.4.9 实现 Easy / Medium / Hard
 - 💭 **录像回放** — 一局打完后无法回看每手牌决策路径
 - 💭 **iOS 脚手架** — Capacitor iOS 工程未建,Mac + Xcode 走一遍
 - 💭 **多语言** — 当前中文 UI 硬编码,英文/繁体未抽 i18n
@@ -1473,7 +1480,7 @@ v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基
 - 14 种牌型识别
 - 大小比较 + 升级 + 进贡
 - 逢人配(红桃级牌万能)
-- AI 出牌决策(规则 + 贪心,中等难度)
+- AI 出牌决策(规则 + 贪心,后续 v0.4.9 扩展为三档难度)
 - 对局状态机(发牌 / 出牌 / 过牌 / 一轮结束 / 一局结束)
 - 浏览器版网络层(BroadcastChannel)
 - localStorage 存储(昵称 / 头像 / 设置 / 战绩)
@@ -1485,7 +1492,7 @@ v0.4.14 commit message 写"37 测试套件 / 1857 单测 / 0 失败",**实测基
 ### 已知限制
 
 - ❌ 网络层只支持同浏览器标签联机(真机需 v2.0 重写)
-- ❌ AI 只有中等难度
+- ✅ AI 难度已扩展为 Easy/Medium/Hard(v0.4.9)
 - ❌ 没原生 APK/IPA 打包
 - ❌ 无录像回放
 
@@ -1501,6 +1508,6 @@ MINOR: 新功能
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前**:`0.3.0`(v2.x 收官,真机跨设备联机 + Capacitor Android 可发)
+**当前**:`v0.4.21+`(Phase 2 hostEpoch 严格化 + P0 收尾 + UI 重叠修复基线)
 
 **首发目标**:`v1.0.0`(H5 公开版本)

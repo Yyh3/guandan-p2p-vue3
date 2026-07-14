@@ -16,6 +16,7 @@ test.describe('AI 单机对局', () => {
   test('进入对局后渲染手牌与 HUD', async ({ page }) => {
     // 跳过发牌动画,让手牌立即出现
     await page.context().addInitScript(() => {
+      window.__gd_e2e = true
       window.__gd_skipDealAnim = true
     })
 
@@ -38,6 +39,7 @@ test.describe('AI 单机对局', () => {
 
   test('点击手牌列可切换选中状态', async ({ page }) => {
     await page.context().addInitScript(() => {
+      window.__gd_e2e = true
       window.__gd_skipDealAnim = true
     })
 

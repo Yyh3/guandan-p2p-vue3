@@ -114,7 +114,8 @@ console.log('\n=== 1. 集成:4 BC client,joiner seat=1 commitPlay → 其它 joi
   // J1 commitPlay = playerPlay + broadcast
   // ★ 这是 useGameLogic.commitPlay 做的事:game.playerPlay + isP2P 时 net.broadcast
   const SEED = 99999
-  const g1 = createGame({ seats: 4, levelRank: 15, isHost: false, aiPlayers: [], seed: SEED })
+  // Phase 2:本测试只验证 broadcast 路径,本地 game 用 host 模式持有完整手牌
+  const g1 = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
   g1.deal()
   // 注意:firstPlayer 由 seed 决定,不一定 = 1
   // 所以 J1 commitPlay 必须等 currentPlayer === J1.getSelfSeat() 才合法
@@ -144,9 +145,9 @@ console.log('\n=== 1. 集成:4 BC client,joiner seat=1 commitPlay → 其它 joi
   eq('payload.source=manual', playsByJ2[0]?.payload?.source, 'manual')
 
   // 验证 J2 / J3 自己的 game 应用这条 PLAY 后,lastPlay.who === 1
-  const g2 = createGame({ seats: 4, levelRank: 15, isHost: false, aiPlayers: [], seed: SEED })
+  const g2 = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
   g2.deal()
-  const g3 = createGame({ seats: 4, levelRank: 15, isHost: false, aiPlayers: [], seed: SEED })
+  const g3 = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
   g3.deal()
 
   // 模拟 joiner 端 onP2PPlay handler

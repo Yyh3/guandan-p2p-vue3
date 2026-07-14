@@ -123,7 +123,7 @@ console.log('\n=== 3. BUG-D: _kickedSeats 在 SYNC peers.set 时清理(joiner �
   // 每个 peers.set 会调 _kickedSeats.delete(seat)
   // 这里手动构造并 emit:
   const fakeSync = {
-    type: 'SYNC', from: 0, to: null, ts: Date.now(),
+    type: 'SYNC', from: 0, to: null, ts: Date.now(), hostEpoch: 1,
     payload: { peers: [[1, { nickname: 'New', avatar: 'N', uuid: 'new-uuid' }]] },
   }
   // host 自己收到 SYNC 不会处理(SYNC 是 host 发出给 joiner 的),但我们的代码修改是

@@ -618,7 +618,8 @@ function onNickEditorConfirmed(p) {
 .hand-area {
   position: fixed;
   left: 0; right: 0; bottom: 0;
-  padding: 8px 0 60px;  /* 留出底部操作栏空间 */
+  /* v4.x patch:底部 padding 加大,给最底部操作栏 + 安全区留足空间,避免压住手牌列 */
+  padding: 8px 0 calc(170px + env(safe-area-inset-bottom, 0px));
   background: linear-gradient(180deg, transparent, rgba(0,0,0,0.6));
   z-index: 5;
   /* v2.5:发牌完手牌"立刻可见",去掉 opacity transition(默认 240ms → 0ms)
@@ -789,9 +790,11 @@ function onNickEditorConfirmed(p) {
     --hand-card-h: 62px;
   }
   .col-count { bottom: -8px; height: 14px; font-size: 9px; min-width: 20px; }
-  .hand-area { padding: 8px 0 100px; }          /* 底部 padding 加大,手牌顶端有更舒服的位置 */
-  /* v3-5:QuickActions 在窄屏进一步上移到 240,避开 self 座位(现 110)+ suit-tabs(320)之间的区域 */
-  :deep(.quick-actions) { bottom: 240px; right: 8px; }
+  /* v4.x patch:窄屏操作栏可能换行,手牌区再让出更多空间 */
+  .hand-area { padding: 8px 0 calc(220px + env(safe-area-inset-bottom, 0px)); }
+  .suit-tabs { bottom: 250px; }
+  /* v3-5:QuickActions 在窄屏进一步上移,避开 self 座位 + 操作栏 */
+  :deep(.quick-actions) { bottom: 270px; right: 8px; }
 }
 
 /* ============================================================
@@ -910,7 +913,12 @@ function onNickEditorConfirmed(p) {
   padding: 0;
 }
 .page.is-landscape .suit-tabs {
-  bottom: 180px;
+  bottom: 132px;
+}
+/* 横屏手牌区整体上移,避开底部操作栏 */
+.page.is-landscape .hand-area {
+  bottom: 58px;
+  max-height: 150px;
 }
 /* 智能理牌 / 不出 / 提示 / 出牌按钮字号缩 */
 .page.is-landscape :deep(.auto-find-btn) {
@@ -921,11 +929,13 @@ function onNickEditorConfirmed(p) {
   font-size: 11px;
 }
 
-/* 花色 tab */
+/* 花色 tab
+ * v4.x patch:随操作栏一起下移,保持叠在操作栏上方、手牌区下方。
+ */
 .suit-tabs {
   position: fixed;
   left: 50%;
-  bottom: 320px;  /* v3-4:从 200 上移到 320,叠在 action-bar 上方,两层不打架 */
+  bottom: 190px;
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
@@ -956,10 +966,14 @@ function onNickEditorConfirmed(p) {
 .suit-tab.suit-1.active, .suit-tab.suit-3.active { color: #ff5252; }
 .suit-tab.suit-0.active, .suit-tab.suit-2.active { color: #fff; }
 
-/* 底部主操作栏容器 */
+/* 底部主操作栏容器
+ * v4.x patch:把操作栏从手牌区上方移回最底部,手牌区加大底部 padding,
+ *   彻底避免"智能理牌 / 提示 / 出牌 / 清空"按钮压住手牌列。
+ */
 .action-bar-wrap {
   position: fixed;
-  left: 0; right: 0; bottom: 168px;  /* v4.x:降到手牌区上方,不再跟中央牌桌重叠 */
+  left: 0; right: 0;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;

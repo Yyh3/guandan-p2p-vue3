@@ -168,8 +168,7 @@ adb uninstall com.guandan.p2p
 4. 4 台都打开 APP → 1 人"开房" + 3 人"加入"（填 4 位房间号）
 5. 满 4 人自动开局
 
-> 真机版的网络层会用 Socket TCP（需后续接入 `network.js` 的真机实现）。
-> 当前网络层是浏览器版（BroadcastChannel），所以 APK 内联同样只能模拟。**真机局域网 P2P 是 v2.0 的工作。**
+> 真机版网络层已基于 WebSocket/AndroidWs 实现：房主 APP 起 WS server，其他设备连热点后通过房间号/IP 加入。**真机局域网 P2P 已可用。**
 
 ---
 
@@ -211,35 +210,26 @@ npx cap open ios
 
 ## 四、局域网真机联机的网络层
 
-当前 `src/common/network.js` 是**浏览器版实现**（BroadcastChannel，仅同浏览器标签页有效）。要支持真机跨设备联机，需要实现：
+当前 `src/common/network.js` 已实现两套 transport，按运行环境自动选择：
 
-| 方案 | 难度 | 兼容性 |
+| 环境 | Transport | 说明 |
 |---|---|---|
-| **TCP Socket（手机热点）** | 中 | 全平台（iOS/Android 都支持原生 Socket） |
-| **WiFi Direct（Android）** | 中 | 仅 Android 7+，iOS 不支持 |
-| **Multipeer Connectivity（iOS）** | 中 | 仅 iOS 7+ |
-| **蓝牙 BLE** | 高 | 全平台，吞吐低，仅做兜底 |
+| 浏览器开发态 | `BroadcastChannelTransport` | 同浏览器多标签调试 |
+| Android 真机 | `AndroidWsTransport` | Capacitor 原生 WsServer plugin + WebView WebSocket |
+| Node / 其它真机 | `WebSocketTransport` | 基于 `ws` 库的 WS server/client |
 
-### 4.1 推荐方案：TCP Socket + 手机热点
+### 4.1 已落地方案：WebSocket + 手机热点
 
-接口规范见 `src/common/network.js` 已导出的方法：
-```js
-startAsHost(roomId)  // 房主：监听端口
-joinRoom(hostIp, roomId)  // 加入者：连 host
-broadcast(msg)       // 群发
-sendTo(seat, msg)    // 定向发送
-```
+房主开热点后，APP 在 `0.0.0.0:8848` 起 WS server；其它设备连热点后，通过扫码/输入房间号/输入 IP 加入。消息格式与 BC 模式一致，host 负责 seat 分配、消息 relay、心跳检测与 host 迁移。
 
-实现替换点：`src/common/network.js` 内部把 BroadcastChannel 换成 TCP Socket（可用 Capacitor 的 `@capacitor/network` 或原生插件）。
-
-> 这一步需要针对每个平台（iOS / Android）写原生插件，**属于 v2.0 范围，不在本教程内**。
+> v4.0 候选：真正的 mDNS / UDP 广播 / 固定服务发现通道，需原生层支持。
 
 ---
 
 ## 五、发布检查清单
 
 - [ ] `npm run build` 成功，`dist/` 里有 `index.html` 和 `assets/`
-- [ ] `npm test` 全过（50 套件 / 2293 用例 / 0 失败,v0.4.21）
+- [ ] `npm test` 全过（50 套件 / 2374 用例 / 0 失败,v0.4.21+）
 - [ ] `npm run bench` 性能基线无明显回退
 - [ ] 浏览器版手测一遍：开房 → 4 标签加入 → 完整打 1 局 → 查看战绩
 - [ ] APK/IPA 真机手测一遍（如果已实现真机网络层）
@@ -265,7 +255,7 @@ sendTo(seat, msg)    // 定向发送
 
 ## 七、下一步
 
-- 真机网络层 v2.0（TCP Socket / WiFi Direct / Multipeer）
+- 弱网压测 / 隧道 / 高铁场景数据(v4.0 候选)
 - AI 难度分级（Easy / Medium / Hard）
 - 录像回放
 - 跨局连续打（接风升级）

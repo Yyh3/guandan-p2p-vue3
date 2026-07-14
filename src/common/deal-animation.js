@@ -47,7 +47,10 @@ class DealAnimation {
       return
     }
     // v2.4 t3 测试 hook:window.__gd_skipDealAnim=true 时立即调 onComplete(用于 headless 截图)
-    if (typeof window !== 'undefined' && window.__gd_skipDealAnim) {
+    //   仅在 DEV 或明确标记 e2e 时生效,生产构建不会跳过动画。
+    const allowSkip = (typeof import.meta !== 'undefined' && import.meta.env?.DEV) ||
+      (typeof window !== 'undefined' && window.__gd_e2e === true)
+    if (allowSkip && typeof window !== 'undefined' && window.__gd_skipDealAnim) {
       this._running = true
       // 下个 microtask 触发 onComplete,跟正常路径行为一致
       Promise.resolve().then(() => {

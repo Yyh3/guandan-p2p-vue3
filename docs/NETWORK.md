@@ -1,6 +1,6 @@
 # P2P 网络层 (`network.js`)
 
-> 当前 v1.0 实现是浏览器版 (`BroadcastChannel`)。**真机跨设备联机需 v2.0 重写**。这份文档解释现状和迁移路径。
+> 当前实现同时支持 `BroadcastChannel`(浏览器开发态) 与 `WebSocketTransport` / `AndroidWsTransport`(真机跨设备)。v2.0 已落地。这份文档解释运行态与架构。
 
 ---
 
@@ -20,17 +20,29 @@
 
 ---
 
-## 二、当前实现:`BroadcastChannel` 浏览器版
+## 二、实现形态
+
+- **开发/演示**: `BroadcastChannelTransport` — 同浏览器同 origin 多标签页模拟 4 玩家。
+- **真机跨设备**: `WebSocketTransport`(浏览器/Node) + `AndroidWsTransport`(Capacitor 真机) — 局域网 WS server/client 直连。
+
+### 2.1 `BroadcastChannel` 限制
 
 **v1.0 实现原理**:
 - 浏览器 API `BroadcastChannel(name)` 创建同 origin 跨标签页通信通道
 - 每个房间一个 channel:`guandan-p2p-<roomId>`
 - 消息格式:`{ type, payload, from, to?, ts }`
 
-**限制**:
-- ❌ **跨设备完全不联**(`BroadcastChannel` 只在同浏览器同 origin 有效)
+**限制**(仅限 BroadcastChannel 开发态):
+- ❌ 跨设备不联(`BroadcastChannel` 只在同浏览器同 origin 有效)
 - ❌ 跨域名的两个浏览器窗口(Chrome vs Safari)不互通
 - ✅ 适合开发/演示:同浏览器开 4 标签页模拟 4 玩家
+
+### 2.2 WebSocket / AndroidWs 真机路径
+
+- host 端起 ws server(浏览器环境无法做 server,真机/Node 可以)。
+- joiner 端用原生 WebSocket 连接 host。
+- host 负责 seat 分配、消息 relay、心跳检测。
+- 已实现 host 迁移、断线重连、peer hostAddress 缓存等兜底机制。
 
 **典型使用**:
 
@@ -141,7 +153,7 @@ net.off('event')  // 清空某事件所有 handler
 |---|---|---|---|
 | **Bug 1 死锁**(P0 致命) | 4-tab 联机永远卡在「等待对方准备」 | `joinRoom` 创建 channel 后啥也不发,`startAsHost` 创建后啥也不广播,互相等 | joiner 创建 channel 后**立即**发 `JOIN`,host 收到后回 `SYNC`(含完整 peers 列表);joiner 收到 SYNC 后反查 `peers[].nickname === self.nickname` 找到自己 seat |
 | **Bug 2 `sendTo` 不过滤**(P0 高) | `sendTo(1, X)` 三个 joiner 全收到 | host/joiner 的 `onmessage` 顶部不看 `msg.to` | host + joiner **对称**加 `if (msg.to != null && msg.to !== selfSeat) return` |
-| **Bug 3 `scanLanRooms` 假数据**(P0 中) | JoinView 显示假房间「本机(广播通道)」 | 旧实现返回 `[{ip: '127.0.0.1', name: '...'}]` | 改返回 `[]`,JSDoc 说明浏览器版不支持 LAN 扫描 |
+| **Bug 3 `scanLanRooms` 假数据/未实现**(P0→P1) | JoinView 曾显示假房间或空列表 | 旧实现返回假数据后长期返回 `[]` | v0.4.22 实现真正的第二发现通道:HTTP `/room-info` 快速路径 + WebSocket `ROOM_PROBE/ROOM_PROBE_ACK`,浏览器/Capacitor 主动扫描常见热点网段 |
 
 **配套修复(PM 审计发现)**:`src/views/room/RoomView.vue` 调用顺序错——`startAsHost` 在 `setRoomId` 之前,导致 host channel name 永远 = `default`,joiner 用 6 位数字 roomNo 永远对不上。已调换顺序(先 `setRoomId` 再 `startAsHost`)。
 
@@ -156,9 +168,9 @@ net.off('event')  // 清空某事件所有 handler
 - `src/common/network.test.js` — 单实例 + Mock BroadcastChannel(38 用例)
 - `src/common/network-multitab.test.js` — 跨实例 + 真实 BroadcastChannel(40 用例,模拟多 tab 联调)
 
-**已知未做**(留给 v3.8 后面的 round):
-- joiner 突然 `close()` 时 host 释放 seat(目前 seat 永久占用,直到 4-tab 跑完一局)
-- 心跳检测 + 断线重连(v2.0 真机再做)
+**已实现**:
+- joiner 断线后 host 通过心跳 6-8s 超时释放 seat;主动 `close()` 可广播 `PEER_LEAVE`。
+- 心跳检测(2s/2s/6s)与断线重连(`smartReconnectToPeers`)已落地。
 
 ### 5.1 房主开房流程
 
@@ -219,76 +231,20 @@ function joinRoom(hostRoomId, self) {
 
 ---
 
-## 六、v2.0 真机联机迁移路径
+## 六、v2.0 真机联机架构(已落地)
 
-### 6.1 目标
+v2.0 没有按原计划的 TCP Socket 平台抽象层实现,而是采用 **WebSocket + 原生插件** 路径,更早拿到跨设备可玩性:
 
-把 `network.js` 内部实现从 `BroadcastChannel` 换成 **TCP Socket**(主机开热点,4 手机连热点,1 个 host 3 个 client)。
+- **`WebSocketTransport`** (`src/common/network-transport-ws.js`)
+  - Node / 真机 host 起 `ws` server + 同端口 HTTP(PWA 入口)。
+  - 浏览器 / Node joiner 用原生 WebSocket 连接。
+  - 消息格式与 BC 完全一致 `{ type, payload, from, to?, ts }`。
+- **`AndroidWsTransport`** (`src/common/network-transport-android-ws.js`)
+  - Capacitor Android 真机:host 走原生 `WsServer` plugin,joiner 走 WebView WebSocket。
+- **`BroadcastChannelTransport`** (`src/common/network-transport-bc.js`)
+  - 浏览器开发态 fallback,同浏览器多 tab 调试。
 
-### 6.2 推荐方案
-
-**TCP Socket + 移动热点**
-
-- 房主开热点,启动 TCP Server 监听 `0.0.0.0:8849`
-- 加入者连房主 IP(如 `192.168.43.1:8849`)
-- 4 人通过长连接 + 房间号配对
-- 消息走 JSON over TCP,加长度前缀
-
-### 6.3 实现步骤
-
-**Step 1:平台抽象层**
-
-新建 `src/common/network-platform.js`:
-
-```js
-// 平台接口
-export interface NetPlatform {
-  listen(port: number): Promise<void>           // 房主:开 server
-  connect(host: string, port: number): Promise<void>  // 加入者
-  send(data: any): void
-  onMessage(callback: (data: any) => void): void
-  close(): void
-}
-```
-
-**Step 2:平台实现**
-
-- `network-platform.web.js` — 浏览器版(BroadcastChannel,当前实现)
-- `network-platform.capacitor.js` — Capacitor 版(用 `@capacitor/network` 或自定义插件)
-- `network-platform.tcp-android.js` — Android 原生 TCP
-- `network-platform.tcp-ios.js` — iOS GameKit Multipeer Connectivity
-
-**Step 3:`network.js` 改用平台抽象**
-
-```js
-import { getPlatform } from './network-platform.js'
-const platform = getPlatform()
-
-// 内部用 platform.listen / platform.send / platform.onMessage
-// 对外 API 不变(startAsHost / joinRoom / broadcast / on)
-```
-
-**Step 4:Capacitor 插件**
-
-- Android:用 Java/Kotlin 写 TCP Socket 服务,通过 `registerPlugin` 暴露给 JS
-- iOS:用 Swift 写 Multipeer Connectivity 桥接
-
-### 6.4 备选方案对比
-
-| 方案 | 难度 | 兼容性 | 延迟 | 实现成本 |
-|------|------|--------|------|----------|
-| TCP Socket + 热点 | 中 | 全平台 | < 100ms | 中 |
-| WiFi Direct (Android) | 中 | 仅 Android 7+ | < 200ms | 中 |
-| Multipeer Connectivity (iOS) | 中 | 仅 iOS 7+ | < 200ms | 中 |
-| 蓝牙 BLE | 高 | 全平台 | 200-500ms | 高 |
-
-**推荐**:先做 **TCP Socket + 热点**,跨平台 SDK 最好,延迟低。
-
-### 6.5 迁移期间保留
-
-- `network.js` 对外 API 不变 → 现有 View 不用改
-- `BroadcastChannel` 实现可作为 web 平台的 fallback
-- 在 `startAsHost` 内部加 platform 判断:浏览器走 BroadcastChannel,真机走 TCP
+`network.js` 通过 `_defaultTransport()` 按环境选择 transport,对外 API 保持不变。
 
 ---
 
@@ -346,4 +302,4 @@ console.log('[NET]', msg)
 **下一步**:
 - 改 View 接网络事件 → `docs/UI.md`
 - 加消息事件 → 改 `network.js` 顶层 + View 监听
-- v2.0 真机迁移 → 单独开 plan,先实现 TCP Socket
+- v4.0 候选:弱网/隧道/高铁压测、真正的 mDNS/UDP 设备发现通道。

@@ -268,12 +268,12 @@ console.log('\n=== 5. close + 再开 ===')
   Net.close()
 }
 
-console.log('\n=== 6. scanLanRooms 返回 [] (浏览器/真机版都不支持 LAN 扫描) ===')
+console.log('\n=== 6. scanLanRooms Node 环境无窗口时返回 [] ===')
 {
   const { mod: Net } = await makeInstance('h6')
   const rooms = await Net.scanLanRooms()
   assert('返回数组', Array.isArray(rooms))
-  assert('返回 0 项', rooms.length === 0)
+  assert('Node 环境(无 window)返回 0 项', rooms.length === 0)
 }
 
 console.log('\n=== 7. getSelfInfo + joiner 后 from 字段 ===')
@@ -771,6 +771,35 @@ console.log('\n=== 26. smartReconnectToPeers 不泄漏 connect/error 监听器 =
   assert('smartReconnect 前后 connect 监听器数量不变', afterConnect === beforeConnect)
   assert('smartReconnect 前后 error 监听器数量不变', afterError === beforeError)
   delete globalThis.localStorage
+}
+
+console.log('\n=== 27. hostEpoch 权威校验严格化 ===')
+{
+  const { mod: Host } = await makeHost('epoch-strict')
+  const epoch = Host.getHostEpoch()
+  assert('host 初始化后 epoch > 0', epoch > 0)
+  assert('同 epoch 且 from=hostSeat 视为权威', Host.isAuthorityMessage({ from: 0, hostEpoch: epoch }))
+  assert('非 hostSeat 来源不权威', !Host.isAuthorityMessage({ from: 1, hostEpoch: epoch }))
+  assert('缺少 hostEpoch 不再视为权威', !Host.isAuthorityMessage({ from: 0 }))
+  assert('hostEpoch 不匹配不权威', !Host.isAuthorityMessage({ from: 0, hostEpoch: epoch + 1 }))
+  Host.close()
+}
+
+console.log('\n=== 28. host 权威消息自动携带 hostEpoch ===')
+{
+  const { mod: Host } = await makeHost('epoch-stamp')
+  const t = Host._getTransport()
+  const originalSend = t.send.bind(t)
+  let lastMsg = null
+  t.send = (msg) => {
+    lastMsg = msg
+    return originalSend(msg)
+  }
+  Host.broadcast({ type: 'STATE_SNAPSHOT', payload: { snapshot: true } })
+  await settle(50)
+  assert('broadcast 的 STATE_SNAPSHOT 携带 hostEpoch', lastMsg && lastMsg.hostEpoch === Host.getHostEpoch())
+  t.send = originalSend
+  Host.close()
 }
 
 console.log(`\n========== 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

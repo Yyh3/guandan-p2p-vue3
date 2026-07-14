@@ -43,6 +43,15 @@ let hostSeat = 0
 let transport = null
 const peers = new Map()           // seat -> {nickname, avatar, uuid, ready, ...}
 
+// ============== Phase 2:hostEpoch 权威纪元 ==============
+// hostEpoch 在每次 host 权威变更(开房/host 迁移/重建)时自增,
+// 所有 host 权威消息必须携带并校验 epoch,防止 stale host 的过期消息被误用。
+let hostEpoch = 0
+function getHostEpoch() { return hostEpoch }
+function setHostEpoch(v) { hostEpoch = (typeof v === 'number' && Number.isFinite(v)) ? v : 0 }
+function _bumpHostEpoch() { hostEpoch = (hostEpoch >= Number.MAX_SAFE_INTEGER - 1) ? 1 : hostEpoch + 1 }
+function _resetHostEpoch() { hostEpoch = 0 }
+
 // ============== 时钟抽象(测试 fake timer 注入点) ==============
 let _setIntervalFn = typeof setInterval !== 'undefined' ? setInterval : null
 let _clearIntervalFn = typeof clearInterval !== 'undefined' ? clearInterval : null
@@ -61,6 +70,13 @@ const HEARTBEAT_TIMEOUT_MS = 6000
 let heartbeatSendTimer = null
 let heartbeatCheckTimer = null
 const lastHeartbeat = new Map()   // host: seat -> ts
+
+// ============== v0.4.22 P1:局域网房间扫描发现 ==============
+const DEFAULT_WS_PORT = 8848
+const ROOM_PROBE_TIMEOUT_MS = 1200
+const SCAN_HTTP_TIMEOUT_MS = 800
+const SCAN_CONCURRENCY = 8
+const COMMON_SUBNETS = ['192.168.43', '192.168.1', '192.168.0', '172.20.10', '10.0.0']
 
 // ============== UUID 持久化 ==============
 const UUID_KEY = 'guandan_session_uuid'
@@ -312,11 +328,25 @@ function getSelfSeat() { return selfSeat }
 function setSelfSeat(i) { selfSeat = i }
 function getHostSeat() { return hostSeat }
 function isHost() { return isHostFlag }
-function isAuthorityMessage(msg) { return msg && msg.from === hostSeat }
+function isAuthorityMessage(msg) {
+  if (!msg || msg.from !== hostSeat) return false
+  // ★ P0 修复:host 权威消息必须携带 hostEpoch。
+  //   - 不再兼容"无 epoch"旧消息,杜绝 stale host 的过期消息被误用。
+  //   - 本地 epoch 为 0(尚未初始化)时,host 第一条 SYNC 会带 epoch,joiner 用此值完成自举,
+  //     之后严格按此 epoch 校验。epoch 自举完成后不再接受任何外部修改。
+  if (msg.hostEpoch == null) return false
+  if (hostEpoch === 0) {
+    hostEpoch = msg.hostEpoch
+    return true
+  }
+  return msg.hostEpoch === hostEpoch
+}
 
 function sendMessage(msg) {
   if (!transport) return false
   const payload = { ...msg, from: selfSeat, ts: Date.now() }
+  // host 发出的权威消息自动带 epoch,joiner 带自己的 epoch 无意义
+  if (isHostFlag && payload.hostEpoch == null) payload.hostEpoch = hostEpoch
   return transport.send(payload)
 }
 
@@ -498,6 +528,19 @@ function relayFromClient(msg) {
 }
 
 function _handleHostMessage(msg) {
+  // v0.4.22 P1:未绑定 seat 的扫描请求,host 直接回复房间摘要
+  if (msg.type === 'ROOM_PROBE') {
+    sendMessage({
+      type: 'ROOM_PROBE_ACK',
+      payload: {
+        roomNo: roomId,
+        playerCount: peers.size,
+        maxPlayers: 4,
+        hostNickname: selfInfo?.nickname || '',
+      },
+    })
+    return
+  }
   if (msg.type === 'JOIN') {
     const newUuid = msg.payload?.uuid
     let assignedSeat = -1
@@ -727,12 +770,16 @@ function _handleJoinerMessage(msg) {
         // 我就是新 host:权威切换到本 seat,不搬动 selfSeat
         peers.delete(oldHostSeat)
         hostSeat = selfSeat
+        _resetHostEpoch()
+        _bumpHostEpoch()
         isHostFlag = true
         emit('host:migrated', { oldHostSeat, newHostSeat, snapshot: snap, isMyself: true })
       } else if (newHostSeat != null) {
-        // 旁观者:同步 hostSeat,保留新 host peer 在原 seat
+        // 旁观者:同步 hostSeat,保留新 host peer 在原 seat;重置 epoch 以接受新 host
         peers.delete(oldHostSeat)
         hostSeat = newHostSeat
+        _resetHostEpoch()
+        _bumpHostEpoch()
         emit('host:migrated', { oldHostSeat, newHostSeat, snapshot: snap, isMyself: false })
       }
     }
@@ -753,6 +800,8 @@ function _handleJoinerMessage(msg) {
     if (selfSeat === newHostSeat) return
     if (peers.has(newHostSeat)) {
       hostSeat = newHostSeat
+      _resetHostEpoch()
+      _bumpHostEpoch()
       emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: msg.payload?.snapshot })
     }
   } else if (msg.type === 'PROMOTE_HOST_REQUEST') {
@@ -769,6 +818,7 @@ function _handleJoinerMessage(msg) {
       // 让位分支:旁观者同步 hostSeat,保留先到的 _promotedHostSeat peer 在原 seat
       if (peers.has(_promotedHostSeat)) {
         hostSeat = _promotedHostSeat
+        _resetHostEpoch()
       }
       emit('host:migrated', { oldHostSeat: null, newHostSeat: _promotedHostSeat, snapshot: snap, isMyself: false })
       return
@@ -778,11 +828,15 @@ function _handleJoinerMessage(msg) {
       if (isHostFlag) return  // 防御:本端已经升过
       _promotedHostSeat = newHostSeat
       hostSeat = selfSeat
+      _resetHostEpoch()
+      _bumpHostEpoch()
       isHostFlag = true
       emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: snap, isMyself: true })
     } else if (peers.has(newHostSeat)) {
-      // 旁观:同步 hostSeat,保留新 host peer 在原 seat
+      // 旁观:同步 hostSeat,保留新 host peer 在原 seat;重置 epoch 以接受新 host
       hostSeat = newHostSeat
+      _resetHostEpoch()
+      _bumpHostEpoch()
       _promotedHostSeat = newHostSeat
       emit('host:migrated', { oldHostSeat: null, newHostSeat, snapshot: snap, isMyself: false })
     }
@@ -811,6 +865,8 @@ function _handleJoinerMessage(msg) {
       // joiner 端:保留新 host peer 在原 seat,只改 hostSeat
       if (announceHostSeat != null && peers.has(announceHostSeat)) {
         hostSeat = announceHostSeat
+        _resetHostEpoch()
+        _bumpHostEpoch()
       }
       emit('transport:rebuild:announce', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
       emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'bc' })
@@ -833,6 +889,8 @@ function _handleJoinerMessage(msg) {
         // 同步 hostSeat(joiner 端保留新 host peer 在原 seat)
         if (announceHostSeat != null && peers.has(announceHostSeat)) {
           hostSeat = announceHostSeat
+          _resetHostEpoch()
+          _bumpHostEpoch()
         }
         emit('transport:rebuild:done', { newHostSeat: announceHostSeat, newHostAddress, mode: 'ws' })
       } catch (e) {
@@ -867,6 +925,7 @@ function startAsHost(self) {
   isHostFlag = true
   selfSeat = 0
   hostSeat = 0
+  _bumpHostEpoch()
   peers.set(0, { ...selfInfo })
 
   try {
@@ -890,6 +949,8 @@ function startAsHost(self) {
     if (!current0 || current0.uuid === uuid) {
       peers.set(0, { ...selfInfo })
     }
+    // v0.4.22 P1:让扫描端能通过 /room-info 或 ROOM_PROBE 发现本房间
+    _bindRoomInfoProvider(transport)
   }).catch((err) => {
     emit('error', err?.message || 'Transport open failed')
   })
@@ -914,6 +975,7 @@ function joinRoom(hostRoomId, self, opts) {
   isHostFlag = false
   selfSeat = -1
   hostSeat = 0
+  _resetHostEpoch()
   // 兼容签名: hostRoomId 含 ':' 或 '[' 时解析为 ws host:port 形式 (Android Capacitor / IPv6 路径)
   // 不含 ':' 或解析失败时 → 当 BC 房间号 (浏览器路径)
   let parsedHostIp = (opts && opts.hostIp) || null
@@ -1188,6 +1250,7 @@ function close(opts = {}) {
   isHostFlag = false
   selfSeat = 0
   hostSeat = 0
+  _resetHostEpoch()
   peers.clear()
   lastHeartbeat.clear()
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
@@ -1580,6 +1643,8 @@ async function rebuildAsHost() {
   try { await transport.close() } catch (e) { /* swallow */ }
   transport = newTransport
   transport.onMessage(_onTransportMessage)
+  // v0.4.22 P1:重建后仍然提供扫描端点
+  _bindRoomInfoProvider(transport)
   // 5) emit 本端事件
   emit('transport:rebuild:announce', { newHostSeat: selfSeat, newHostAddress, mode: 'ws', isMyself: true })
   emit('transport:rebuild:done', { newHostSeat: selfSeat, newHostAddress, mode: 'ws', isMyself: true })
@@ -1786,9 +1851,184 @@ function clearPeerHostAddressCache(roomNo) {
 }
 
 /**
- * 扫描局域网房间 —— v1.0 浏览器版 / v2.0 都不返回真实数据,JoinView 显示空状态
+ * v0.4.22 P1:把当前 host 房间摘要绑定到 transport 的 /room-info HTTP 端点。
  */
-async function scanLanRooms() { return [] }
+function _bindRoomInfoProvider(tr) {
+  if (!tr || typeof tr.setRoomInfoProvider !== 'function') return
+  tr.setRoomInfoProvider(() => ({
+    roomNo: roomId,
+    playerCount: peers.size,
+    maxPlayers: 4,
+    hostNickname: selfInfo?.nickname || '',
+  }))
+}
+
+/**
+ * 生成候选 host 地址列表(浏览器环境无 UDP/多播,只能猜测常见热点网段 + 当前页来源)。
+ */
+function _generateLanCandidates() {
+  const list = []
+  // 只在浏览器 / Capacitor WebView 环境猜测常见热点网段;
+  // Node 测试环境没有 window,避免每次跑 100+ 个 HTTP 探测导致超时。
+  const isBrowserLike = typeof window !== 'undefined'
+  if (isBrowserLike) {
+    for (const subnet of COMMON_SUBNETS) {
+      list.push(`${subnet}.1:${DEFAULT_WS_PORT}`)
+      for (let i = 2; i <= 20; i++) list.push(`${subnet}.${i}:${DEFAULT_WS_PORT}`)
+    }
+  }
+  try {
+    const loc = typeof location !== 'undefined' ? location : null
+    if (loc && loc.host) list.push(loc.host)
+  } catch (_) {}
+  try {
+    if (typeof localStorage !== 'undefined') {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (!key || !key.startsWith(PEER_CACHE_KEY_PREFIX)) continue
+        const raw = localStorage.getItem(key)
+        if (!raw) continue
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) {
+          for (const e of arr) {
+            if (e && typeof e.hostAddress === 'string' && e.hostAddress) list.push(e.hostAddress)
+          }
+        }
+      }
+    }
+  } catch (_) {}
+  const seen = new Set()
+  const out = []
+  for (const addr of list) {
+    if (seen.has(addr)) continue
+    seen.add(addr)
+    try { parseHostAddress(addr); out.push(addr) } catch (_) {}
+  }
+  return out
+}
+
+function _normalizeRoomInfo(hostIp, hostPort, payload) {
+  const roomNo = String(payload.roomNo || '')
+  const playerCount = typeof payload.playerCount === 'number' ? payload.playerCount : 0
+  const maxPlayers = typeof payload.maxPlayers === 'number' ? payload.maxPlayers : 4
+  const hostNickname = payload.hostNickname || ''
+  const name = roomNo
+    ? `${hostNickname || '房主'}的房间 · ${roomNo} (${playerCount}/${maxPlayers})`
+    : `${hostNickname || '房主'}的房间 (${playerCount}/${maxPlayers})`
+  return {
+    ip: hostIp,
+    port: hostPort,
+    roomNo,
+    playerCount,
+    maxPlayers,
+    hostNickname,
+    name,
+    key: `${hostIp}:${hostPort}:${roomNo}`,
+  }
+}
+
+async function _probeHostHttp(hostAddress, timeoutMs) {
+  if (typeof fetch === 'undefined') return null
+  let parsed
+  try { parsed = parseHostAddress(hostAddress) } catch (e) { return null }
+  const { hostIp, hostPort } = parsed
+  const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null
+  let timer = null
+  if (controller) {
+    timer = _setTimeoutFn(() => { try { controller.abort() } catch {} }, timeoutMs)
+  }
+  try {
+    const bracketed = (hostIp.includes(':') && !hostIp.startsWith('[')) ? `[${hostIp}]` : hostIp
+    const res = await fetch(`http://${bracketed}:${hostPort}/room-info`, { signal: controller?.signal })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!data || !data.roomNo) return null
+    return _normalizeRoomInfo(hostIp, hostPort, data)
+  } catch (e) {
+    return null
+  } finally {
+    if (timer) _clearTimeoutFn(timer)
+  }
+}
+
+function _probeHostWs(hostAddress, timeoutMs) {
+  return new Promise((resolve) => {
+    if (typeof WebSocket === 'undefined') return resolve(null)
+    let ws = null
+    let timer = null
+    let done = false
+    const finish = (v) => {
+      if (done) return
+      done = true
+      if (timer) { _clearTimeoutFn(timer); timer = null }
+      if (ws) { try { ws.close() } catch (_) {} ws = null }
+      resolve(v)
+    }
+    try {
+      const { hostIp, hostPort } = parseHostAddress(hostAddress)
+      const bracketed = (hostIp.includes(':') && !hostIp.startsWith('[')) ? `[${hostIp}]` : hostIp
+      ws = new WebSocket(`ws://${bracketed}:${hostPort}/`)
+      ws.addEventListener('open', () => {
+        try { ws.send(JSON.stringify({ type: 'ROOM_PROBE', payload: { ts: Date.now() } })) } catch (_) { finish(null) }
+      })
+      ws.addEventListener('message', (ev) => {
+        try {
+          const msg = JSON.parse(ev.data)
+          if (msg && msg.type === 'ROOM_PROBE_ACK' && msg.payload) {
+            finish(_normalizeRoomInfo(hostIp, hostPort, msg.payload))
+          }
+        } catch (_) {}
+      })
+      ws.addEventListener('error', () => finish(null))
+      ws.addEventListener('close', () => finish(null))
+      timer = _setTimeoutFn(() => finish(null), timeoutMs)
+    } catch (_) {
+      finish(null)
+    }
+  })
+}
+
+/**
+ * 扫描局域网房间 —— v0.4.22 P1 真正第二发现通道
+ *
+ * 浏览器环境无 UDP/多播,通过对常见热点网段做 HTTP / WebSocket 探测,
+ * 发现正在广播的 host。返回 { ip, port, roomNo, playerCount, maxPlayers, hostNickname, name, key }[]。
+ *
+ * opts.candidates 可覆盖候选地址(单测 / 高级用法)。
+ *
+ * @param {{candidates?:string[]}} [opts]
+ * @returns {Promise<object[]>}
+ */
+async function scanLanRooms(opts = {}) {
+  if (typeof WebSocket === 'undefined' && typeof fetch === 'undefined') return []
+  const candidates = Array.isArray(opts?.candidates) ? opts.candidates : _generateLanCandidates()
+  if (candidates.length === 0) return []
+  const found = []
+  const seen = new Set()
+  const processOne = async (hostAddress) => {
+    try {
+      if (typeof fetch !== 'undefined') {
+        const httpInfo = await _probeHostHttp(hostAddress, SCAN_HTTP_TIMEOUT_MS)
+        if (httpInfo && httpInfo.roomNo && !seen.has(httpInfo.key)) {
+          seen.add(httpInfo.key)
+          found.push(httpInfo)
+          return
+        }
+      }
+    } catch (_) {}
+    try {
+      const wsInfo = await _probeHostWs(hostAddress, ROOM_PROBE_TIMEOUT_MS)
+      if (wsInfo && wsInfo.roomNo && !seen.has(wsInfo.key)) {
+        seen.add(wsInfo.key)
+        found.push(wsInfo)
+      }
+    } catch (_) {}
+  }
+  for (let i = 0; i < candidates.length; i += SCAN_CONCURRENCY) {
+    await Promise.all(candidates.slice(i, i + SCAN_CONCURRENCY).map(processOne))
+  }
+  return found
+}
 
 // ============== 测试辅助 API ==============
 function _sendHeartbeat() {
@@ -1844,7 +2084,7 @@ function _getTransportType() {
 export {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, isAuthorityMessage,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, getHostEpoch, setHostEpoch, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007:swapSeats 网络层权威 + kickPlayer 统一踢人协议
   swapSeats, kickPlayer,
@@ -1866,6 +2106,8 @@ export {
   // ★ v0.4.20 V0420:真正的"第二发现通道"(纯 JS 实现)— peer hostAddress 缓存 + smart reconnect
   cachePeerHostAddress, getCachedPeerHostAddresses,
   smartReconnectToPeers, clearPeerHostAddressCache,
+  // ★ v0.4.22 P1:局域网扫描发现内部 helper(单测用)
+  _generateLanCandidates, _probeHostHttp, _probeHostWs, _normalizeRoomInfo,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -1881,7 +2123,7 @@ export {
 const net = {
   on, off, emit, close,
   isHost, isConnected, getSelfInfo, getPeers,
-  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, isAuthorityMessage,
+  getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, getHostEpoch, setHostEpoch, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
   // ★ v2.4-p4 BUG-006/007
   swapSeats, kickPlayer,

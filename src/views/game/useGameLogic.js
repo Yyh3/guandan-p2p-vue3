@@ -186,10 +186,11 @@ export function useGameLogic(opts = {}) {
       isRestartAfterA.value = st.isRestartAfterA
     }
     // ★ P1-17:refreshUiFromGameState 统一重算 lastCardCounts
+    // Phase 2:joiner 模式下远程 seat 的 hand 是空占位,真实张数从 handCounts 读
     lastCardCounts.value = st.hands.map((hand, seat) => {
       if (st.finishedOrder?.includes(seat)) return 0
       if (st.abandonedSeats?.includes(seat)) return 0
-      return Array.isArray(hand) ? hand.length : 0
+      return (Array.isArray(hand) ? hand.length : 0) || (Array.isArray(st.handCounts) ? st.handCounts[seat] : 0) || 0
     })
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
@@ -343,7 +344,7 @@ export function useGameLogic(opts = {}) {
     const selfSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
     const { top: tmSeat, left: leftSeat, right: rightSeat } = rotateSeats(selfSeat)
     const t = players.value[tmSeat] || players.value[2]
-    const tCount = st ? (st.finishedOrder.includes(tmSeat) ? 0 : st.hands[tmSeat]?.length ?? 27) : 27
+    const tCount = st ? (st.finishedOrder.includes(tmSeat) ? 0 : (st.hands[tmSeat]?.length || st.handCounts?.[tmSeat] || 27)) : 27
     result.top = {
       role: 'teammate', name: t.name, avatar: t.avatar, coins: t.coins, level: t.level,
       cardCount: tCount,
@@ -361,7 +362,7 @@ export function useGameLogic(opts = {}) {
       showCount: _seatShowCount(meCount), isUrgent: _seatIsUrgent(meCount),
     }
     const l = players.value[leftSeat] || players.value[1]
-    const lCount = st ? (st.finishedOrder.includes(leftSeat) ? 0 : st.hands[leftSeat]?.length ?? 27) : 27
+    const lCount = st ? (st.finishedOrder.includes(leftSeat) ? 0 : (st.hands[leftSeat]?.length || st.handCounts?.[leftSeat] || 27)) : 27
     result.left = {
       role: 'opponent', name: l.name, avatar: l.avatar, coins: l.coins, level: l.level,
       cardCount: lCount,
@@ -370,7 +371,7 @@ export function useGameLogic(opts = {}) {
       showCount: _seatShowCount(lCount), isUrgent: _seatIsUrgent(lCount),
     }
     const r = players.value[rightSeat] || players.value[3]
-    const rCount = st ? (st.finishedOrder.includes(rightSeat) ? 0 : st.hands[rightSeat]?.length ?? 27) : 27
+    const rCount = st ? (st.finishedOrder.includes(rightSeat) ? 0 : (st.hands[rightSeat]?.length || st.handCounts?.[rightSeat] || 27)) : 27
     result.right = {
       role: 'opponent', name: r.name, avatar: r.avatar, coins: r.coins, level: r.level,
       cardCount: rCount,
@@ -610,13 +611,15 @@ export function useGameLogic(opts = {}) {
     if (opts2.forcedLevelRank != null) levelRank.value = opts2.forcedLevelRank
     // ★ GD-RC-001 修复:isHost 判定用 net.isHost()(网络 host 身份),不用 selfSeat === 0。
     //   host 换队友后 selfSeat 变成 2,但本机仍是网络 host,isHost 应仍为 true。
-    const isNetworkHost = (() => { try { return net.isHost ? net.isHost() : !isP2P } catch { return !isP2P } })()
+    // Phase 2:单机模式(非 P2P)始终按 host 模式发牌;P2P 模式才看 net.isHost()
+    const isNetworkHost = (() => { try { return !isP2P || (net.isHost ? net.isHost() : false) } catch { return !isP2P } })()
     // ★ Phase 4:支持复用已有 game 实例(如 retryDeal 先 replaceGame 再 attach listeners)
     if (!(opts2.reuse === true && game.value)) {
       replaceGame(() => createGame({
         seats: 4,
         levelRank: levelRank.value,
         isHost: isNetworkHost,
+        selfSeat: selfSeat.value,
         aiPlayers: isP2P ? [] : aiPlayers,
         seed: seed,
         // ★ v0.4.9:透传 difficulty 给 createGame(联机时所有 AI 用相同难度)
@@ -643,9 +646,9 @@ export function useGameLogic(opts = {}) {
     if (isP2P && isNetworkHost && typeof game.value.addAIPlayer === 'function') {
       _fillEmptySeatsWithAI()
     }
-    // ★ P0-01:调试全局变量只在 DEV 模式暴露,生产构建树摇掉该分支
+    // ★ P0-01:调试全局变量只在 DEV 模式暴露,生产构建树摇掉该分支。
+    //   不直接暴露完整 game ref,只暴露只读 UI 状态与必要 ref,防止手牌等敏感状态被 console 绕过。
     if (typeof window !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
-      window.__gd_game = game.value
       window.__gd_selfSeat = selfSeat.value
       window.__gd_net = net
       // v2.4 t3:暴露 isDealing / myHand / phase / currentPlayer 给 dev/screenshot 工具
@@ -654,6 +657,20 @@ export function useGameLogic(opts = {}) {
       window.__gd_myTurn = myTurn
       window.__gd_phase = phase
       window.__gd_currentPlayer = currentPlayer
+      // 结算遮罩 E2E 需要能注入结果数据
+      window.__gd_finishedOrder = finishedOrder
+      window.__gd_isRestartAfterA = isRestartAfterA
+      window.__gd_levelUp = levelUp
+      window.__gd_nextLevelLabel = nextLevelLabel
+      // 如需完整 state 调试,只通过 getState() 一次性拷贝,并截断非本 seat 手牌
+      window.__gd_gameState = () => {
+        const st = game.value?.getState?.()
+        if (!st) return null
+        return {
+          ...st,
+          hands: st.hands.map((h, i) => (i === selfSeat.value ? h : { length: h.length })),
+        }
+      }
     }
     game.value.on('dealt', ({ firstPlayer: fp, levelRank: lr }) => {
       firstPlayer.value = fp
@@ -774,11 +791,9 @@ export function useGameLogic(opts = {}) {
     })
     // ★ Phase 4:复用已有实例且已发牌时不再重复 deal,避免覆盖状态
     const shouldSkipDeal = opts2.reuse === true && game.value && game.value.getState().phase !== 'idle'
-    // ★ P1-07 修复:真正连入 P2P 的 joiner 不应本地 deal,应等待 host 的 DEAL 消息,
-    //   避免重复动画、手牌闪烁、AI timer 抖动。未连接的测试/离线场景仍本地 deal。
-    const isRealP2PJoiner = isP2P && !isNetworkHost.value && net.isConnected && net.isConnected()
-    const canDeal = !isP2P || isNetworkHost.value || !isRealP2PJoiner
-    if (!shouldSkipDeal && canDeal) game.value.deal(seed, firstSeat)
+    // ★ Phase 2:host 模式(单机/P2P host)才本地发牌;joiner 模式等待 host 逐座 DEAL 消息,
+    //   并用自己的真实手牌填充 game state,不再用 seed 本地还原四家完整手牌。
+    if (!shouldSkipDeal && isNetworkHost) game.value.deal(seed, firstSeat)
   }
 
   function toggleCard(i) {
@@ -943,10 +958,11 @@ function commitPass(seat, source = 'manual') {
         //   直接 return 但 phase 已被改,UI 提示文本从"本局结束"跳到"思考中"
         //   按钮状态混乱。修法:phase='playing' 移到 host 分支进入 initGame 之后
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
+        currentDealId.value = String(pendingSeed)
         phase.value = 'playing'
         initGame({ isP2P: true, seed: pendingSeed })
         addTimer(() => {
-          net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value, newRound: true } })
+          _broadcastPerSeatDeal()
         }, 500)
       }
       // P2P 非 host:什么都不做(等 host 广播 DEAL)
@@ -1000,8 +1016,9 @@ function commitPass(seat, source = 'manual') {
       // ★ V0410-04 修复:host 分支也刷本机 UI(原来直接 return 漏刷)
       if (isNetworkHost.value) {
         if (game.value && game.value.restartMatch) {
+          currentDealId.value = String(newSeed)
           game.value.restartMatch({ levelRank: 15, seed: newSeed })
-          // 广播(joiner 端收到后也 restart,带 seed 保证一致)
+          // 广播 MATCH_RESTART 通知 joiner 进入等待,再逐座发新牌
           try {
             net.broadcast({
               type: 'MATCH_RESTART',
@@ -1009,6 +1026,7 @@ function commitPass(seat, source = 'manual') {
             })
           } catch (e) { /* 离线或非 host 时 noop */ }
           afterMatchRestartRefresh()
+          addTimer(() => { _broadcastPerSeatDeal() }, 500)
         }
       }
       return
@@ -1067,7 +1085,9 @@ function commitPass(seat, source = 'manual') {
   let pendingSeed = null
 
   function onP2PDeal(payload, from, msg) {
-    if (!payload || payload.seed == null) return
+    if (!payload) return
+    // ★ Phase 2:DEAL 必须由当前 host 权威发出
+    if (typeof net.isAuthorityMessage === 'function' && !net.isAuthorityMessage(msg)) return
     currentDealId.value = String(payload.dealId ?? payload.seed ?? Date.now())
     // ★ GD-RC-001 修复:网络 host 跳过(自己发的),用 isNetworkHost 判定
     if (isNetworkHost.value) return
@@ -1083,8 +1103,50 @@ function commitPass(seat, source = 'manual') {
     tableCards.value = []
     lastPlay.value = null
     const dealFirstSeat = (typeof payload.firstSeat === 'number' && payload.firstSeat >= 0 && payload.firstSeat <= 3) ? payload.firstSeat : undefined
-    initGame({ isP2P: true, seed: payload.seed, forcedLevelRank: payload.levelRank, firstSeat: dealFirstSeat })
+
+    // ★ Phase 2:新版 DEAL 携带 hands / handCounts,joiner 只应用自己的手牌
+    if (Array.isArray(payload.hands) && payload.hands.length === 4 &&
+        Array.isArray(payload.handCounts) && payload.handCounts.length === 4) {
+      const seat = selfSeat.value
+      if (!isValidSeat(seat)) return
+      if (!Array.isArray(payload.hands[seat]) || payload.hands[seat].length !== 27) {
+        console.warn('[P2P] DEAL rejected: invalid own hand for seat', seat)
+        return
+      }
+      initGame({ isP2P: true, forcedLevelRank: payload.levelRank, firstSeat: dealFirstSeat })
+      if (game.value) {
+        try {
+          game.value.deal(null, dealFirstSeat, { hands: payload.hands, handCounts: payload.handCounts })
+        } catch (e) { console.warn('joiner deal apply err', e) }
+      }
+      return
+    }
+
+    // 旧版兼容:seed-only DEAL(不推荐,测试 / 旧端 fallback)
+    if (payload.seed != null) {
+      initGame({ isP2P: true, seed: payload.seed, forcedLevelRank: payload.levelRank, firstSeat: dealFirstSeat })
+    }
   }
+  // ★ Phase 2:host 逐座发送真实手牌,joiner 只收到自己的 27 张 + 四家张数
+  function _broadcastPerSeatDeal() {
+    if (!isNetworkHost.value || !game.value) return
+    const st = game.value.getState()
+    const counts = Array.isArray(st.handCounts) ? st.handCounts.slice() : st.hands.map(h => h.length)
+    const firstSeat = st.firstPlayer
+    const dealId = currentDealId.value
+    const fullHands = st.hands
+    for (let s = 1; s < 4; s++) {
+      const hands = [[], [], [], []]
+      if (Array.isArray(fullHands[s])) hands[s] = fullHands[s].slice()
+      try {
+        net.sendTo(s, {
+          type: 'DEAL',
+          payload: { hands, handCounts: counts, firstSeat, levelRank: st.levelRank, dealId, seed: null },
+        })
+      } catch (e) { console.warn('[P2P] broadcastPerSeatDeal seat', s, e) }
+    }
+  }
+
   // ★ Phase 2:PLAY/PASS 统一 actionId 去重(最近 2048 条)
   //   防御:WS 重传 / 多次 broadcast / 重连后回放 history 时,同一动作被收到多次。
   const _appliedActionIds = new Set()
@@ -1145,8 +1207,8 @@ function commitPass(seat, source = 'manual') {
   //   只在 P2P 模式 broadcast,joiner 端不会重复 broadcast
   function onP2PMatchRestart(payload, from, msg) {
     if (!payload || !game.value) return
-    if (!game.value.restartMatch) return
-    // ★ Phase 2:sender authority 检查 — 只有当前权威 host 发出的 MATCH_RESTART 才被接受
+    // ★ Phase 2:sender authority 检查 — 只有当前权威 host 发出的 MATCH_RESTART 才被接受(epoch 校验)
+    if (typeof net.isAuthorityMessage === 'function' && !net.isAuthorityMessage(msg)) return
     const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (typeof from !== 'number') return
     if (typeof from === 'number' && from !== hostSeat) return
@@ -1171,9 +1233,29 @@ function commitPass(seat, source = 'manual') {
     if (_appliedRestartIds.has(payload.restartId)) return
     _appliedRestartIds.add(payload.restartId)
     const lr = (typeof payload.levelRank === 'number') ? payload.levelRank : 15
-    // 调 game.restartMatch 统一清状态 + 重新发牌(用 host 的 seed)
-    game.value.restartMatch({ levelRank: lr, seed: payload.seed })
-    // ★ V0410-04 修复:统一刷 UI refs(走共享 afterMatchRestartRefresh)
+    // ★ Phase 2:joiner 不本地 restartMatch 发牌,而是重建 joiner 模式 game 等待 host 逐座 DEAL
+    replaceGame(() => createGame({
+      seats: 4,
+      levelRank: lr,
+      isHost: false,
+      selfSeat: selfSeat.value,
+      aiPlayers: [],
+      seed: payload.seed,
+      difficulty: gameDifficulty.value,
+    }))
+    // 重新挂载 game 事件监听
+    initGame({ isP2P: true, seed: payload.seed, forcedLevelRank: lr, reuse: true })
+    // 清空可能残留的 UI 状态,等待 DEAL 后由 game 'dealt' 事件驱动动画
+    phase.value = 'idle'
+    finishedOrder.value = []
+    tableCards.value = []
+    lastPlay.value = null
+    myHand.value = []
+    selected.value = []
+    selectedColKeys.value = {}
+    hintCards.value = []
+    mainActionsRef.value?.setShowing(false)
+    // V0410-04:统一刷公共 UI refs(兼容旧测试与后续字段扩展)
     afterMatchRestartRefresh()
   }
   // ★ V0410-03:restartId 去重集合(MATCH_RESTART 一次性应用)
@@ -1186,9 +1268,10 @@ function commitPass(seat, source = 'manual') {
 
   // ★ GD-RC-003 修复:改用 applyRoundEndFromPayload 权威结算(不读本地 state)
   let suppressRoundEndBroadcast = false
-  function onP2PRoundEnd(payload, from) {
+  function onP2PRoundEnd(payload, from, msg) {
     if (!payload || !game.value) return
-    // ★ P0-02:ROUND_END 只能由 host 权威发出
+    // ★ P0-02:ROUND_END 只能由 host 权威发出(Phase 2 加 epoch 校验)
+    if (typeof net.isAuthorityMessage === 'function' && !net.isAuthorityMessage(msg)) return
     const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (from !== hostSeat) return
     // roundId 去重:host 重传同一 ROUND_END 时跳过外层 UI 同步
@@ -1241,9 +1324,10 @@ function commitPass(seat, source = 'manual') {
   // ★ GD-RC-005 修复:snapshot 接收端用 targetSeat 判定(原 seat: 0 语义混乱)
   //   host 定向 sendTo(connSeat, { type: 'STATE_SNAPSHOT', targetSeat, snapshot })
   //   joiner 收到后判断 targetSeat === selfSeat 才应用,避免非目标 joiner 也被覆盖
-  function onP2PStateSnapshot(payload, from) {
+  function onP2PStateSnapshot(payload, from, msg) {
     if (!payload || !game.value || !payload.snapshot) return
-    // ★ P0-02:STATE_SNAPSHOT 只能由 host 权威发出
+    // ★ P0-02:STATE_SNAPSHOT 只能由 host 权威发出(Phase 2 加 epoch 校验)
+    if (typeof net.isAuthorityMessage === 'function' && !net.isAuthorityMessage(msg)) return
     const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (from !== hostSeat) return
     // 旧版本(无 targetSeat 字段)是 broadcast,所有非发送方都应用;新版本定向
@@ -1283,11 +1367,6 @@ function commitPass(seat, source = 'manual') {
     } catch (e) { console.warn('applyStateSnapshot err', e) }
   }
 
-  let _aiModule = null
-  async function import_AI() {
-    if (!_aiModule) _aiModule = await import('@/common/guandan-ai.js')
-    return _aiModule
-  }
   // v0.4.8 N-2:joiner 加入时 host 端的反向操作 — 从 aiPlayers 移除 seat
   //   对称于 onP2PAITakeover(掉线/AI 接管时加 aiPlayers,真玩家进入时移除)
   // ★ v0.4.13 对抗性审查 (P1-3):删掉手写的 players.value 更新,
@@ -1334,10 +1413,11 @@ function commitPass(seat, source = 'manual') {
     }
   }
 
-  function onP2PAITakeover(payload, from) {
+  function onP2PAITakeover(payload, from, msg) {
     if (!payload || !game.value) return
-    // ★ P0-02:网络 AI_TAKEOVER 消息只能由 host 权威发出;
+    // ★ P0-02:网络 AI_TAKEOVER 消息只能由 host 权威发出(Phase 2 加 epoch 校验);
     //   本地 'ai:takeover' 事件不携带 from,允许通过。
+    if (typeof from === 'number' && typeof net.isAuthorityMessage === 'function' && !net.isAuthorityMessage(msg)) return
     const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (typeof from === 'number' && from !== hostSeat) return
     const seat = payload.seat
@@ -1364,15 +1444,14 @@ function commitPass(seat, source = 'manual') {
             mySeatIndex: seat,
             teammateSeatIndex: (seat + 2) % 4,
           }
-          import_AI().then(AI => {
-            const r = AI.default.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
-            // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
-            if (r.type === 'play') {
-              commitPlay(seat, r.cards, 'ai')
-            } else {
-              commitPass(seat, 'ai')
-            }
-          })
+          // Phase 4:统一使用静态导入的 AI，避免与动态导入并存产生构建警告
+          const r = AI.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
+          // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
+          if (r.type === 'play') {
+            commitPlay(seat, r.cards, 'ai')
+          } else {
+            commitPass(seat, 'ai')
+          }
         }
       }, 500)
     }
@@ -1407,10 +1486,12 @@ function commitPass(seat, source = 'manual') {
       // dealId 不匹配也发当前快照(可能是新请求到达前已换局)
     }
     try {
-      const st = game.value.getState()
+      const snap = (typeof game.value.getSnapshot === 'function')
+        ? game.value.getSnapshot(from)
+        : game.value.getState()
       net.sendTo && net.sendTo(from, {
         type: 'STATE_SNAPSHOT',
-        payload: { targetSeat: from, snapshot: st },
+        payload: { targetSeat: from, snapshot: snap },
       })
     } catch (e) { console.warn('STATE_REQUEST response failed', e) }
   }
@@ -1440,7 +1521,7 @@ function commitPass(seat, source = 'manual') {
         isP2PMode.value =
           (net.isConnected && net.isConnected()) === true ||
           (net.isHost && net.isHost()) === true ||
-          (net.getRoomId && net.getRoomId() != null)
+          (net.getRoomId && !!net.getRoomId())
       }
     } catch { isP2PMode.value = false }
     if (isP2PMode.value) {
@@ -1479,12 +1560,14 @@ function commitPass(seat, source = 'manual') {
           if (!game.value) return
           addTimer(() => {
             if (!game.value) return
-            const st = game.value.getState()
+            const snap = (typeof game.value.getSnapshot === 'function')
+              ? game.value.getSnapshot(connSeat)
+              : game.value.getState()
             // 定向:用 sendTo + targetSeat 标记接收方,接收端判断 target 决定是否应用
             try {
               net.sendTo && net.sendTo(connSeat, {
                 type: 'STATE_SNAPSHOT',
-                payload: { targetSeat: connSeat, snapshot: st },
+                payload: { targetSeat: connSeat, snapshot: snap },
               })
             } catch (e) { /* fallback to broadcast if sendTo not available */ }
           }, 200)
@@ -1493,9 +1576,10 @@ function commitPass(seat, source = 'manual') {
       }
       if (isNetworkHost.value) {
         pendingSeed = Math.floor(Math.random() * 0x7FFFFFFF)
+        currentDealId.value = String(pendingSeed)
         initGame({ isP2P: true, seed: pendingSeed })
         addTimer(() => {
-          net.broadcast({ type: 'DEAL', payload: { seed: pendingSeed, levelRank: levelRank.value } })
+          _broadcastPerSeatDeal()
         }, 500)
       }
     } else {
@@ -1542,14 +1626,8 @@ function commitPass(seat, source = 'manual') {
     dealTimeout.value = false
     if (isP2PMode.value) {
       if (isNetworkHost.value) {
-        // host:重发当前 DEAL,让 joiner 用同一 seed 重新初始化
-        const st = game.value && game.value.getState ? game.value.getState() : null
-        const seed = st?.seed ?? (currentDealId.value ? Number(currentDealId.value) : null) ?? _newRestartSeed()
-        const dealId = currentDealId.value || String(seed)
-        const firstSeat = (typeof st?.firstPlayer === 'number') ? st.firstPlayer : opts.firstSeat
-        try {
-          net.broadcast({ type: 'DEAL', payload: { seed, levelRank: levelRank.value, dealId, firstSeat } })
-        } catch (e) { console.warn('host retry DEAL failed', e) }
+        // host:重发当前各座真实手牌,让 joiner 重新进入当前局
+        _broadcastPerSeatDeal()
       } else {
         // joiner:向 host 请求权威 state,不本地重新发牌
         try {

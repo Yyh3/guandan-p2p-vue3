@@ -19,6 +19,7 @@ const commands = [
   'node src/common/network-multitab.test.js',
   'node src/common/network-kick-player.test.js',
   'node src/common/network-cross-device.test.js',
+  'node src/common/network-discovery.test.js',
   'node src/common/network-ws-http.test.js',
   'node src/common/ws-server.test.js',
   'node src/common/qr-fallback.test.js',
