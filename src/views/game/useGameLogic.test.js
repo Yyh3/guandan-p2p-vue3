@@ -139,17 +139,19 @@ console.log('\n=== 4. turn 事件按实时 selfSeat 重置选中/提示 =====')
   await sleep(50)
   // 伪造选中状态
   logic.hintCards.value = [{ suit: 0, rank: 7 }]
-  logic.selectedColKeys.value = { '7': true }
+  const fakeId = logic.cardKey(logic.myHand.value[0])
+  logic.selectedCardIds.value = new Set([fakeId])
 
   // selfSeat=0,turn seat=1(别人) → hintCards 清空
   logic.selfSeat.value = 0
   logic.game.value.emit('turn', 1, null)
   check('turn seat=1(非我)时 hintCards 清空', logic.hintCards.value.length === 0)
 
-  // selfSeat 改为 2,turn seat=2(我) → selectedColKeys 清空
+  // selfSeat 改为 2,turn seat=2(我) → selectedCardIds 清空
   logic.selfSeat.value = 2
-  logic.selectedColKeys.value = { '9': true }
+  logic.selectedCardIds.value = new Set([fakeId])
   logic.game.value.emit('turn', 2, null)
+  check('turn seat=2(我)时 selectedCardIds 清空', logic.selectedCardIds.value.size === 0)
   check('turn seat=2(我)时 selectedColKeys 清空', Object.keys(logic.selectedColKeys.value).length === 0)
 }
 
@@ -228,8 +230,8 @@ console.log('\n=== 8. Batch 1:window.__gd_game 不再暴露完整 game ref ===')
   check('不暴露 window.__gd_game', typeof global.window.__gd_game === 'undefined')
 }
 
-// ===== 9. Batch 1:onP2PPlay 拒绝错误发送方 =====
-console.log('\n=== 9. Batch 1:onP2PPlay sender authority ===')
+// ===== 9. Batch 1:onP2PPlayCommitted 拒绝错误发送方 =====
+console.log('\n=== 9. Batch 1:onP2PPlayCommitted sender authority ===')
 {
   const logic = useGameLogic({ mainActionsRef: ref(null) })
   logic.selfSeat.value = 0
@@ -241,14 +243,14 @@ console.log('\n=== 9. Batch 1:onP2PPlay sender authority ===')
   g._state.phase = 'playing'
   const card = g._state.hands[0][0]
   const beforeLen = g._state.hands[0].length
-  // 正确发送方:from === seat === currentPlayer
-  logic.onP2PPlay({ seat: 0, cards: [card], ts: 1 }, 0, {})
-  check('正确 sender 的 PLAY 被应用(hand -1)', g._state.hands[0].length === beforeLen - 1)
-  // 错误发送方:from !== seat
+  // 正确发送方:msg.from === seat === currentPlayer,且携带 hostEpoch 通过权威校验
+  logic.onP2PPlayCommitted({ seat: 0, cards: [card], ts: 1 }, 0, { from: 0, hostEpoch: 1 })
+  check('正确 sender 的 PLAY_COMMITTED 被应用(hand -1)', g._state.hands[0].length === beforeLen - 1)
+  // 错误发送方:msg.from !== seat
   const card2 = g._state.hands[0][0]
   const len2 = g._state.hands[0].length
-  logic.onP2PPlay({ seat: 0, cards: [card2], ts: 2 }, 99, {})
-  check('错误 sender(from !== seat)的 PLAY 被拒绝', g._state.hands[0].length === len2)
+  logic.onP2PPlayCommitted({ seat: 0, cards: [card2], ts: 2 }, 99, { from: 99, hostEpoch: 1 })
+  check('错误 sender(from !== seat)的 PLAY_COMMITTED 被拒绝', g._state.hands[0].length === len2)
 }
 
 // ===== 10. Batch 1:refreshUiFromGameState 重算 lastCardCounts =====
@@ -268,6 +270,42 @@ console.log('\n=== 10. Batch 1:refreshUiFromGameState 重算 lastCardCounts ==='
   logic.refreshUiFromGameState()
   check('refresh 后 lastCardCounts 反映 hands/finished/abandoned',
     JSON.stringify(logic.lastCardCounts.value) === JSON.stringify([10, 27, 0, 0]))
+}
+
+// ===== 11. P0-01 单牌级选择 =====
+console.log('\n=== 11. P0-01 单牌级选择 ===')
+{
+  const logic = useGameLogic({ mainActionsRef: ref(null) })
+  logic.selfSeat.value = 0
+  logic.initGame({ firstSeat: 0 })
+  await sleep(50)
+  const c0 = logic.myHand.value[0]
+  const c1 = logic.myHand.value[1]
+  const col0 = logic.handColumns.value[0]
+
+  // 单击选单张
+  logic.toggleCardId(logic.cardKey(c0))
+  check('单击选中单张', logic.isCardSelected(c0))
+  check('未点的牌不选中', !logic.isCardSelected(c1))
+  check('selectedCount = 1', logic.selectedCount.value === 1)
+
+  // 再次单击取消
+  logic.toggleCardId(logic.cardKey(c0))
+  check('再次单击取消选中', !logic.isCardSelected(c0))
+
+  // toggleCol 选中整列
+  logic.toggleCol(col0)
+  check('toggleCol 选中整列', col0.cards.every(c => logic.isCardSelected(c)))
+
+  // onClear 清空
+  logic.onClear()
+  check('onClear 清空选择', logic.selectedCount.value === 0)
+
+  // 提示后按具体牌 ID 选中
+  logic.onHintToggle(true)
+  check('提示后 selectedCount > 0', logic.selectedCount.value > 0)
+  const selected = logic.selectedCardsFromIds()
+  check('selectedCardsFromIds 返回选中牌', selected.length === logic.selectedCount.value)
 }
 
 console.log(`\n========== useGameLogic 测试结果: ${pass} 通过 / ${fail} 失败 ==========`)

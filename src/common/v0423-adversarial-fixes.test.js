@@ -36,7 +36,7 @@ console.log('\n=== 1. P0-02:头游出完后的接风 ===')
     abandonedSeats: [],
     hands: st.hands,
     tableCards: [],
-    trickHistory: [{ seat: 0, pass: false }],
+    trickHistory: [{ seat: 0, pass: false, cards: [{ suit: 0, rank: 14 }] }],
     passCount: 0,
     levelRank: 15,
     teamLevels: [15, 15],

@@ -123,7 +123,7 @@ console.log('\n=== 5. relayFromClient 保留定向 msg.to ===')
   net.close()
 }
 
-console.log('\n=== 6. SEAT_SWAP_ACK 从 joiner 发到 host 后被 relay ===')
+console.log('\n=== 6. SEAT_SWAP_REQUEST → host 提交 SEAT_SWAP_COMMITTED ===')
 {
   const tag = 'p2-swap-' + Date.now()
   const net = await import('./network.js?tag=' + tag)
@@ -136,11 +136,19 @@ console.log('\n=== 6. SEAT_SWAP_ACK 从 joiner 发到 host 后被 relay ===')
   net.getPeers().set(2, { nickname: 'J2', uuid: 'u2' })
   net.getPeers().set(3, { nickname: 'J3', uuid: 'u3' })
   fake.sent.length = 0
-  fake._emit({ type: 'SEAT_SWAP_ACK', from: 1, payload: { a: 1, b: 2 } })
+  // joiner 只能发 REQUEST,且只能和队友换座;1 与 2 不是队友,应被拒绝
+  fake._emit({ type: 'SEAT_SWAP_REQUEST', from: 1, payload: { a: 1, b: 2 } })
   await new Promise(r => setTimeout(r, 10))
-  const relayed = fake.sent.filter(m => m.type === 'SEAT_SWAP_ACK')
-  assert('host 把 SEAT_SWAP_ACK relay 给其它 joiner', relayed.length >= 2)
-  assert('host 本地已交换 seat 1/2', net.getPeers().get(1)?.nickname === 'J2')
+  assert('非队友换座请求被忽略(本地 seat 1/2 不变)', net.getPeers().get(1)?.nickname === 'J1')
+  // 1 与 3 是队友,host 应提交并广播 COMMITTED
+  fake._emit({ type: 'SEAT_SWAP_REQUEST', from: 1, payload: { a: 1, b: 3 } })
+  await new Promise(r => setTimeout(r, 10))
+  const committed = fake.sent.filter(m => m.type === 'SEAT_SWAP_COMMITTED')
+  assert('host 广播 SEAT_SWAP_COMMITTED', committed.length >= 1)
+  assert('host 本地已交换 seat 1/3', net.getPeers().get(1)?.nickname === 'J3')
+  // REQUEST 不在 relay 白名单,不应被转发
+  const relayedRequest = fake.sent.filter(m => m.type === 'SEAT_SWAP_REQUEST')
+  assert('SEAT_SWAP_REQUEST 不被 relay', relayedRequest.length === 0)
   net.close()
 }
 

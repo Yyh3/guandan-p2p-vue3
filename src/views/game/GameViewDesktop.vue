@@ -59,7 +59,6 @@
             col.isJoker ? 'is-joker' : (isLevel({ suit: 0, rank: col.rank }) ? 'is-level' : '')
           ]"
           :style="{ minHeight: colMinHeight(col) + 'px' }"
-          @click="toggleCol(col)"
         >
           <!-- v3.6:列顶 rank 数字标签(7/9/10/K/2)
                  v0.4.3:大小王列隐藏 rank 标签(卡通小丑占满牌面已自带视觉标识,不需要"王"字) -->
@@ -75,11 +74,13 @@
             :key="cardKey(c)"
             class="hand-card"
             :style="{ zIndex: i + 1, top: (i * -20) + 'px' }"
+            @click="toggleCardId(cardKey(c))"
+            @dblclick="toggleCol(col)"
           >
             <CardPlay
               :card="c"
               :is-level="isLevel(c)"
-              :selected="!!selectedColKeys[columnKey(col)]"
+              :selected="isCardSelected(c)"
               :hinted="isHinted(c)"
               size="md"
             />
@@ -360,7 +361,7 @@ onUnmounted(() => {
 const {
   // state
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
-  players, myHand, selectedColKeys, tableCards, lastPlay,
+  players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder,
   isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
@@ -372,8 +373,8 @@ const {
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
   playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
-  columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
-  selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+  columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
+  selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch, isRestartAfterA,  // ★ v0.4.9
   onIcon, initGame, retryDeal,
@@ -475,6 +476,8 @@ function onNickEditorConfirmed(p) {
   color: #fff;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* ============================================================

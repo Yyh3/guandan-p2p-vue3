@@ -81,7 +81,9 @@ console.log('\n=== host 迁移后连续对局:网络层行为 ===')
   assert('J2 的 payload.isMyself = true', j2Migrated.payload?.isMyself === true)
   assert('J1 payload.newHostSeat = 2', j1Migrated.payload?.newHostSeat === 2)
   assert('J2 payload.newHostSeat = 2', j2Migrated.payload?.newHostSeat === 2)
-  assert('J1 payload 携带 snapshot', j1Migrated.payload?.snapshot?.testSnapshot === true)
+  // ★ P0-06 修复:host 主动迁移的完整 snapshot 只定向发给新 host,旁观者不应携带完整手牌
+  assert('J1 payload 不携带完整 snapshot', j1Migrated.payload?.snapshot == null)
+  assert('J2 payload 携带 snapshot', j2Migrated.payload?.snapshot?.testSnapshot === true)
 
   assert('J2 迁移后 selfSeat 保持 2(座位稳定)', J2.getSelfSeat() === 2)
   assert('J2 迁移后 hostSeat = 2', J2.getHostSeat() === 2)

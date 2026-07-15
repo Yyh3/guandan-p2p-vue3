@@ -105,11 +105,11 @@ check('@media (orientation: landscape) 出现 ≥ 3 次',
   '实际 ' + landscapeBlocks.length + ' 次')
 
 check('landscape .cut-card 贴右下',
-  /@media \(orientation: landscape\)\s*\{[\s\S]*?\.cut-card\s*\{[^}]*right:\s*30px[^}]*bottom:\s*100px/.test(roomStyle))
+  /@media \(orientation: landscape\)\s*\{[\s\S]*?\.cut-card\s*\{[^}]*right:\s*calc\(16px[^}]*bottom:\s*80px/.test(roomStyle))
 
-check('landscape .info-card 居中 + max-width: 460px',
+check('landscape .info-card 居中 + 最大宽度适配窄屏',
   /@media \(orientation: landscape\)\s*\{[\s\S]*?\.info-card\s*\{[\s\S]*?transform:\s*translate\(-50%,\s*-50%\)/.test(roomStyle) &&
-  /@media \(orientation: landscape\)\s*\{[\s\S]*?\.info-card\s*\{[\s\S]*?max-width:\s*460px/.test(roomStyle))
+  /@media \(orientation: landscape\)\s*\{[\s\S]*?\.info-card\s*\{[\s\S]*?max-width:\s*min\(320px,\s*42vw\)/.test(roomStyle))
 
 const landscapeSeats = ['seat-top', 'seat-bottom', 'seat-left', 'seat-right']
 const missingLandscapeSeats = landscapeSeats.filter(s => {

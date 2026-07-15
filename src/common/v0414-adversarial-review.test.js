@@ -87,8 +87,8 @@ console.log('\n=== 3. V0412-03: scheduleAI pass 路径 + aiBroadcast(\'PASS\') �
   const setBC = srcUse.match(/game\.value\.setAIBroadcast\(\(seat, cards, type\) => \{[\s\S]*?^\s\s\}\)/m)
   assert('setAIBroadcast 注入回调存在', !!setBC)
   if (setBC) {
-    assert('setAIBroadcast 注入回调处理 PASS 分支(广播 {type: \'PASS\'})',
-      /type\s*===\s*'PASS'/.test(setBC[0]) && /type:\s*'PASS'/.test(setBC[0]))
+    assert('setAIBroadcast 注入回调处理 PASS 分支(广播 {type: \'PASS_COMMITTED\'})',
+      /type\s*===\s*'PASS'/.test(setBC[0]) && /type:\s*'PASS_COMMITTED'/.test(setBC[0]))
   }
 
   // 3.3 行为:AI 决策 pass 时调 aiBroadcast('PASS')

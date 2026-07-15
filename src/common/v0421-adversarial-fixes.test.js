@@ -163,7 +163,7 @@ console.log('\n=== 4. BUG-AI-1 修复:findMinStraightFlush 允许 A(14) ===')
 // ============== 5. 版本号与 npm test 集成 ==============
 console.log('\n=== 5. 版本号与 npm test 集成 ===')
 {
-  check('package.json version === 0.4.21', pkg.version === '0.4.21')
+  check('package.json version === 0.4.22', pkg.version === '0.4.22')
   const pkgSrc = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
   const usesWrapper = /scripts\/run-all-tests\.js/.test(pkgSrc)
   const wrapperPath = path.join(repoRoot, 'scripts/run-all-tests.js')
@@ -198,5 +198,5 @@ console.log('\n=== 6. 关键回归:不破坏既有 smartReconnectToPeers 行为 
     /net\.smartReconnectToPeers\(routeRoomNo/.test(gameViewDesktopSrc))
 }
 
-console.log(`\n========== v0.4.21 对抗性复查修复测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
+console.log(`\n========== v0.4.22 对抗性复查修复测试结果: ${pass} 通过 / ${fail} 失败 ==========`)
 if (fail > 0) process.exit(1)

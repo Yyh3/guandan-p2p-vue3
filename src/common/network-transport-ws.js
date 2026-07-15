@@ -114,6 +114,7 @@ export class WebSocketTransport {
     this._url = null              // client 端 ws URL,重连用
     this._lastSenderWs = null // host 端最近一次发消息的 ws（用于 bindLastSenderSeat）
     this._roomInfoProvider = null // v0.4.22 P1:扫描发现 /room-info 数据源
+    this._hostSeat = 0 // v0.4.22 P0-08:forceDisconnectSeat 等 host-only 广播的 from 字段
   }
 
   /**
@@ -240,8 +241,22 @@ export class WebSocketTransport {
           const msg = JSON.parse(data.toString())
           // ★ P0-02:server 端必须按 socket 绑定的 seat 覆盖客户端伪造的 msg.from
           const boundSeat = this._clients.get(ws)?.seat ?? ws._seat ?? -1
-          // v0.4.22 P1:允许未绑定 seat 的 ROOM_PROBE 扫描请求
-          if (boundSeat < 0 && msg.type !== 'JOIN' && msg.type !== 'ROOM_PROBE') return
+          // ★ P1-13 修复:未绑定 seat 的 ROOM_PROBE 扫描请求直接在对应 socket 回复,
+          //   不进入普通消息广播,避免局域网扫描时打扰所有已连接玩家。
+          if (boundSeat < 0 && msg.type === 'ROOM_PROBE') {
+            const info = this._getRoomInfo()
+            if (info) {
+              try {
+                ws.send(JSON.stringify({
+                  type: 'ROOM_PROBE_ACK',
+                  payload: info,
+                  ts: Date.now(),
+                }))
+              } catch (_) {}
+            }
+            return
+          }
+          if (boundSeat < 0 && msg.type !== 'JOIN') return
           msg.from = boundSeat
           this._lastSenderWs = ws
           this._emit(msg)
@@ -473,6 +488,14 @@ export class WebSocketTransport {
   }
 
   /**
+   * v0.4.22 P0-08:同步当前 host seat,避免 host-only 广播消息 from 字段硬编码为 0。
+   * @param {number} seat
+   */
+  setHostSeat(seat) {
+    this._hostSeat = (typeof seat === 'number' && seat >= 0 && seat <= 3) ? seat : 0
+  }
+
+  /**
    * v0.4.22 P1:设置 /room-info 数据源,扫描端通过 HTTP 获取房间摘要。
    * @param {Function|null} fn —— () => { roomNo, playerCount, maxPlayers, hostNickname? }
    */
@@ -517,7 +540,7 @@ export class WebSocketTransport {
     const data = JSON.stringify({
       type: 'PEER_LEAVE',
       payload: { seat, kick: true, reason: 'kicked' },
-      from: 0,
+      from: this._hostSeat,
       ts: Date.now(),
     })
     for (const ws of this._clients.keys()) {

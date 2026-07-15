@@ -44,6 +44,14 @@
 - `JoinView.vue`: 增加「扫描局域网房间」按钮与可点击结果列表，真机/浏览器均可一键发现房间并自动填入 IP/房间号。
 - 新增 `src/common/network-discovery.test.js`(32 case)覆盖候选生成、HTTP/WS 探测、`scanLanRooms` 端到端发现；总基线刷新至 **51 套件 / 2406 通过 / 0 失败**。
 
+### F. v0.4.22 对抗性审查收尾(2026-07-16)
+
+- `guandan-game.js`: `_applySnapshot` 原子提交，任何字段校验失败都不残留半写状态；`validateHands` 校验 4 手牌结构与 card id 唯一性。
+- `network.js`: host 迁移时公开 `PEER_LEAVE` 仅广播元数据，完整快照通过 `HOST_MIGRATION_SECRET_STATE` 仅发给新 host；`isAuthorityMessage` 强制要求 `hostEpoch`。
+- transport 层(`network-transport-ws.js` / `network-transport-bc.js` / `network-transport-android-ws.js`): 新增 `_hostSeat` 跟踪，`forceDisconnectSeat` 与 graceful migration 不再依赖硬编码 seat 0。
+- UI: 移动端横屏触控目标与布局优化；`JoinView.vue` 浏览器扫描结果改用 `?host=...` 路由以走 WebSocket client。
+- 测试回归：新增 `v0423-adversarial-fixes.test.js`；修复 `trickHistory` 快照缺 `cards` 字段等陈旧断言；总基线刷新至 **52 套件 / 1933 通过 / 0 失败**；Playwright E2E 9 测试全绿。
+
 ---
 
 ## v0.4.21 (2026-06-30) — V0421 对抗性审查 4 个 BUG 修复(42 套件 / 1916 单测全过)

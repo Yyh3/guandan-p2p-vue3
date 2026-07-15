@@ -64,17 +64,17 @@ console.log('\n=== 1. applySnapshot 别名(去掉下划线,跟报告建议一致
 console.log('\n=== 2. host 主动退出调 requestHostMigration(API 行为) ===')
 {
   // 模拟 host(GameView)主动退出时调 requestHostMigration(2, snapshot)
-  // 验证:网络层收到 snapshot,把它嵌入 PEER_LEAVE { migrate: true, snapshot }
-  // 用 fake transport 拦截 send,看消息 payload
+  // ★ v0.4.22 P0-06 修复:完整 snapshot 不再嵌入公开 PEER_LEAVE,而是定向发给新 host;
+  //   用 fake transport 拦截 send,看消息 payload。
   const Host = Object.create(net)
   globalThis.sessionStorage = { _store: { guandan_session_uuid: 'host-uuid-v045' }, getItem(k) { return this._store[k] || null }, setItem(k, v) { this._store[k] = v } }
-  let capturedSend = null
+  let capturedSends = []
   Host._setTransportFactory(() => ({
     _mode: 'self', _wss: null, _clients: new Map(), _channel: { name: 'fake', postMessage: () => {} },
     _outbox: [], _ready: true, _listeners: [], _closedByUser: false, _reconnecting: false,
     onMessage(cb) { this._listeners.push(cb) }, offMessage() {},
     open() { return Promise.resolve() },
-    send(msg) { capturedSend = msg; return true },
+    send(msg) { capturedSends.push(msg); return true },
     _emit(msg) { for (const cb of this._listeners) { try { cb(msg) } catch (e) {} } },
     close() {}, isReady() { return true },
   }))
@@ -84,13 +84,18 @@ console.log('\n=== 2. host 主动退出调 requestHostMigration(API 行为) ==='
   const snap = { hands: 'mock', currentPlayer: 1, levelRank: 14 }
   const r = Host.requestHostMigration(2, snap)
   assert('host 调 requestHostMigration(2, snap) 返回 true', r === true)
-  // 验证 send 收到 PEER_LEAVE { migrate: true, newHostSeat: 2, snapshot }
-  assert('send 收到 PEER_LEAVE 消息', capturedSend?.type === 'PEER_LEAVE')
-  eq('PEER_LEAVE.payload.seat=0', capturedSend?.payload?.seat, 0)
-  eq('PEER_LEAVE.payload.migrate=true', capturedSend?.payload?.migrate, true)
-  eq('PEER_LEAVE.payload.newHostSeat=2', capturedSend?.payload?.newHostSeat, 2)
-  eq('PEER_LEAVE.payload.snapshot 含 hands=mock', capturedSend?.payload?.snapshot?.hands, 'mock')
-  eq('PEER_LEAVE.payload.snapshot.currentPlayer=1', capturedSend?.payload?.snapshot?.currentPlayer, 1)
+  // v0.4.22 P0-06:公开 PEER_LEAVE 只含迁移元数据,完整 snapshot 通过定向 HOST_MIGRATION_SECRET_STATE 发给新 host
+  const peerLeave = capturedSends.find(m => m.type === 'PEER_LEAVE')
+  const secret = capturedSends.find(m => m.type === 'HOST_MIGRATION_SECRET_STATE')
+  assert('send 收到 PEER_LEAVE 消息', peerLeave?.type === 'PEER_LEAVE')
+  eq('PEER_LEAVE.payload.seat=0', peerLeave?.payload?.seat, 0)
+  eq('PEER_LEAVE.payload.migrate=true', peerLeave?.payload?.migrate, true)
+  eq('PEER_LEAVE.payload.newHostSeat=2', peerLeave?.payload?.newHostSeat, 2)
+  assert('公开 PEER_LEAVE 不再携带完整 snapshot', peerLeave?.payload?.snapshot === undefined)
+  assert('send 收到 HOST_MIGRATION_SECRET_STATE 定向消息', secret?.type === 'HOST_MIGRATION_SECRET_STATE')
+  eq('定向消息 to=2(新 host)', secret?.to, 2)
+  eq('定向消息 snapshot.hands=mock', secret?.payload?.snapshot?.hands, 'mock')
+  eq('定向消息 snapshot.currentPlayer=1', secret?.payload?.snapshot?.currentPlayer, 1)
   Host.close()
 }
 
@@ -169,7 +174,9 @@ console.log('\n=== 4. requestHostMigration 不传 snapshot 兼容旧调用 ===')
   // 不传 snapshot
   const r = Host.requestHostMigration(2)
   assert('不传 snapshot 也返回 true(向后兼容)', r === true)
-  eq('payload.snapshot=null', capturedSend?.payload?.snapshot, null)
+  // v0.4.22 P0-06:公开 PEER_LEAVE 不再含 snapshot 字段
+  assert('PEER_LEAVE 消息存在', capturedSend?.type === 'PEER_LEAVE')
+  assert('payload.snapshot 不存在(undefined)', capturedSend?.payload?.snapshot === undefined)
   Host.close()
 }
 

@@ -117,9 +117,9 @@ console.log('\n=== 1. BUG-006 — host 调 swapSeats(0, 2):host 端 peers Map / 
 }
 
 // ============================================================
-// 块 2: BUG-006 — joiner 调 swapSeats (joiner 在 seat 1 时换 seat 2)
+// 块 2: BUG-006/P0-07 — joiner 发 SEAT_SWAP_REQUEST,host 提交后同步
 // ============================================================
-console.log('\n=== 2. BUG-006 — joiner 调 swapSeats(1, 2):joiner peers Map / selfSeat 立即互换 ===')
+console.log('\n=== 2. BUG-006/P0-07 — joiner 请求 swapSeats(1, 3):host 提交后 joiner 同步 ===')
 {
   resetSessionStorage()
   const { mod: Host } = await makeFakeInstance('h-swap-j', 'h-uuid-swap-j')
@@ -139,18 +139,25 @@ console.log('\n=== 2. BUG-006 — joiner 调 swapSeats(1, 2):joiner peers Map / 
   for (let i = 0; i < 50 && s2 === -1; i++) { await settle(10); s2 = J2.getSelfSeat() }
   assert('J2 seat=2', s2 === 2)
 
-  // J1 调 swapSeats(1, 2) → 自己应该跳到 seat 2,seat 1 变成 J2 的 info
+  const { mod: J3 } = await makeFakeInstance('j3-swap-j', 'j3-uuid-swap-j')
+  J3.joinRoom('multitab-swap-j', { nickname: 'J3', avatar: '3' })
+  let s3 = -1
+  for (let i = 0; i < 50 && s3 === -1; i++) { await settle(10); s3 = J3.getSelfSeat() }
+  assert('J3 seat=3', s3 === 3)
+
+  // J1 调 swapSeats(1, 3) → 只能发 REQUEST,由 host 提交后通过 COMMITTED 同步
   let j1SwapEvt = null
   J1.on('peer:seat_swap', (e) => { j1SwapEvt = e })
-  const r = J1.swapSeats(1, 2)
-  assert('J1 swapSeats(1, 2) 返回 ok=true', r.ok === true)
-  eq('J1 selfSeat 从 1 切换到 2', J1.getSelfSeat(), 2)
-  assert('J1 peers[1] 现在是 J2 (nickname=J2)', J1.getPeers().get(1)?.nickname === 'J2')
-  assert('J1 peers[2] 现在是 J1 自己 (nickname=J1)', J1.getPeers().get(2)?.nickname === 'J1')
+  const r = J1.swapSeats(1, 3)
+  assert('J1 swapSeats(1, 3) 返回 ok=true(pending)', r.ok === true)
+  await settle(80)
+  eq('J1 selfSeat 从 1 切换到 3', J1.getSelfSeat(), 3)
+  assert('J1 peers[1] 现在是 J3 (nickname=J3)', J1.getPeers().get(1)?.nickname === 'J3')
+  assert('J1 peers[3] 现在是 J1 自己 (nickname=J1)', J1.getPeers().get(3)?.nickname === 'J1')
   assert('J1 emit peer:seat_swap 事件', j1SwapEvt != null)
 
   J1.off('peer:seat_swap')
-  J1.close(); J2.close(); Host.close()
+  J1.close(); J2.close(); J3.close(); Host.close()
   await settle(30)
 }
 
@@ -204,14 +211,14 @@ console.log('\n=== 3. BUG-006 — host 调 swapSeats 后,3 个 joiner 都收到 
   eq('host 端 peer:seat_swap.a=0', hostSwapEvt[0]?.a, 0)
   eq('host 端 peer:seat_swap.b=2', hostSwapEvt[0]?.b, 2)
 
-  // 3 个 joiner 都收到 SEAT_SWAP_ACK → 调 _applySeatSwapLocal → emit peer:seat_swap
+  // 3 个 joiner 都收到 SEAT_SWAP_COMMITTED → 调 _applySeatSwapLocal → emit peer:seat_swap
   for (let i = 0; i < 3; i++) {
     eq(`J${i+1} 端 peer:seat_swap 触发 1 次`, swapEvts[i].length, 1)
     eq(`J${i+1} 端 peer:seat_swap.a=0`, swapEvts[i][0]?.a, 0)
     eq(`J${i+1} 端 peer:seat_swap.b=2`, swapEvts[i][0]?.b, 2)
   }
 
-  // joiner 端 peers Map 也同步(host 没参与 joiner 的 peers Map,但 SEAT_SWAP_ACK 广播后
+  // joiner 端 peers Map 也同步(host 没参与 joiner 的 peers Map,但 SEAT_SWAP_COMMITTED 广播后
   // joiner 的本地 _applySeatSwapLocal 会 swap 自己的 peers Map entries)
   // 注意:joiner 端 peers Map 之前是 SYNC 同步下来的 host 信息,所以 swap 后会反映新状态
   const j0After = joiners[0].getPeers().get(0)
@@ -265,9 +272,9 @@ console.log('\n=== 4. BUG-006 — swapSeats 边界 (a==b / 非法 seat / 自未�
 }
 
 // ============================================================
-// 块 5: BUG-006 — swapSeats 时 selfSeat 不在 {a,b} 中 → selfSeat 不变
+// 块 5: BUG-006/P0-07 — swapSeats 时 selfSeat 不在 {a,b} 中 → selfSeat 不变;只能对家换
 // ============================================================
-console.log('\n=== 5. BUG-006 — host 调 swapSeats(1, 2) (不动自己 seat=0),selfSeat 不变 ===')
+console.log('\n=== 5. BUG-006/P0-07 — host 调 swapSeats(1, 3) (不动自己 seat=0),selfSeat 不变 ===')
 {
   resetSessionStorage()
   const { mod: Host } = await makeFakeInstance('h-swap-notme', 'h-uuid-swap-notme')
@@ -275,13 +282,49 @@ console.log('\n=== 5. BUG-006 — host 调 swapSeats(1, 2) (不动自己 seat=0)
   Host.startAsHost({ nickname: 'Host', avatar: 'H' })
   await settle()
   Host.getPeers().set(1, { nickname: 'J1', avatar: '1', uuid: 'j1-uuid' })
-  Host.getPeers().set(2, { nickname: 'J2', avatar: '2', uuid: 'j2-uuid' })
+  Host.getPeers().set(3, { nickname: 'J3', avatar: '3', uuid: 'j3-uuid' })
 
-  const r = Host.swapSeats(1, 2)
-  assert('swapSeats(1, 2) 返回 ok=true', r.ok === true)
-  eq('host selfSeat 仍为 0 (没在 {1,2} 中)', Host.getSelfSeat(), 0)
-  assert('host peers[1] 现在是 J2', Host.getPeers().get(1)?.nickname === 'J2')
-  assert('host peers[2] 现在是 J1', Host.getPeers().get(2)?.nickname === 'J1')
+  // 非对家换座应被拒绝
+  const rBad = Host.swapSeats(1, 2)
+  assert('swapSeats(1, 2)(非对家) 返回 ok=false', rBad.ok === false)
+
+  const r = Host.swapSeats(1, 3)
+  assert('swapSeats(1, 3) 返回 ok=true', r.ok === true)
+  eq('host selfSeat 仍为 0 (没在 {1,3} 中)', Host.getSelfSeat(), 0)
+  assert('host peers[1] 现在是 J3', Host.getPeers().get(1)?.nickname === 'J3')
+  assert('host peers[3] 现在是 J1', Host.getPeers().get(3)?.nickname === 'J1')
+
+  Host.close()
+  await settle(30)
+}
+
+// ============================================================
+// 块 5.5: P1-02 — host 换座到 seat 2 后可踢原 seat 0
+// ============================================================
+console.log('\n=== 5.5. P1-02 — host 换座到 seat 2 后可踢原 seat 0 ===')
+{
+  resetSessionStorage()
+  const { mod: Host } = await makeFakeInstance('h-swap-kick', 'h-uuid-swap-kick')
+  Host.setRoomId('multitab-swap-kick')
+  Host.startAsHost({ nickname: 'Host', avatar: 'H' })
+  await settle()
+  // 模拟原 host(seat 0)与队友 seat 2 换座
+  Host.getPeers().set(2, { nickname: 'J2', avatar: '2', uuid: 'j2-uuid' })
+  Host.swapSeats(0, 2)
+  await settle(50)
+  eq('换座后 host selfSeat = 2', Host.getSelfSeat(), 2)
+  eq('换座后 host hostSeat = 2', Host.getHostSeat(), 2)
+  // 原 seat 0 现在由 J2 占据(peer 信息已 swap)
+  assert('peers[0] 是 J2', Host.getPeers().get(0)?.nickname === 'J2')
+
+  // 不能踢自己(seat 2)
+  const rSelf = Host.kickPlayer(2)
+  assert('kickPlayer(2)(自己) 返回 ok=false', rSelf.ok === false)
+
+  // 可以踢原 seat 0(现在坐着 J2)
+  const r = Host.kickPlayer(0)
+  assert('kickPlayer(0) 返回 ok=true', r.ok === true)
+  assert('踢后 peers 不再含 seat 0', !Host.getPeers().has(0))
 
   Host.close()
   await settle(30)

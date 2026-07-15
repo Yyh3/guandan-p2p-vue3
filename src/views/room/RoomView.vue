@@ -688,6 +688,8 @@ function onKickPlayer(seat) {
   font: var(--font-body);
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* 背景层 — 更克制的深蓝 + 底部 felt */
@@ -1199,27 +1201,31 @@ function onKickPlayer(seat) {
   .info-roomno { font-size: 28px !important; }
 }
 
-/* landscape 横屏 */
+/* landscape 横屏(手机横屏 h≤500px 优先) */
 @media (orientation: landscape) {
+  .room-header {
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    right: calc(16px + env(safe-area-inset-right, 0px));
+  }
   .seat-top {
     left: 50%;
     top: 56px;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scale(0.85);
   }
   .seat-bottom {
     left: 50%;
-    bottom: 130px;
-    transform: translateX(-50%);
+    bottom: 80px;
+    transform: translateX(-50%) scale(0.85);
   }
   .seat-left {
-    left: 60px;
+    left: calc(8px + env(safe-area-inset-left, 0px));
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(-50%) scale(0.85);
   }
   .seat-right {
-    right: 60px;
+    right: calc(8px + env(safe-area-inset-right, 0px));
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(-50%) scale(0.85);
   }
 }
 
@@ -1228,15 +1234,16 @@ function onKickPlayer(seat) {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    max-width: 460px;
-    width: min(460px, calc(100% - 32px));
+    max-width: min(320px, 42vw);
+    width: min(320px, 42vw);
+    padding: 14px 16px;
   }
 }
 
 @media (orientation: landscape) {
   .cut-card {
-    right: 30px;
-    bottom: 100px;
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: 80px;
   }
 }
 </style>

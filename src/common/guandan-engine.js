@@ -25,20 +25,24 @@ const LEVEL_SEQUENCE = [15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 // ============ 牌组生成 ============
 /**
  * 生成一副新牌(两副共108张)
- * 返回 [{suit, rank}, ...]
+ * 返回 [{suit, rank, id}, ...]
+ *
+ * id 是全局唯一实体标识,两副牌中完全相同的 rank/suit 也会有不同 id,
+ * 用于 UI 单牌选择、提示、出牌动画 diff 和 P2P 同步验证。
  */
 function createDeck() {
   const deck = []
+  let id = 0
   for (let copy = 0; copy < 2; copy++) {
     // 普通牌:3..15(对应 3..K..A..2),13 个 rank
     for (let suit = 0; suit < 4; suit++) {
       for (let rank = 3; rank <= 15; rank++) {
-        deck.push({ suit, rank })
+        deck.push({ suit, rank, id: id++ })
       }
     }
     // 大小王
-    deck.push({ suit: -1, rank: 16 }) // 小王
-    deck.push({ suit: -1, rank: 17 }) // 大王
+    deck.push({ suit: -1, rank: 16, id: id++ }) // 小王
+    deck.push({ suit: -1, rank: 17, id: id++ }) // 大王
   }
   return deck
 }
@@ -81,6 +85,16 @@ function sortHand(hand) {
     if (a.rank !== b.rank) return b.rank - a.rank
     return a.suit - b.suit
   })
+}
+
+/**
+ * 判断两张牌是否指同一实体牌。
+ * 优先比较 id(唯一标识),无 id 时回退到 rank + suit。
+ */
+function cardEquals(a, b) {
+  if (!a || !b) return false
+  if (typeof a.id === 'number' && typeof b.id === 'number') return a.id === b.id
+  return a.rank === b.rank && a.suit === b.suit
 }
 
 /**
@@ -702,7 +716,7 @@ export {
   // PRNG(4-tab 联机用 seeded firstPlayer)
   mulberry32,
   // 工具
-  countByRank,
+  countByRank, cardEquals,
   // 识别
   recognize, canBeat, splitGhosts, canFormWithGhosts, materializeGhosts,
   // 展示层

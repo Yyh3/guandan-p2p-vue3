@@ -192,7 +192,16 @@ console.log('\n=== 6. scanLanRooms 空候选返回 [] ===')
   eq('空候选返回空数组', rooms, [])
 }
 
-console.log('\n=== 7. _normalizeRoomInfo 缺省字段兜底 ===')
+console.log('\n=== 7. scanLanRooms 支持 AbortSignal 取消 ===')
+{
+  const { mod: Net } = await makeNetInstance('scan-abort')
+  const controller = new AbortController()
+  controller.abort()
+  const rooms = await Net.scanLanRooms({ candidates: ['127.0.0.1:9999'], signal: controller.signal })
+  eq('取消后立即返回空数组', rooms, [])
+}
+
+console.log('\n=== 8. _normalizeRoomInfo 缺省字段兜底 ===')
 {
   const { mod: Net } = await makeNetInstance('norm')
   const info = Net._normalizeRoomInfo('192.168.1.5', 8848, {})

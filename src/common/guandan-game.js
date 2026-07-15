@@ -30,7 +30,7 @@ function createGame(opts) {
   // ★ Phase 2:hand hiding / host authority
   //   'host' = 持有完整 hands,运行 AI,权威来源
   //   'joiner' = 只持有自己的手牌,其他 seat 用 handCounts 占位,被动接受 host 权威消息
-  const mode = isHost ? 'host' : 'joiner'
+  let mode = isHost ? 'host' : 'joiner'
   const ownSeat = isValidSeat(selfSeat) ? selfSeat : 0
   // ★ v3.8 P1:aiPlayers 用可变数组(支持运行时加 seat,例如断线 AI 接管)
   let aiPlayers = initialAI.slice()
@@ -266,7 +266,7 @@ function createGame(opts) {
     // 验证牌都在手牌里
     const hand = state.hands[seat].slice()
     for (const card of cards) {
-      const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
+      const idx = hand.findIndex(c => E.cardEquals(c, card))
       if (idx < 0) return { ok: false, error: '牌不在手牌中' }
       hand.splice(idx, 1)
     }
@@ -297,7 +297,7 @@ function applyPlay(seat, cards, hand, rec) {
       sourceHand = state.hands[seat].slice()
       let allFound = true
       for (const card of cards) {
-        const idx = sourceHand.findIndex(c => c.rank === card.rank && c.suit === card.suit)
+        const idx = sourceHand.findIndex(c => E.cardEquals(c, card))
         if (idx < 0) {
           allFound = false
           break
@@ -677,6 +677,27 @@ function applyPlay(seat, cards, hand, rec) {
       const alive = ensureAlive(); if (alive) return alive
       return this._applySnapshot(snap)
     },
+    /**
+     * ★ P0-04/05:joiner 升为 host,必须携带完整 authoritativeState。
+     *   无完整 state 时拒绝升级,避免 host 崩溃后把损坏状态当成权威。
+     * @param {object} authoritativeState 完整对局快照(含 hands 等)
+     * @returns {{ok:boolean, error?:string}}
+     */
+    promoteToHost(authoritativeState) {
+      const alive = ensureAlive(); if (alive) return alive
+      if (!authoritativeState || typeof authoritativeState !== 'object') {
+        return { ok: false, error: 'missing_authoritative_state' }
+      }
+      // ★ P0-04/05:必须携带完整 hands,否则视为 host 崩溃(无完整 state),拒绝升级
+      const hands = authoritativeState.hands
+      if (!Array.isArray(hands) || hands.length !== 4 || !hands.every(h => Array.isArray(h))) {
+        return { ok: false, error: 'missing_authoritative_state' }
+      }
+      const r = this.applySnapshot(authoritativeState)
+      if (!r.ok) return r
+      mode = 'host'
+      return { ok: true }
+    },
     // ★ GD-RC-003:权威结算 — 接 host 发的完整 payload,不去读本地 state 重新算
     // ★ P0-07 修复:先完整校验 payload,校验通过后再原子提交并记录去重 ID,
     //   防止畸形 ROUND_END 先占用 lastAppliedRoundId 导致后续正确结算被跳过。
@@ -830,103 +851,156 @@ function applyPlay(seat, cards, hand, rec) {
     // ★ P0-06 修复:snapshot 必须先完整校验并生成临时对象,最后一次性原子提交,
     //   任何字段非法都不能留下"应用一半"的损坏状态。
     _applySnapshot(snap) {
-      if (!snap || typeof snap !== 'object') return
+      if (!snap || typeof snap !== 'object') return { ok: false, error: 'invalid_snapshot' }
       const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
       const validPhase = ['idle', 'dealing', 'playing', 'trick_end', 'finished']
+
+      // ★ P0-09 修复:hands 必须整体合法,任一字段非法都直接拒绝,不纠正为 []。
+      function validateHands(hands) {
+        if (!Array.isArray(hands) || hands.length !== 4) return false
+        let total = 0
+        const seenIds = new Set()
+        for (const h of hands) {
+          if (!Array.isArray(h)) return false
+          if (h.length > 27) return false
+          total += h.length
+          for (const c of h) {
+            if (!c || typeof c !== 'object') return false
+            if (typeof c.rank !== 'number' || typeof c.suit !== 'number') return false
+            if ('id' in c) {
+              if (typeof c.id !== 'number') return false
+              if (seenIds.has(c.id)) return false
+              seenIds.add(c.id)
+            }
+          }
+        }
+        if (total > 108) return false
+        return true
+      }
 
       // 先把所有要应用的字段校验并克隆到 next,最后一次性 Object.assign(state, next)
       const next = {}
 
       if ('hands' in snap) {
-        if (!Array.isArray(snap.hands) || snap.hands.length !== 4) return
+        if (!validateHands(snap.hands)) return { ok: false, error: 'invalid_hands' }
         next.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
       }
       if ('handCounts' in snap) {
-        if (!Array.isArray(snap.handCounts) || snap.handCounts.length !== 4 || !snap.handCounts.every(n => typeof n === 'number')) return
+        if (!Array.isArray(snap.handCounts) || snap.handCounts.length !== 4 || !snap.handCounts.every(n => typeof n === 'number')) {
+          return { ok: false, error: 'invalid_handCounts' }
+        }
         next.handCounts = snap.handCounts.slice()
       }
       if ('tableCards' in snap) {
-        if (!Array.isArray(snap.tableCards)) return
+        if (!Array.isArray(snap.tableCards) || !snap.tableCards.every(c => c && typeof c === 'object' && typeof c.rank === 'number' && typeof c.suit === 'number')) {
+          return { ok: false, error: 'invalid_tableCards' }
+        }
         next.tableCards = snap.tableCards.slice()
       }
-      if ('lastPlay' in snap) next.lastPlay = snap.lastPlay
+      if ('lastPlay' in snap) {
+        if (snap.lastPlay !== null) {
+          const lp = snap.lastPlay
+          if (!lp || typeof lp !== 'object' ||
+              (typeof lp.type !== 'number' && typeof lp.type !== 'string') ||
+              typeof lp.mainRank !== 'number' ||
+              typeof lp.length !== 'number' || !isValidSeat(lp.who) ||
+              !Array.isArray(lp.cards)) {
+            return { ok: false, error: 'invalid_lastPlay' }
+          }
+        }
+        next.lastPlay = snap.lastPlay
+      }
 
       if ('currentPlayer' in snap) {
-        if (!isValidSeat(snap.currentPlayer)) return
+        if (!isValidSeat(snap.currentPlayer)) return { ok: false, error: 'invalid_currentPlayer' }
         next.currentPlayer = snap.currentPlayer
       }
       if ('firstPlayer' in snap) {
-        if (!isValidSeat(snap.firstPlayer)) return
+        if (!isValidSeat(snap.firstPlayer)) return { ok: false, error: 'invalid_firstPlayer' }
         next.firstPlayer = snap.firstPlayer
       }
       if ('leaderPlayer' in snap) {
-        if (!isValidSeat(snap.leaderPlayer)) return
+        if (!isValidSeat(snap.leaderPlayer)) return { ok: false, error: 'invalid_leaderPlayer' }
         next.leaderPlayer = snap.leaderPlayer
       }
       if ('trickHistory' in snap) {
-        if (!Array.isArray(snap.trickHistory)) return
+        if (!Array.isArray(snap.trickHistory) || !snap.trickHistory.every(entry => {
+          if (!entry || typeof entry !== 'object' || !isValidSeat(entry.seat)) return false
+          if (entry.pass === true) return true
+          return Array.isArray(entry.cards)
+        })) {
+          return { ok: false, error: 'invalid_trickHistory' }
+        }
         next.trickHistory = snap.trickHistory.slice()
       }
       if ('difficulty' in snap) {
-        if (!['easy', 'medium', 'hard'].includes(snap.difficulty)) return
+        if (!['easy', 'medium', 'hard'].includes(snap.difficulty)) return { ok: false, error: 'invalid_difficulty' }
         next.difficulty = snap.difficulty
       }
       if ('finishedOrder' in snap) {
         if (!Array.isArray(snap.finishedOrder) ||
-            !snap.finishedOrder.every(s => isValidSeat(s))) return
+            !snap.finishedOrder.every(s => isValidSeat(s))) return { ok: false, error: 'invalid_finishedOrder' }
         next.finishedOrder = snap.finishedOrder.slice()
       }
       if ('abandonedSeats' in snap) {
         if (!Array.isArray(snap.abandonedSeats) ||
-            !snap.abandonedSeats.every(s => isValidSeat(s))) return
+            !snap.abandonedSeats.every(s => isValidSeat(s))) return { ok: false, error: 'invalid_abandonedSeats' }
         next.abandonedSeats = snap.abandonedSeats.slice()
       }
 
       // 计算应用后的 finished/abandoned,检查二者不重叠。
       const finalFinished = next.finishedOrder ?? state.finishedOrder
       const finalAbandoned = next.abandonedSeats ?? state.abandonedSeats
-      if (finalFinished.some(s => finalAbandoned.includes(s))) return
+      if (finalFinished.some(s => finalAbandoned.includes(s))) return { ok: false, error: 'invalid_finishedOrder_abandoned_overlap' }
       // ★ P0-03 修复:phase=finished 的合法快照允许 currentPlayer 在 finishedOrder 中
       //   (结算态没有"当前出牌者",seat 只作为占位)。非 finished 态仍拒绝 inactive currentPlayer。
       //   注意:phase 字段的正式校验在下方,这里先从 snap 读取最终 phase。
       const finalPhase = ('phase' in snap) ? snap.phase : state.phase
       const finalCurrentPlayer = ('currentPlayer' in next) ? next.currentPlayer : state.currentPlayer
       if (finalPhase !== 'finished' &&
-          (finalFinished.includes(finalCurrentPlayer) || finalAbandoned.includes(finalCurrentPlayer))) return
+          (finalFinished.includes(finalCurrentPlayer) || finalAbandoned.includes(finalCurrentPlayer))) {
+        return { ok: false, error: 'invalid_currentPlayer_inactive' }
+      }
 
       if ('passCount' in snap) {
-        if (typeof snap.passCount !== 'number' || snap.passCount < 0 || snap.passCount > 3) return
+        if (typeof snap.passCount !== 'number' || snap.passCount < 0 || snap.passCount > 3) return { ok: false, error: 'invalid_passCount' }
         next.passCount = snap.passCount
       }
       if ('round' in snap) {
-        if (typeof snap.round !== 'number' || snap.round < 1) return
+        if (typeof snap.round !== 'number' || snap.round < 1) return { ok: false, error: 'invalid_round' }
         next.round = snap.round
       }
       if ('phase' in snap) {
-        if (!validPhase.includes(snap.phase)) return
+        if (!validPhase.includes(snap.phase)) return { ok: false, error: 'invalid_phase' }
         next.phase = snap.phase
       }
       if ('levelUp' in snap) {
-        if (typeof snap.levelUp !== 'number') return
+        if (typeof snap.levelUp !== 'number') return { ok: false, error: 'invalid_levelUp' }
         next.levelUp = snap.levelUp
       }
       if ('levelRank' in snap) {
-        if (typeof snap.levelRank !== 'number') return
+        if (typeof snap.levelRank !== 'number') return { ok: false, error: 'invalid_levelRank' }
         next.levelRank = snap.levelRank
       }
       if ('teamLevels' in snap) {
         if (!Array.isArray(snap.teamLevels) || snap.teamLevels.length !== 2 ||
-            !snap.teamLevels.every(t => typeof t === 'number')) return
+            !snap.teamLevels.every(t => typeof t === 'number')) return { ok: false, error: 'invalid_teamLevels' }
         next.teamLevels = snap.teamLevels.slice()
       }
-      if ('tribute' in snap) next.tribute = snap.tribute
-      if ('ghost' in snap) next.ghost = snap.ghost
+      if ('tribute' in snap) {
+        if (snap.tribute !== null && (!snap.tribute || typeof snap.tribute !== 'object')) return { ok: false, error: 'invalid_tribute' }
+        next.tribute = snap.tribute
+      }
+      if ('ghost' in snap) {
+        if (snap.ghost !== null && (!snap.ghost || typeof snap.ghost !== 'object')) return { ok: false, error: 'invalid_ghost' }
+        next.ghost = snap.ghost
+      }
       if ('isRestartAfterA' in snap) {
-        if (typeof snap.isRestartAfterA !== 'boolean') return
+        if (typeof snap.isRestartAfterA !== 'boolean') return { ok: false, error: 'invalid_isRestartAfterA' }
         next.isRestartAfterA = snap.isRestartAfterA
       }
       if ('previousLevelRank' in snap) {
-        if (snap.previousLevelRank !== null && typeof snap.previousLevelRank !== 'number') return
+        if (snap.previousLevelRank !== null && typeof snap.previousLevelRank !== 'number') return { ok: false, error: 'invalid_previousLevelRank' }
         next.previousLevelRank = snap.previousLevelRank
       }
       if ('lastAppliedRoundId' in snap && snap.lastAppliedRoundId !== undefined) {
@@ -936,6 +1010,7 @@ function applyPlay(seat, cards, hand, rec) {
       // 原子提交:所有字段一次性写回 state
       Object.assign(state, next)
       emit('turn', state.currentPlayer, state.lastPlay, { isTeammateLast: false })
+      return { ok: true }
     },
   }
 }

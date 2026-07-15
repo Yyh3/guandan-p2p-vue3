@@ -96,18 +96,18 @@ console.log('\n=== 1. WS host relay: seat 1 PLAY → seat 2 + seat 3 都收到 f
   const recv1 = []
   clients[0].on('message', (d) => { try { recv1.push(JSON.parse(d.toString())) } catch (e) {} })
 
-  // ★ 核心:让 host transport 收到来自 seat=1 joiner 的 PLAY 消息
+  // ★ 核心:让 host transport 收到来自 seat=1 joiner 的 PLAY_COMMITTED 消息
   //   真实路径:joiner ws.send → host ws.on('message') → host._emit → host._listeners[0](=onTransportMessage)
   //   模拟:直接调 host._emit(msg),host._listeners[0] 是 _onTransportMessage
-  const playMsg = { type: 'PLAY', from: 1, payload: { seat: 1, cards: [{ suit: 0, rank: 5 }], source: 'manual' }, ts: Date.now() }
+  const playMsg = { type: 'PLAY_COMMITTED', from: 1, payload: { seat: 1, cards: [{ suit: 0, rank: 5 }], source: 'manual' }, ts: Date.now() }
   host._emit(playMsg)
   await settle(50)
 
-  // 验证 joiner seat=2 / seat=3 收到 from=1 的 PLAY
-  const r2 = recv2.find(m => m.type === 'PLAY')
-  const r3 = recv3.find(m => m.type === 'PLAY')
-  assert('joiner seat=2 收到 PLAY (relay 命中)', r2 != null)
-  assert('joiner seat=3 收到 PLAY (relay 命中)', r3 != null)
+  // 验证 joiner seat=2 / seat=3 收到 from=1 的 PLAY_COMMITTED
+  const r2 = recv2.find(m => m.type === 'PLAY_COMMITTED')
+  const r3 = recv3.find(m => m.type === 'PLAY_COMMITTED')
+  assert('joiner seat=2 收到 PLAY_COMMITTED (relay 命中)', r2 != null)
+  assert('joiner seat=3 收到 PLAY_COMMITTED (relay 命中)', r3 != null)
   eq('relay 消息 from=1 (保留原 sender)', r2?.from, 1)
   eq('relay 消息 from=1 (seat=3 同样)', r3?.from, 1)
   eq('relay 消息 to=2 (定向)', r2?.to, 2)
@@ -116,8 +116,8 @@ console.log('\n=== 1. WS host relay: seat 1 PLAY → seat 2 + seat 3 都收到 f
   assert('payload.cards 含 1 张牌', Array.isArray(r2?.payload?.cards) && r2.payload.cards.length === 1)
   eq('payload.source=manual', r2?.payload?.source, 'manual')
 
-  // 验证:原 sender seat=1 不应收到自己 PLAY 的回环
-  assert('原 sender seat=1 不收到自己 PLAY 的回环', !recv1.some(m => m.type === 'PLAY'))
+  // 验证:原 sender seat=1 不应收到自己 PLAY_COMMITTED 的回环
+  assert('原 sender seat=1 不收到自己 PLAY_COMMITTED 的回环', !recv1.some(m => m.type === 'PLAY_COMMITTED'))
 
   // 验证:host 自己 (transport 端没有 host 自己 ws) 不会"发给自己"
   //      (host 端没有 ws,_sendHost 只遍历 _clients,即 joiner ws)
@@ -229,15 +229,15 @@ console.log('\n=== 3. BC host 模式不调 relayFromClient (BC 天然广播,避�
   Host.getPeers().set(2, { nickname: 'B', avatar: 'B', uuid: 'u2' })
   Host.getPeers().set(3, { nickname: 'C', avatar: 'C', uuid: 'u3' })
 
-  // BC host 收到 PLAY 消息 — relayFromClient 应跳过
+  // BC host 收到 PLAY_COMMITTED 消息 — relayFromClient 应跳过
   bcSendCalls = []
-  const playMsg = { type: 'PLAY', from: 1, payload: { seat: 1, cards: [{ suit: 0, rank: 3 }] } }
+  const playMsg = { type: 'PLAY_COMMITTED', from: 1, payload: { seat: 1, cards: [{ suit: 0, rank: 3 }] } }
   bcTransport._emit(playMsg)
   await settle(30)
 
-  // BC 模式 _handleHostMessage 对 PLAY 不处理分支,无副作用
+  // BC 模式 _handleHostMessage 对 PLAY_COMMITTED 不处理分支,无副作用
   // relayFromClient 也跳过 (因为 _channel != null)
-  const relayPlay = bcSendCalls.filter(m => m.type === 'PLAY')
+  const relayPlay = bcSendCalls.filter(m => m.type === 'PLAY_COMMITTED')
   eq('BC host 模式不触发 relayFromClient (to 定向 send=0)', relayPlay.length, 0)
 
   Host.close()
@@ -280,14 +280,14 @@ console.log('\n=== 4. joiner 端收到消息不调 relayFromClient(joiner 不是
   Joiner.joinRoom('127.0.0.1:9999', { nickname: 'J', avatar: 'J' }, { hostIp: '127.0.0.1', hostPort: 9999 })
   await settle(30)
 
-  // 模拟 joiner 收到 host 发来的 PLAY 消息 (from=0 host 出的牌)
+  // 模拟 joiner 收到 host 发来的 PLAY_COMMITTED 消息 (from=0 host 出的牌)
   joinerSendCalls = []
-  const playMsg = { type: 'PLAY', from: 0, payload: { seat: 0, cards: [] }, to: 1 }
+  const playMsg = { type: 'PLAY_COMMITTED', from: 0, payload: { seat: 0, cards: [] }, to: 1 }
   joinerTransport._emit(playMsg)
   await settle(30)
 
   // joiner 端不调 relayFromClient (因为 isHostFlag=false),所以 send 不应增加
-  eq('joiner 收到 PLAY 不产生 send 调用 (relay 仅 host 触发)', joinerSendCalls.length, 0)
+  eq('joiner 收到 PLAY_COMMITTED 不产生 send 调用 (relay 仅 host 触发)', joinerSendCalls.length, 0)
 
   Joiner.close()
 }
@@ -325,27 +325,27 @@ console.log('\n=== 5. relay 目标:跳过原 sender + host 自己 ===')
   Host.getPeers().set(2, { nickname: 'B', avatar: 'B', uuid: 'u2' })
   Host.getPeers().set(3, { nickname: 'C', avatar: 'C', uuid: 'u3' })
 
-  // ★ 模拟 seat=2 发 PASS
+  // ★ 模拟 seat=2 发 PASS_COMMITTED
   const recv1 = [], recv3 = []
   clients[0].on('message', (d) => { try { recv1.push(JSON.parse(d.toString())) } catch (e) {} })
   clients[2].on('message', (d) => { try { recv3.push(JSON.parse(d.toString())) } catch (e) {} })
 
-  host._emit({ type: 'PASS', from: 2, payload: { seat: 2 } })
+  host._emit({ type: 'PASS_COMMITTED', from: 2, payload: { seat: 2 } })
   await settle(30)
 
-  const r1 = recv1.find(m => m.type === 'PASS')
-  const r3 = recv3.find(m => m.type === 'PASS')
-  assert('PASS from=2 → seat=1 收到', r1 != null)
-  assert('PASS from=2 → seat=3 收到', r3 != null)
+  const r1 = recv1.find(m => m.type === 'PASS_COMMITTED')
+  const r3 = recv3.find(m => m.type === 'PASS_COMMITTED')
+  assert('PASS_COMMITTED from=2 → seat=1 收到', r1 != null)
+  assert('PASS_COMMITTED from=2 → seat=3 收到', r3 != null)
   eq('relay to seat=1 (定向)', r1?.to, 1)
   eq('relay to seat=3 (定向)', r3?.to, 3)
   eq('relay from=2 (原 sender 保留)', r1?.from, 2)
 
-  // 原 sender seat=2 不应收到自己 PASS 的回环
+  // 原 sender seat=2 不应收到自己 PASS_COMMITTED 的回环
   const recv2 = []
   clients[1].on('message', (d) => { try { recv2.push(JSON.parse(d.toString())) } catch (e) {} })
   await settle(20)
-  assert('原 sender seat=2 不收到自己 PASS 的回环', !recv2.some(m => m.type === 'PASS'))
+  assert('原 sender seat=2 不收到自己 PASS_COMMITTED 的回环', !recv2.some(m => m.type === 'PASS_COMMITTED'))
 
   Host.close()
   for (const ws of clients) try { ws.close() } catch (e) {}
@@ -388,7 +388,7 @@ console.log('\n=== 6. host peers Map 为空时 relay 安全 no-op ===')
   // relayFromClient 应该跳过 seat=0,不发给自己
   let threw = false
   try {
-    hostTransport._emit({ type: 'PLAY', from: 1, payload: { seat: 1, cards: [] } })
+    hostTransport._emit({ type: 'PLAY_COMMITTED', from: 1, payload: { seat: 1, cards: [] } })
   } catch (e) { threw = true }
   await settle(10)
   assert('peers 为空时 relay 不报错', threw === false)
@@ -396,7 +396,7 @@ console.log('\n=== 6. host peers Map 为空时 relay 安全 no-op ===')
   // from=0 (host 自己) 也被跳过 (relayFromClient 内部 msg.from<=0 return)
   threw = false
   try {
-    hostTransport._emit({ type: 'PLAY', from: 0, payload: { seat: 0, cards: [] } })
+    hostTransport._emit({ type: 'PLAY_COMMITTED', from: 0, payload: { seat: 0, cards: [] } })
   } catch (e) { threw = true }
   await settle(10)
   assert('from=0 (host 自己) 时 relay 跳过,不发', threw === false)

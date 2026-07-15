@@ -218,14 +218,14 @@
     <!-- ===== 7. 手牌 28% (按 rank 分组竖叠,9 列 56px 宽) ===== -->
     <button
       class="smart-sort-float"
-      :disabled="!myTurn || isDealing || phase !== 'playing' || myHand.length === 0"
+      :disabled="isDealing || phase !== 'playing' || myHand.length === 0"
       @click="onAutoFindBest"
       title="智能理牌 · 自动凑炸弹/顺子/三带二"
     >
       <span class="ss-icon">✨</span>
       <span class="ss-text">理牌</span>
     </button>
-    <div class="hand-area" :class="{ disabled: !myTurn || isDealing, 'is-urgent': urgent && myTurn }">
+    <div class="hand-area" :class="{ disabled: isDealing, 'is-urgent': urgent && myTurn }">
       <div class="hand-inner" :style="{ '--overlap': handOverlap + 'px' }">
         <div
           v-for="col in handColumns"
@@ -236,7 +236,6 @@
             col.isJoker ? 'is-joker' : (isLevel({ suit: 0, rank: col.rank }) ? 'is-level' : '')
           ]"
           :style="{ minHeight: colMinHeight(col) + 'px' }"
-          @click="toggleCol(col)"
         >
           <!-- v0.4.3:大小王列隐藏 col-rank 标签(卡通小丑已自带视觉标识) -->
           <div
@@ -246,15 +245,19 @@
           >{{ colRankLabel(col) }}</div>
           <div class="col-count">×{{ col.cards.length }}</div>
           <div
-            v-for="(c, i) in col.cards.slice(0, 3)"
-            :key="cardKey(c) + '-' + i"
+            v-for="(c, i) in col.cards"
+            :key="cardKey(c)"
             class="hand-card"
-            :style="{ zIndex: i + 1, top: (i * -16) + 'px' }"
+            :style="{ zIndex: i + 1, top: (i * -12) + 'px' }"
+            @click="toggleCardId(cardKey(c))"
+            @touchstart="onCardTouchStart($event, col)"
+            @touchend="onCardTouchEnd"
+            @touchmove="onCardTouchEnd"
           >
             <CardPlay
               :card="c"
               :is-level="isLevel(c)"
-              :selected="!!selectedColKeys[columnKey(col)]"
+              :selected="isCardSelected(c)"
               :hinted="isHinted(c)"
               size="md"
             />
@@ -395,7 +398,7 @@ const mainActionsRef = ref(null)
 const {
   // state
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
-  players, myHand, selectedColKeys, tableCards, lastPlay,
+  players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, turnTimeLeft, finishedOrder,
   isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
@@ -407,8 +410,8 @@ const {
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
   playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
-  columnKey, colMinHeight, colRankLabel, toggleCol, onClear,
-  selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+  columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
+  selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch,
   onIcon, retryDeal,
@@ -425,13 +428,36 @@ const {
   firstSeat: props.firstSeat,
 })
 
+// ★ P0-01:移动端长按某张牌选中整列(替代桌面双击)
+const longPressTimer = ref(null)
+const LONG_PRESS_MS = 500
+function onCardTouchStart(e, col) {
+  if (longPressTimer.value) clearTimeout(longPressTimer.value)
+  longPressTimer.value = setTimeout(() => {
+    longPressTimer.value = null
+    toggleCol(col)
+  }, LONG_PRESS_MS)
+}
+function onCardTouchEnd() {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
+}
+
 // ★ P1-09 修复:动态计算手牌列重叠量,列数多时自动收紧,
 //   避免固定 -16px 重叠导致总宽度超出 viewport 被 .page overflow:hidden 裁切。
 //   首列 margin-left 强制为 0,保证最左列完整可见。
+// ★ UX-P1-07 修复:用响应式 viewportWidth 监听 resize/visualViewport,
+//   横竖屏切换后 handOverlap 自动重新计算。
+const viewportWidth = ref(typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 390)
+function updateViewportWidth() {
+  viewportWidth.value = (typeof window !== 'undefined') ? (window.visualViewport?.width || window.innerWidth) : 390
+}
 const handOverlap = computed(() => {
   const count = handColumns.value.length
   if (count <= 1) return 0
-  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 390
+  const viewportW = viewportWidth.value
   const leftPad = 16
   const rightSafe = 74 // 70px 智能理牌胶囊 + 4px 缓冲
   const available = Math.max(0, viewportW - leftPad - rightSafe)
@@ -528,6 +554,13 @@ onMounted(() => {
       mqLandscape.addListener(updateLandscape)
     }
   }
+  // ★ UX-P1-07 修复:监听 resize / visualViewport 变化,重新计算 handOverlap
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateViewportWidth)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateViewportWidth)
+    }
+  }
   net.on('host:lost', onHostLost)
 })
 onUnmounted(() => {
@@ -538,8 +571,18 @@ onUnmounted(() => {
       mqLandscape.removeListener(updateLandscape)
     }
   }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateViewportWidth)
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', updateViewportWidth)
+    }
+  }
   if (typeof net.off === 'function') {
     try { net.off('host:lost', onHostLost) } catch (e) { /* swallow */ }
+  }
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
   }
 })
 </script>
@@ -1364,27 +1407,27 @@ button {
 /* 顶 HUD 压缩到 50px */
 .page.is-landscape .hud-top {
   height: 50px;
-  padding: 4px 6px;
+  padding: 4px calc(6px + env(safe-area-inset-left, 0px)) 4px calc(6px + env(safe-area-inset-right, 0px));
 }
-.page.is-landscape .hud-value { font-size: 13px; }
-.page.is-landscape .hud-label { font-size: 8px; }
+.page.is-landscape .hud-value { font-size: 14px; }
+.page.is-landscape .hud-label { font-size: 10px; }
 .page.is-landscape .menu-btn,
 .page.is-landscape .chat-btn {
-  width: 36px;
-  height: 36px;
-  font-size: 16px;
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
 }
 .page.is-landscape .clock-float {
-  height: 36px;
-  min-width: 40px;
-  padding: 0 8px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
 }
-.page.is-landscape .clock-num { font-size: 14px; }
+.page.is-landscape .clock-num { font-size: 16px; }
 .page.is-landscape .opponent-clock-float {
-  height: 36px;
-  min-width: 40px;
-  padding: 0 8px;
-  font-size: 10px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 /* 队友座位(顶 HUD 之下):top 8% → top 50px,缩 0.6 */
@@ -1458,13 +1501,13 @@ button {
   top: 110px;
 }
 
-/* 手牌:bottom 14vh → bottom 50px(操作栏之上)
+/* 手牌:bottom 14vh → bottom 56px(操作栏之上)
  * v2.5 patch: overflow hidden 改成 visible + 加 padding-top 12 + max-height 110,
  *   否则 col-rank (top -10) 浮在 .hand-area 顶外的部分会被裁,用户看不到"级"badge */
 .page.is-landscape .hand-area {
-  bottom: 50px;
-  padding: 12px 4px 6px;
-  max-height: 110px;
+  bottom: 56px;
+  padding: 12px calc(4px + env(safe-area-inset-left, 0px)) 6px calc(4px + env(safe-area-inset-right, 0px));
+  max-height: 120px;
   overflow: visible;
 }
 .page.is-landscape .hand-inner {
@@ -1473,17 +1516,17 @@ button {
   gap: 0;
 }
 .page.is-landscape .hand-column {
-  width: 36px;
-  min-height: 40px;
+  width: 44px;
+  min-height: 44px;
   margin-left: -6px;
   padding: 6px 0 2px;
 }
 .page.is-landscape .hand-column .hand-card {
-  left: 2px;
-  width: 32px;
-  height: 46px;
-  --hand-card-w: 32px;
-  --hand-card-h: 46px;
+  left: 4px;
+  width: 36px;
+  height: 50px;
+  --hand-card-w: 36px;
+  --hand-card-h: 50px;
 }
 /* 限制手牌卡竖叠 top,牌顶不浮出 .hand-area(只 col-rank 浮出 8px) */
 .page.is-landscape .hand-column .hand-card:nth-child(1) { top: 0 !important; }
@@ -1494,16 +1537,16 @@ button {
   /* v3.9: top -8px → -34px,横屏 hand-card 最多 top:-28px,
    *   让 rank badge 浮在最上牌之上,不被遮挡 */
   top: -34px;
-  height: 11px;
-  font-size: 8px;
-  min-width: 14px;
+  height: 13px;
+  font-size: 10px;
+  min-width: 16px;
   z-index: 6;
 }
 .page.is-landscape .col-count {
   bottom: -4px;
-  height: 10px;
-  font-size: 8px;
-  min-width: 14px;
+  height: 12px;
+  font-size: 10px;
+  min-width: 16px;
   padding: 0 2px;
   z-index: 6;
 }
@@ -1511,19 +1554,19 @@ button {
 /* 操作栏:bottom 0,height 50px */
 .page.is-landscape .action-bar {
   bottom: 0;
-  height: 50px;
-  padding: 4px 6px;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 4px;
+  height: 56px;
+  padding: 4px calc(6px + env(safe-area-inset-left, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-right, 0px));
+  grid-template-columns: 0.9fr 0.9fr 1.2fr; /* ★ UX-P1-01 修复:3 个按钮对应 3 列 */
+  gap: 6px;
 }
 .page.is-landscape .action-bar button {
-  height: 42px;
-  min-height: 42px;
-  font-size: 11px;
+  height: 48px;
+  min-height: 44px;
+  font-size: 14px;
   letter-spacing: 0.5px;
 }
-.page.is-landscape .action-icon { font-size: 14px; }
-.page.is-landscape .action-text { font-size: 9px; }
+.page.is-landscape .action-icon { font-size: 18px; }
+.page.is-landscape .action-text { font-size: 12px; }
 
 /* toast 缩 */
 .page.is-landscape .nick-toast,

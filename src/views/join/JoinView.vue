@@ -160,10 +160,13 @@ const addressError = computed(() => {
     return e?.message || '地址格式不正确'
   }
 })
+const selectedWsHost = ref('') // ★ P1-11 修复:浏览器扫描到 WS host 后记录 IP:port,加入时携带 host 参数
 const canJoin = computed(() => {
   if (isNative.value) {
     return !addressError.value && hostAddress.value.trim().length > 0
   }
+  // 浏览器模式:扫描到的 WS 房间可直接加入;否则需要房间号
+  if (selectedWsHost.value) return true
   return roomNo.value.length >= 4
 })
 
@@ -176,6 +179,9 @@ function onJoin() {
   if (isNative.value) {
     // ws 模式:URL ?role=joiner&host=1.2.3.4:8848
     router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddress.value.trim())}`)
+  } else if (selectedWsHost.value) {
+    // ★ P1-11 修复:浏览器扫描到 WS 房间后,按真实 IP:port 加入,不走本地 BC
+    router.push(`/room?role=joiner&roomNo=${roomNo.value}&host=${encodeURIComponent(selectedWsHost.value)}`)
   } else {
     router.push(`/room?role=joiner&roomNo=${roomNo.value}`)
   }
@@ -198,8 +204,10 @@ function selectRoom(room) {
   if (!room) return
   if (isNative.value) {
     hostAddress.value = `${room.ip}:${room.port}`
-  } else if (room.roomNo) {
-    roomNo.value = room.roomNo
+  } else {
+    // ★ P1-11 修复:浏览器扫描到 WS 房间后记录 IP:port,加入时携带 host 参数
+    selectedWsHost.value = `${room.ip}:${room.port}`
+    if (room.roomNo) roomNo.value = room.roomNo
   }
 }
 

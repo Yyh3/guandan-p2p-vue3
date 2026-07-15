@@ -51,6 +51,15 @@ export class AndroidWsTransport {
     this._lastSenderSeat = -1 // host 端最近一次收到消息的 seat (调试用)
     this._lastSenderConnId = -1 // host 端最近一次收到消息的 conn 稳定 ID (用于 bindSeat)
     this._listenersHandle = [] // plugin addListener 句柄,用于 close 时清理
+    this._hostSeat = 0 // v0.4.22 P0-08:避免 host-only 广播 from 硬编码 0
+  }
+
+  /**
+   * v0.4.22 P0-08:同步当前 host seat。
+   * @param {number} seat
+   */
+  setHostSeat(seat) {
+    this._hostSeat = (typeof seat === 'number' && seat >= 0 && seat <= 3) ? seat : 0
   }
 
   async open(mode, hostIp, hostPort) {
@@ -242,7 +251,7 @@ export class AndroidWsTransport {
     const data = JSON.stringify({
       type: 'PEER_LEAVE',
       payload: { seat, kick: true, reason: 'kicked' },
-      from: 0,
+      from: this._hostSeat,
       ts: Date.now(),
     })
     WsServer.broadcast({ message: data }).catch(() => { /* swallow */ })

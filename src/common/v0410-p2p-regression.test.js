@@ -284,6 +284,12 @@ console.log('\n=== 4. V0410-04: restartMatch 同 seed 产生同手牌(host/joine
   eq('applyRoundEndFromPayload 后 isRestartAfterA=true', game4.getState().isRestartAfterA, true)
   game4.restartMatch({ levelRank: 15, seed: 99999 })
   eq('restartMatch 后 isRestartAfterA=false(消费掉)', game4.getState().isRestartAfterA, false)
+
+  // 清理 AI timer,避免 Node 进程挂起
+  game1.destroy()
+  game2.destroy()
+  game3.destroy()
+  game4.destroy()
 }
 
 // ============================================================

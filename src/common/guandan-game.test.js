@@ -392,13 +392,15 @@ console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
   if (game) {
     const origState = game.getState()
     // 1) currentPlayer=99 畸形 → 不应用
-    game._applySnapshot({
+    const bad = game._applySnapshot({
       currentPlayer: 99,
       firstPlayer: 99,
       leaderPlayer: 99,
       levelRank: 'not a number',
       phase: 'invalid_phase',
     })
+    assert('畸形 snapshot 返回 ok=false', bad.ok === false)
+    assert('畸形 snapshot 返回 error', typeof bad.error === 'string')
     const s1 = game.getState()
     assert('畸形 currentPlayer=99 不应用', s1.currentPlayer === origState.currentPlayer)
     assert('畸形 firstPlayer=99 不应用', s1.firstPlayer === origState.firstPlayer)
@@ -406,22 +408,26 @@ console.log('\n=== 10.10 v3.x P2-26:_applySnapshot 畸形数据防御 ===')
     assert('畸形 levelRank 不应用', s1.levelRank === origState.levelRank)
     assert('畸形 phase 不应用', s1.phase === origState.phase)
     // 2) 合法数据正常应用
-    game._applySnapshot({
+    const good = game._applySnapshot({
       currentPlayer: 2,
       passCount: 1,
       phase: 'playing',
     })
+    assert('合法 snapshot 返回 ok=true', good.ok === true)
     const s2 = game.getState()
     assert('合法 currentPlayer=2 应用', s2.currentPlayer === 2)
     assert('合法 passCount=1 应用', s2.passCount === 1)
     assert('合法 phase=playing 应用', s2.phase === 'playing')
     // 3) hands 不是 4 长度数组 → 拒收,保持原 state.hands
     const beforeHands = JSON.stringify(origState.hands)
-    game._applySnapshot({ hands: [[1, 2]] })
+    const badHands = game._applySnapshot({ hands: [[1, 2]] })
+    assert('畸形 hands 返回 ok=false', badHands.ok === false)
+    assert('畸形 hands 返回 error=invalid_hands', badHands.error === 'invalid_hands')
     const s3 = game.getState()
     assert('畸形 hands(长度≠4)拒收', JSON.stringify(s3.hands) === beforeHands)
     // 4) finishedOrder 含非法 seat → 拒收
-    game._applySnapshot({ finishedOrder: [0, 1, 99] })
+    const badFinished = game._applySnapshot({ finishedOrder: [0, 1, 99] })
+    assert('畸形 finishedOrder 返回 ok=false', badFinished.ok === false)
     const s4 = game.getState()
     assert('畸形 finishedOrder(含 99)拒收', JSON.stringify(s4.finishedOrder) === JSON.stringify(origState.finishedOrder))
   } else {

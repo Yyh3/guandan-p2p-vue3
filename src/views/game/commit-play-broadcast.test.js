@@ -8,8 +8,8 @@
  *   P2P 联机时,joiner 自动出牌/AI 接管出牌,其它 joiner 看不到
  *
  * 修复后:
- *   - commitPlay(seat, cards, source) = playerPlay + isP2P 时 broadcast PLAY
- *   - commitPass(seat, source) = playerPass + isP2P 时 broadcast PASS
+ *   - commitPlay(seat, cards, source) = playerPlay + isP2P 时 broadcast PLAY_COMMITTED
+ *   - commitPass(seat, source) = playerPass + isP2P 时 broadcast PASS_COMMITTED
  *   - 所有出牌路径 (onPlay / onAutoPlay / onAutoFindBest / timeout / AI 接管) 都走 commitPlay
  *
  * 本测试:
@@ -106,13 +106,13 @@ console.log('\n=== 1. 集成:4 BC client,joiner seat=1 commitPlay → 其它 joi
   for (let i = 0; i < 30 && s3 === -1; i++) { await settle(20); s3 = J3.getSelfSeat() }
   assert('J3 seat=3', s3 === 3)
 
-  // 各 client 收集 'message:PLAY' 事件
+  // 各 client 收集 'message:PLAY_COMMITTED' 事件
   const playsByJ2 = [], playsByJ3 = []
-  J2.on('message:PLAY', (payload, from) => { playsByJ2.push({ payload, from }) })
-  J3.on('message:PLAY', (payload, from) => { playsByJ3.push({ payload, from }) })
+  J2.on('message:PLAY_COMMITTED', (payload, from) => { playsByJ2.push({ payload, from }) })
+  J3.on('message:PLAY_COMMITTED', (payload, from) => { playsByJ3.push({ payload, from }) })
 
   // J1 commitPlay = playerPlay + broadcast
-  // ★ 这是 useGameLogic.commitPlay 做的事:game.playerPlay + isP2P 时 net.broadcast
+  // ★ 这是 useGameLogic.commitPlay 做的事:game.playerPlay + isP2P 时 net.broadcast PLAY_COMMITTED
   const SEED = 99999
   // Phase 2:本测试只验证 broadcast 路径,本地 game 用 host 模式持有完整手牌
   const g1 = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
@@ -130,12 +130,12 @@ console.log('\n=== 1. 集成:4 BC client,joiner seat=1 commitPlay → 其它 joi
   assert(`seat=${firstPlayer1} playerPlay 返回 ok (firstPlayer)`, r1.ok === true)
 
   // 模拟 commitPlay 的 broadcast 行为 (broadcast 谁出的牌不重要,关键是验证 broadcast 路径)
-  J1.broadcast({ type: 'PLAY', payload: { seat: firstPlayer1, cards: [card], source: 'manual' } })
+  J1.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: firstPlayer1, cards: [card], source: 'manual' } })
   await settle(50)
 
-  // 验证 J2 / J3 收到 PLAY 消息
-  assert('J2 收到 PLAY 广播', playsByJ2.length === 1)
-  assert('J3 收到 PLAY 广播', playsByJ3.length === 1)
+  // 验证 J2 / J3 收到 PLAY_COMMITTED 消息
+  assert('J2 收到 PLAY_COMMITTED 广播', playsByJ2.length === 1)
+  assert('J3 收到 PLAY_COMMITTED 广播', playsByJ3.length === 1)
   // from=1 是 J1 的 seat (J1.broadcast 的 from 字段),不是牌出的 seat
   eq('J2 收到 from=1 (J1 发出)', playsByJ2[0]?.from, 1)
   eq('J3 收到 from=1 (J1 发出)', playsByJ3[0]?.from, 1)
@@ -150,8 +150,8 @@ console.log('\n=== 1. 集成:4 BC client,joiner seat=1 commitPlay → 其它 joi
   const g3 = createGame({ seats: 4, levelRank: 15, isHost: true, aiPlayers: [], seed: SEED })
   g3.deal()
 
-  // 模拟 joiner 端 onP2PPlay handler
-  // joiner 收到 PLAY 消息后,调 game.applyPlay(seat, cards)
+  // 模拟 joiner 端 onP2PPlayCommitted handler
+  // joiner 收到 PLAY_COMMITTED 消息后,调 game.applyPlay(seat, cards)
   for (const playRec of playsByJ2) {
     g2.applyPlay(playRec.payload.seat, playRec.payload.cards)
   }
@@ -205,16 +205,16 @@ console.log('\n=== 2. commitPass 同样广播 PASS 消息给其它 joiner ===')
   assert('J2 seat=2', s2 === 2)
 
   const passesByJ2 = []
-  J2.on('message:PASS', (payload, from) => { passesByJ2.push({ payload, from }) })
+  J2.on('message:PASS_COMMITTED', (payload, from) => { passesByJ2.push({ payload, from }) })
 
   // 模拟 commitPass 的 broadcast 行为
-  J1.broadcast({ type: 'PASS', payload: { seat: 1, source: 'auto' } })
+  J1.broadcast({ type: 'PASS_COMMITTED', payload: { seat: 1, source: 'auto' } })
   await settle(50)
 
-  assert('J2 收到 PASS 广播', passesByJ2.length === 1)
-  eq('J2 PASS from=1', passesByJ2[0]?.from, 1)
-  eq('J2 PASS payload.seat=1', passesByJ2[0]?.payload?.seat, 1)
-  eq('J2 PASS payload.source=auto', passesByJ2[0]?.payload?.source, 'auto')
+  assert('J2 收到 PASS_COMMITTED 广播', passesByJ2.length === 1)
+  eq('J2 PASS_COMMITTED from=1', passesByJ2[0]?.from, 1)
+  eq('J2 PASS_COMMITTED payload.seat=1', passesByJ2[0]?.payload?.seat, 1)
+  eq('J2 PASS_COMMITTED payload.source=auto', passesByJ2[0]?.payload?.source, 'auto')
 
   J1.close(); J2.close(); Host.close()
   await settle()
@@ -246,19 +246,19 @@ console.log('\n=== 3. source 字段正确传递:manual / auto / ai / timeout ===
   assert('J2 seat=2', s2 === 2)
 
   const plays = [], passes = []
-  J2.on('message:PLAY', (payload) => { plays.push(payload) })
-  J2.on('message:PASS', (payload) => { passes.push(payload) })
+  J2.on('message:PLAY_COMMITTED', (payload) => { plays.push(payload) })
+  J2.on('message:PASS_COMMITTED', (payload) => { passes.push(payload) })
 
   // 4 种 source 各自发一条
-  J1.broadcast({ type: 'PLAY', payload: { seat: 1, cards: [], source: 'manual' } })
-  J1.broadcast({ type: 'PLAY', payload: { seat: 1, cards: [], source: 'auto' } })
-  J1.broadcast({ type: 'PLAY', payload: { seat: 1, cards: [], source: 'ai' } })
-  J1.broadcast({ type: 'PLAY', payload: { seat: 1, cards: [], source: 'timeout' } })
-  J1.broadcast({ type: 'PASS', payload: { seat: 1, source: 'manual' } })
+  J1.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: 1, cards: [], source: 'manual' } })
+  J1.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: 1, cards: [], source: 'auto' } })
+  J1.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: 1, cards: [], source: 'ai' } })
+  J1.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: 1, cards: [], source: 'timeout' } })
+  J1.broadcast({ type: 'PASS_COMMITTED', payload: { seat: 1, source: 'manual' } })
   await settle(80)
 
-  eq('J2 收到 4 条 PLAY (4 种 source)', plays.length, 4)
-  eq('J2 收到 1 条 PASS', passes.length, 1)
+  eq('J2 收到 4 条 PLAY_COMMITTED (4 种 source)', plays.length, 4)
+  eq('J2 收到 1 条 PASS_COMMITTED', passes.length, 1)
   eq('PLAY sources = manual/auto/ai/timeout',
     plays.map(p => p.source), ['manual', 'auto', 'ai', 'timeout'])
 
@@ -287,12 +287,12 @@ console.log('\n=== 4. isP2PMode=false 时 commitPlay/commitPass 不广播 ===')
   // 模拟 commitPlay 的实现 (内联,因为 useGameLogic 依赖 Vue 运行时)
   function commitPlay(isP2PMode, seat, cards, source = 'manual') {
     if (isP2PMode) {
-      mockNet.broadcast({ type: 'PLAY', payload: { seat, cards, source } })
+      mockNet.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source } })
     }
   }
   function commitPass(isP2PMode, seat, source = 'manual') {
     if (isP2PMode) {
-      mockNet.broadcast({ type: 'PASS', payload: { seat, source } })
+      mockNet.broadcast({ type: 'PASS_COMMITTED', payload: { seat, source } })
     }
   }
 
@@ -325,7 +325,7 @@ console.log('\n=== 5. commitPlay:playerPlay 失败时 ok=false,且不广播 ==='
     const r = game.playerPlay(seat, cards)
     if (!r || !r.ok) return r || { ok: false, error: 'playerPlay 失败' }
     if (isP2PMode) {
-      mockNet.broadcast({ type: 'PLAY', payload: { seat, cards, source } })
+      mockNet.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source } })
     }
     return r
   }

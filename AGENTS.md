@@ -6,6 +6,12 @@
 
 ## 当前任务记录
 
+- 2026-07-16：完成 v0.4.22 对抗性审查收尾与测试基线回归：
+  - P0-06 `_applySnapshot` 原子提交与严格校验、`HOST_MIGRATION_SECRET_STATE` 仅发给新 host；P0-08 transport 层跟踪 `_hostSeat`，`forceDisconnectSeat` 与 migration 不再硬编码 seat 0。
+  - UX-P1：移动端横屏 action-bar 三列布局、更大触控目标、安全区适配、`handOverlap` 响应式计算；`JoinView.vue` 浏览器扫描结果改用 `?host=...` 进入跨设备 WS 房间。
+  - 回归测试：修复 `v0423-adversarial-fixes.test.js` 中 P0-02 接风快照 `trickHistory` 缺 `cards` 字段导致校验失败的问题；同步刷新 `room-ui.test.js`、`v045-bug-fixes.test.js`、`v0417-adversarial-fixes.test.js` 等陈旧断言。
+  - 测试基线：`npm test` 52 套件 / 1933 case 全绿；`npm run e2e` 9 测试全绿；`npm run build` 成功。
+
 - 2026-07-14：完成 P1 — 真正的第二发现通道：
   - `network.js` 实现 `scanLanRooms()`：通过 HTTP `/room-info` 快速路径 + WebSocket `ROOM_PROBE/ROOM_PROBE_ACK` 主动发现局域网 host；候选地址覆盖常见热点网段、当前页来源、历史 peer hostAddress 缓存。
   - `network-transport-ws.js` host HTTP server 新增 `/room-info` JSON 端点，并允许未绑定 seat 的 `ROOM_PROBE` 消息进入 network.js 处理。
@@ -21,6 +27,18 @@
   - P0-3 dev hook 收敛：`useGameLogic.js` 不再暴露完整 `window.__gd_game` game ref，只暴露 UI ref 与只读 `__gd_gameState()`；`deal-animation.js` 的 `__gd_skipDealAnim` 仅在 `DEV` 或 `window.__gd_e2e` 时生效。
   - 文档过时项清理：刷新 `docs/NETWORK.md`、`README.md`、`BUILD.md`、`docs/CHANGELOG.md`、`docs/ROADMAP.md` 中关于 BC-only、TCP Socket、AI 仅中等难度、移动端未支持等陈旧描述。
   - 测试基线：`npm test` 50 套件 / 2374 case 全绿；`npm run e2e` 9 测试全绿（含新增 WS 跨设备 spec）；`npm run build` 成功。
+
+- 2026-07-13：完成 Phase 0 P0 核心架构收尾（P0-01 + P0-04/05）：
+  - `useGameLogic.js` 引入 `selectedCardIds` 单牌级选择：单击选单张、双击/长按选整列、提示按具体牌 ID 选中；`selectedColKeys` 改为派生视觉状态。
+  - `GameViewDesktop.vue` / `GameViewMobile.vue` 把点击事件从列下放到单张 `CardPlay`；桌面支持双击选列，移动端支持长按选列；`:selected` 改为按具体牌状态。
+  - `guandan-game.js` 新增 `promoteToHost(authoritativeState)`：无完整 `hands` 时返回 `{ok:false, error:'missing_authoritative_state'}`；升级后 `mode` 切为 `host`。
+  - 新增 `src/common/promote-to-host.test.js`（16 case）与 `useGameLogic.test.js` P0-01 选择测试；`scripts/run-all-tests.js` 纳入新测试套件。
+  - 测试基线：`npm test` 52 套件全绿；`npm run build` 成功。
+
+- 2026-07-13：完成 Phase 1 P0 核心架构 seat-swap 协议修复与测试回归：
+  - `network.js` `swapSeats()` 调整发送顺序：host 与对家互换座位时,先广播 `SEAT_SWAP_COMMITTED`(from 旧 host seat)再更新本地 `selfSeat`/`hostSeat`,避免 joiner 端 `isAuthorityMessage` 因 hostSeat 已变而拒绝权威提交。
+  - `src/common/seat-swap-kick-protocol.test.js` 适配 P0-07 新协议：`SEAT_SWAP_REQUEST` → `SEAT_SWAP_COMMITTED`、仅对家可换座、joiner 请求后等待 host 提交同步；块 2/3/5 断言全部刷新。
+  - `npm test` 51 套件全绿；`npm run build` 成功。P0-01 单牌级选择仍待后续落地。
 
 - 2026-07-14：完成 Plan 4（E2E / Vite 升级 / 构建警告清理）：
   - `playwright.config.js` 新增 `webServer` 自动启动 `npm run dev`，并补 `actionTimeout` / `expect.timeout`。
@@ -104,7 +122,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（50 套件 / 2374 通过 / 0 失败，P0 收尾基线）
+# 跑全部测试（52 套件 / 1933 通过 / 0 失败，v0.4.22 收尾基线）
 npm test
 
 # 跑单个测试套件
@@ -155,7 +173,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 50 套件 Node assert 单测（2374 case 全过,P0 收尾基线）
+│   │   └── *.test.js               # 52 套件 Node assert 单测（1933 case 全过,v0.4.22 收尾基线）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -202,7 +220,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**P0 收尾基线：50 套件 / 2374 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.22 收尾基线：52 套件 / 1933 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -214,7 +232,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 50 套件 | **2374 / 0 fail** (P0 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + UI/UX 修复回归) |
+| `npm test` | 全部 52 套件 | **1933 / 0 fail** (v0.4.22 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + UI/UX 修复回归) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录

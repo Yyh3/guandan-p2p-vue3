@@ -22,6 +22,15 @@ export class BroadcastChannelTransport {
     this._channel = null
     this._listeners = []
     this._roomId = ''
+    this._hostSeat = 0 // v0.4.22 P0-08:避免 host-only 广播 from 硬编码 0
+  }
+
+  /**
+   * v0.4.22 P0-08:同步当前 host seat。
+   * @param {number} seat
+   */
+  setHostSeat(seat) {
+    this._hostSeat = (typeof seat === 'number' && seat >= 0 && seat <= 3) ? seat : 0
   }
 
   /**
@@ -80,7 +89,7 @@ export class BroadcastChannelTransport {
       this._channel.postMessage({
         type: 'PEER_LEAVE',
         payload: { seat, kick: true, reason: 'kicked' },
-        from: 0, // host 是 seat=0
+        from: this._hostSeat,
         ts: Date.now(),
       })
     } catch (e) {

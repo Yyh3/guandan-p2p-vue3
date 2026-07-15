@@ -97,7 +97,18 @@ export function useGameLogic(opts = {}) {
   ])
   const myHand = ref([])
   const selected = ref([])
-  const selectedColKeys = ref({})
+  // ★ P0-01:单牌级选择源,以 cardKey(card id) 为键
+  const selectedCardIds = ref(new Set())
+  // 列级视觉反馈仍保留,但由 selectedCardIds 派生
+  const selectedColKeys = computed(() => {
+    const map = {}
+    for (const col of handColumns.value) {
+      if (col.cards.some(c => selectedCardIds.value.has(cardKey(c)))) {
+        map[columnKey(col)] = true
+      }
+    }
+    return map
+  })
   const tableCards = ref([])
   const lastPlay = ref(null)
   const phase = ref('idle')
@@ -195,7 +206,7 @@ export function useGameLogic(opts = {}) {
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
       selected.value = new Array(myHand.value.length).fill(false)
-      selectedColKeys.value = {}
+      selectedCardIds.value = new Set()
     }
   }
 
@@ -230,6 +241,8 @@ export function useGameLogic(opts = {}) {
       if (game.value && game.value.migrateHost) {
         game.value.migrateHost(oldHostSeat, newHostSeat)
       }
+      // ★ P1-03:旧 host 座位由 AI 接管,同步 players UI(加 (AI) 后缀)
+      onP2PAITakeover({ seat: oldHostSeat })
       // 4) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
       refreshUiFromGameState()
     } catch (e) { console.warn('host migration state sync err', e) }
@@ -391,7 +404,7 @@ export function useGameLogic(opts = {}) {
     if (n >= 1e4) return (n / 1e4).toFixed(1) + '万'
     return String(n)
   }
-  function cardKey(c) { return `${c.suit}-${c.rank}` }
+  function cardKey(c) { return typeof c.id === 'number' ? String(c.id) : `${c.suit}-${c.rank}` }
   function handCardKey(c, i) { return `${i}-${cardKey(c)}` }
   function isHinted(c) { return hintCards.value.includes(cardKey(c)) }
   function isLevel(c) { return E.isLevelCard(c, levelRank.value) }
@@ -420,11 +433,17 @@ export function useGameLogic(opts = {}) {
     return RANK_LABELS[col.rank] || String(col.rank)
   }
   function toggleCol(col) {
-    if (!myTurn.value) return
-    const k = columnKey(col)
-    selectedColKeys.value = { ...selectedColKeys.value, [k]: !selectedColKeys.value[k] }
+    if (isDealing.value) return
+    const allSelected = col.cards.every(c => selectedCardIds.value.has(cardKey(c)))
+    const next = new Set(selectedCardIds.value)
+    for (const c of col.cards) {
+      const k = cardKey(c)
+      if (allSelected) next.delete(k)
+      else next.add(k)
+    }
+    selectedCardIds.value = next
   }
-  const selectedCount = computed(() => Object.values(selectedColKeys.value).filter(Boolean).length)
+  const selectedCount = computed(() => selectedCardIds.value.size)
 
   // ===== 计时器 =====
   function startTimer() {
@@ -508,7 +527,7 @@ export function useGameLogic(opts = {}) {
     mainActionsRef.value?.setShowing(false)
     myHand.value = []
     selected.value = []
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     tableCards.value = []
     lastPlay.value = null
     playedHistory.value = []
@@ -567,7 +586,7 @@ export function useGameLogic(opts = {}) {
     }
     myHand.value = E.sortHandGrouped(hand.slice())
     selected.value = new Array(myHand.value.length).fill(false)
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     phase.value = 'playing'
     dealTimeout.value = false
     startTimer()
@@ -633,11 +652,12 @@ export function useGameLogic(opts = {}) {
         //   但 AI PASS 时 joiner 端 currentPlayer 没推进,后续校验失败导致 joiner 卡住。
         //   修法:symmetrize PLAY / PASS 两个分支,都通过 net.broadcast 同步给 joiner。
         const ts = Date.now()
+        // ★ P0-03:AI 只在 host 端运行,host 直接广播 COMMITTED
         if (type === 'PLAY') {
-          net.broadcast({ type: 'PLAY', payload: { seat, cards, source: 'ai', actionId: _generateActionId(), ts } })
+          net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source: 'ai', actionId: _generateActionId(), ts } })
         }
         if (type === 'PASS') {
-          net.broadcast({ type: 'PASS', payload: { seat, source: 'ai', actionId: _generateActionId(), ts } })
+          net.broadcast({ type: 'PASS_COMMITTED', payload: { seat, source: 'ai', actionId: _generateActionId(), ts } })
         }
       })
     }
@@ -688,7 +708,7 @@ export function useGameLogic(opts = {}) {
         mainActionsRef.value?.setShowing(false)
       } else {
         selected.value = new Array(myHand.value.length).fill(false)
-        selectedColKeys.value = {}
+        selectedCardIds.value = new Set()
       }
       startTimer()
     })
@@ -719,11 +739,11 @@ export function useGameLogic(opts = {}) {
         const remove = new Set(cards.map(c => cardKey(c)))
         myHand.value = myHand.value.filter(c => !remove.has(cardKey(c)))
         selected.value = new Array(myHand.value.length).fill(false)
-        selectedColKeys.value = {}
+        selectedCardIds.value = new Set()
       }
       tableCards.value = cards
       cards.forEach(c => playedHistory.value.push(c))
-      if (seat !== 0) {
+      if (seat !== getMe()) {
         hintCards.value = []
         mainActionsRef.value?.setShowing(false)
       }
@@ -796,25 +816,37 @@ export function useGameLogic(opts = {}) {
     if (!shouldSkipDeal && isNetworkHost) game.value.deal(seed, firstSeat)
   }
 
+  function isCardSelected(c) {
+    return selectedCardIds.value.has(cardKey(c))
+  }
+  function toggleCardId(id) {
+    if (isDealing.value) return
+    const next = new Set(selectedCardIds.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selectedCardIds.value = next
+  }
   function toggleCard(i) {
     if (!myTurn.value) return
     const c = myHand.value[i]
     if (!c) return
-    const col = handColumns.value.find(col => col.cards.some(cc => cardKey(cc) === cardKey(c)))
-    if (col) toggleCol(col)
+    toggleCardId(cardKey(c))
   }
   function onClear() {
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     selected.value = new Array(myHand.value.length).fill(false)
   }
 
+  function selectedCardsFromIds() {
+    return myHand.value.filter(c => selectedCardIds.value.has(cardKey(c)))
+  }
+  // 兼容旧调用
   function selectedCardsFromColumns() {
-    const selCols = handColumns.value.filter(col => selectedColKeys.value[columnKey(col)])
-    return selCols.flatMap(col => col.cards.slice())
+    return selectedCardsFromIds()
   }
 
   function onSortHand() {
-    if (!myTurn.value) return
+    if (isDealing.value) return
     myHand.value = E.sortHandGrouped(myHand.value.slice())
     suitFilter.value = null
     hintCards.value = []
@@ -836,19 +868,30 @@ export function useGameLogic(opts = {}) {
  */
 function commitPlay(seat, cards, source = 'manual') {
   if (!game.value) return { ok: false, error: 'game not initialized' }
+  const actionId = _generateActionId()
+  // ★ P0-03 host 权威模型:joiner 只发 PLAY_INTENT,不动本地 game;host 校验后广播 PLAY_COMMITTED
+  if (isP2PMode.value && !isNetworkHost.value) {
+    net.broadcast({ type: 'PLAY_INTENT', payload: { seat, cards, source, actionId, ts: Date.now() } })
+    return { ok: true, pending: true }
+  }
   const r = game.value.playerPlay(seat, cards)
   if (!r || !r.ok) return r || { ok: false, error: 'playerPlay 失败' }
   if (isP2PMode.value) {
-    net.broadcast({ type: 'PLAY', payload: { seat, cards, source, actionId: _generateActionId(), ts: Date.now() } })
+    net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source, actionId, ts: Date.now() } })
   }
   return r
 }
 function commitPass(seat, source = 'manual') {
   if (!game.value) return { ok: false, error: 'game not initialized' }
+  const actionId = _generateActionId()
+  if (isP2PMode.value && !isNetworkHost.value) {
+    net.broadcast({ type: 'PASS_INTENT', payload: { seat, source, actionId, ts: Date.now() } })
+    return { ok: true, pending: true }
+  }
   const r = game.value.playerPass(seat)
   if (!r || !r.ok) return r || { ok: false, error: 'playerPass 失败' }
   if (isP2PMode.value) {
-    net.broadcast({ type: 'PASS', payload: { seat, source, actionId: _generateActionId(), ts: Date.now() } })
+    net.broadcast({ type: 'PASS_COMMITTED', payload: { seat, source, actionId, ts: Date.now() } })
   }
   return r
 }
@@ -858,14 +901,17 @@ function commitPass(seat, source = 'manual') {
    * 行为改为:用 AI 算当前局面最佳出牌,把对应列高亮选中,等用户点"出牌"确认。
    */
   function onAutoFindBest() {
-    if (!myTurn.value || isDealing.value || phase.value !== 'playing' || myHand.value.length === 0) return
+    if (isDealing.value || phase.value !== 'playing' || myHand.value.length === 0) return
     onHintToggle(true)
+  }
+  function selectCardIds(ids) {
+    selectedCardIds.value = new Set(ids)
   }
 
   function onSuitTab(suit) {
     if (suitFilter.value === suit) {
       suitFilter.value = null
-      selectedColKeys.value = {}
+      selectCardIds([])
       return
     }
     suitFilter.value = suit
@@ -875,7 +921,13 @@ function commitPass(seat, source = 'manual') {
         next[columnKey(col)] = true
       }
     }
-    selectedColKeys.value = next
+    const ids = []
+    for (const col of handColumns.value) {
+      if (next[columnKey(col)]) {
+        for (const c of col.cards) ids.push(cardKey(c))
+      }
+    }
+    selectCardIds(ids)
   }
 
   function onHintToggle(show) {
@@ -895,7 +947,7 @@ function commitPass(seat, source = 'manual') {
             next[columnKey(col)] = true
           }
         }
-        selectedColKeys.value = next
+        selectCardIds(hintCards.value)
       } else {
         hintCards.value = []
         mainActionsRef.value?.setShowing(false)
@@ -903,19 +955,12 @@ function commitPass(seat, source = 'manual') {
           const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
           const minKey = cardKey(sorted[0])
           hintCards.value = [minKey]
-          const next = {}
-          for (const col of handColumns.value) {
-            if (col.cards.some(c => cardKey(c) === minKey)) {
-              next[columnKey(col)] = true
-              break
-            }
-          }
-          selectedColKeys.value = next
+          selectCardIds(hintCards.value)
         }
       }
     } else {
       hintCards.value = []
-      selectedColKeys.value = {}
+      selectCardIds([])
     }
   }
 
@@ -931,14 +976,14 @@ function commitPass(seat, source = 'manual') {
   }
 
   function onPlay() {
-    const cards = selectedCardsFromColumns()
+    const cards = selectedCardsFromIds()
     if (cards.length === 0) { showToast('请先选牌'); return }
     // ★ BUG-003:走 commitPlay 统一广播 (保留本地 selected 重置)
     const r = commitPlay(selfSeat.value, cards, 'manual')
     if (!r.ok) { showToast(r.error || '出牌失败'); return }
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     suitFilter.value = null
   }
   function onPass() {
@@ -973,7 +1018,7 @@ function commitPass(seat, source = 'manual') {
     game.value.nextRound()
     myHand.value = E.sortHandGrouped(game.value.getState().hands[selfSeat.value].slice())
     selected.value = new Array(myHand.value.length).fill(false)
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     startDealAnimation()
   }
 
@@ -999,7 +1044,7 @@ function commitPass(seat, source = 'manual') {
     if (Array.isArray(st.hands) && st.hands[selfSeat.value]) {
       myHand.value = E.sortHandGrouped(st.hands[selfSeat.value].slice())
       selected.value = new Array(myHand.value.length).fill(false)
-      selectedColKeys.value = {}
+      selectedCardIds.value = new Set()
     }
     phase.value = st.phase
     isRestartAfterA.value = false  // 消费掉,重置标志
@@ -1169,34 +1214,71 @@ function commitPass(seat, source = 'manual') {
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   }
-  function onP2PPlay(payload, from, msg) {
+  // ★ P0-03 host 权威动作模型
+  function _isHostAuthority(msg) {
+    if (typeof net.isAuthorityMessage === 'function') return net.isAuthorityMessage(msg)
+    const hostSeat = (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
+    return msg && msg.from === hostSeat
+  }
+
+  function onP2PPlayIntent(payload, from, msg) {
     if (!payload || !game.value) return
-    // ★ P0-02:authority/sender 校验 — 只能由 currentPlayer 自己发,且 phase=playing
-    const st = game.value.getState()
+    // 只有当前网络 host 处理 intent
+    if (!isNetworkHost.value) return
     if (from !== payload.seat) return
+    const st = game.value.getState()
     if (st.phase !== 'playing') return
     if (st.currentPlayer !== payload.seat) return
-    // ★ Phase 2:actionId 去重,兼容旧版 payload.ts
+    if (!Array.isArray(payload.cards) || payload.cards.length === 0) return
+    const r = game.value.playerPlay(payload.seat, payload.cards)
+    if (r && r.ok) {
+      net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: payload.seat, cards: payload.cards, source: payload.source || 'manual', actionId: payload.actionId, ts: payload.ts || Date.now() } })
+    } else {
+      net.sendTo(payload.seat, { type: 'PLAY_REJECTED', payload: { actionId: payload.actionId, seat: payload.seat, error: r?.error || 'invalid_play' } })
+    }
+  }
+  function onP2PPlayCommitted(payload, from, msg) {
+    if (!payload || !game.value) return
+    // 只接受当前 host 广播的 COMMITTED
+    if (!_isHostAuthority(msg)) return
     if (_dedupActionId(payload.actionId ?? payload.ts)) return
     try {
       game.value.applyPlay(payload.seat, payload.cards)
     } catch (e) { console.warn('applyPlay err', e) }
   }
-  function onP2PPass(payload, from, msg) {
+  function onP2PPlayRejected(payload, from, msg) {
+    if (!payload) return
+    if (payload.seat !== selfSeat.value) return
+    showToast(payload.error || '出牌被 host 拒绝')
+  }
+
+  function onP2PPassIntent(payload, from, msg) {
     if (!payload || !game.value) return
-    // ★ P0-02:authority/sender 校验
+    if (!isNetworkHost.value) return
     if (from !== payload.seat) return
     const st = game.value.getState()
     if (st.phase !== 'playing') return
     if (st.currentPlayer !== payload.seat) return
     if (!st.lastPlay) return
-    // 跳过本机自己(本地已通过 game 事件同步,不再走网络回放)
-    if (payload.seat === selfSeat.value) return
-    // ★ Phase 2:actionId 去重,兼容旧版 payload.ts
+    const r = game.value.playerPass(payload.seat)
+    if (r && r.ok) {
+      net.broadcast({ type: 'PASS_COMMITTED', payload: { seat: payload.seat, source: payload.source || 'manual', actionId: payload.actionId, ts: payload.ts || Date.now() } })
+    } else {
+      net.sendTo(payload.seat, { type: 'PASS_REJECTED', payload: { actionId: payload.actionId, seat: payload.seat, error: r?.error || 'invalid_pass' } })
+    }
+  }
+  function onP2PPassCommitted(payload, from, msg) {
+    if (!payload || !game.value) return
+    if (!_isHostAuthority(msg)) return
     if (_dedupActionId(payload.actionId ?? payload.ts)) return
     try {
       game.value.applyPass(payload.seat)
     } catch (e) { console.warn('applyPass err', e) }
+  }
+  function onP2PPassRejected(payload, from, msg) {
+    if (!payload) return
+    if (payload.seat !== selfSeat.value) return
+    showToast(payload.error || '过牌被 host 拒绝')
   }
   // ★ 静态审查 BUG-A 修复:远端 ROUND_END 调 applyRoundEnd 时抑制再次广播
   // ★ v0.4.9:joiner 端 P2P MATCH_RESTART 处理器
@@ -1252,7 +1334,7 @@ function commitPass(seat, source = 'manual') {
     lastPlay.value = null
     myHand.value = []
     selected.value = []
-    selectedColKeys.value = {}
+    selectedCardIds.value = new Set()
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
     // V0410-04:统一刷公共 UI refs(兼容旧测试与后续字段扩展)
@@ -1360,7 +1442,7 @@ function commitPass(seat, source = 'manual') {
         if (Array.isArray(snap.hands) && snap.hands[selfSeat.value]) {
           myHand.value = E.sortHandGrouped(snap.hands[selfSeat.value].slice())
           selected.value = new Array(myHand.value.length).fill(false)
-          selectedColKeys.value = {}
+          selectedCardIds.value = new Set()
         }
       }
       refreshUiFromGameState()
@@ -1526,8 +1608,13 @@ function commitPass(seat, source = 'manual') {
     } catch { isP2PMode.value = false }
     if (isP2PMode.value) {
       onNet('message:DEAL', onP2PDeal)
-      onNet('message:PLAY', onP2PPlay)
-      onNet('message:PASS', onP2PPass)
+      // ★ P0-03 host 权威动作模型
+      onNet('message:PLAY_INTENT', onP2PPlayIntent)
+      onNet('message:PLAY_COMMITTED', onP2PPlayCommitted)
+      onNet('message:PLAY_REJECTED', onP2PPlayRejected)
+      onNet('message:PASS_INTENT', onP2PPassIntent)
+      onNet('message:PASS_COMMITTED', onP2PPassCommitted)
+      onNet('message:PASS_REJECTED', onP2PPassRejected)
       onNet('message:ROUND_END', onP2PRoundEnd)
       // ★ v0.4.9:P2P 联机 host 发"重开一局"广播
       onNet('message:MATCH_RESTART', onP2PMatchRestart)
@@ -1652,7 +1739,7 @@ function commitPass(seat, source = 'manual') {
   return {
     // state
     round, levelRank, levelLabel, nextLevelLabel, levelUp, multiplier,
-    players, myHand, selected, selectedColKeys, tableCards, lastPlay,
+    players, myHand, selected, selectedCardIds, selectedColKeys, tableCards, lastPlay,
     phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder, game,
     isDealing, hintCards, bombFx, floatingPasses, playedHistory,
     suitFilter, isShaking, lastCardCounts, showNickToast, showChatPanel,
@@ -1667,14 +1754,16 @@ function commitPass(seat, source = 'manual') {
     retryDeal,
     playerName, formatCoins, cardKey, handCardKey, isHinted, isLevel, rankColor,
     isWinningSeat,
-    columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, onClear,
-    selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+    columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, toggleCardId, isCardSelected, onClear,
+    selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
     _fillEmptySeatsWithAI,
     // ★ Phase4 测试:暴露 P2P handler 入口供回归测试
-    onP2PPlay, onP2PPass, onP2PRoundEnd, onP2PStateSnapshot, onP2PAITakeover,
+    onP2PPlayIntent, onP2PPlayCommitted, onP2PPlayRejected,
+    onP2PPassIntent, onP2PPassCommitted, onP2PPassRejected,
+    onP2PRoundEnd, onP2PStateSnapshot, onP2PAITakeover,
     onRemoteNickUpdate, applySettingsToAudio, finishDeal,
     // ★ BUG-003:统一出牌/过牌入口 — 组件层也能直接调,带自动广播
     commitPlay, commitPass,

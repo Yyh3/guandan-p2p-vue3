@@ -39,6 +39,7 @@ const commands = [
   'node src/common/v3x-p2-23-28-fixes.test.js',
   'node src/common/network-host-promote.test.js',
   'node src/common/network-host-migration-consecutive.test.js',
+  'node src/common/promote-to-host.test.js',
   'node src/common/static-bug-fixes.test.js',
   'node src/common/v045-bug-fixes.test.js',
   'node src/common/v046-gd-rc-fixes.test.js',
