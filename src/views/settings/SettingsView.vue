@@ -611,9 +611,10 @@ function onBack() {
 }
 
 /* ============================================================
- * 横屏/宽屏双栏布局(平板横屏、PC、大屏手机横屏)
+ * 横屏/宽屏双栏布局(平板横屏、PC、足够高的大屏手机横屏)
+ * 超短横屏(如 640×360)仍保持单栏,避免两列被压扁。
  * ============================================================ */
-@media (min-width: 760px) and (min-height: 500px), (orientation: landscape) and (min-width: 640px) {
+@media (min-width: 760px) and (min-height: 500px), (orientation: landscape) and (min-width: 700px) and (min-height: 400px) {
   .page {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -623,6 +624,15 @@ function onBack() {
   }
   .topbar, .footer { grid-column: 1 / -1; }
   .settings-section { margin-bottom: 20px; }
+}
+
+/* 超短横屏兜底:减少上下内边距,避免内容被裁 */
+@media (orientation: landscape) and (max-height: 399px) {
+  .page { padding: 12px 16px 12px; }
+  .topbar { margin-bottom: 12px; }
+  .settings-section { margin-bottom: 12px; }
+  .section-title { margin-bottom: 6px; }
+  .card { padding: 10px 12px 12px; margin-bottom: 10px; }
 }
 
 /* ====== 分组标题与间距 ====== */

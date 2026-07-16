@@ -50,7 +50,7 @@
 - `network.js`: host 迁移时公开 `PEER_LEAVE` 仅广播元数据，完整快照通过 `HOST_MIGRATION_SECRET_STATE` 仅发给新 host；`isAuthorityMessage` 强制要求 `hostEpoch`。
 - transport 层(`network-transport-ws.js` / `network-transport-bc.js` / `network-transport-android-ws.js`): 新增 `_hostSeat` 跟踪，`forceDisconnectSeat` 与 graceful migration 不再依赖硬编码 seat 0。
 - UI: 移动端横屏触控目标与布局优化；`JoinView.vue` 浏览器扫描结果改用 `?host=...` 路由以走 WebSocket client。
-- 测试回归：新增 `v0423-adversarial-fixes.test.js`；修复 `trickHistory` 快照缺 `cards` 字段等陈旧断言；新增 `haptics.test.js` / `network-mdns.test.js`；总基线刷新至 **54 套件 / 1950 通过 / 0 失败**；Playwright E2E 10 测试全绿。
+- 测试回归：新增 `v0423-adversarial-fixes.test.js`；修复 `trickHistory` 快照缺 `cards` 字段等陈旧断言；新增 `haptics.test.js` / `network-mdns.test.js` / `network-weaknet.test.js`；新增首页/设置页/对局横屏 E2E；总基线刷新至 **55 套件 / 1958 通过 / 0 失败**；Playwright E2E 12 测试全绿。
 
 ---
 

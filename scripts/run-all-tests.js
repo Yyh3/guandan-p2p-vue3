@@ -16,6 +16,7 @@ const commands = [
   'node src/common/audio.test.js',
   'node src/common/haptics.test.js',
   'node src/common/network-mdns.test.js',
+  'node src/common/network-weaknet.test.js',
   'node src/common/card-api.test.js',
   'node src/common/network.test.js',
   'node src/common/network-multitab.test.js',

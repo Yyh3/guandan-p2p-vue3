@@ -1,8 +1,8 @@
 # 掼蛋 P2P · 真机 4 设备联机部署 & 验收手册
 
-> v2.0 真机交付 — 4 部 Android 手机开热点 + 局域网联机全流程
+> v0.4.22 真机交付 — 4 部 Android 手机开热点 + 局域网联机全流程
 >
-> 适用版本:`com.guandan.p2p` v1.0 (versionCode=1) debug APK
+> 适用版本:`com.guandan.p2p` v0.4.22 debug APK
 >
 > 预计耗时:首装 ~15min (含装 APK + 配权限),后续开局 < 1min
 
@@ -12,17 +12,15 @@
 
 | 项 | 值 |
 |---|---|
-| **APK 绝对路径** | `/Users/yangyuanhao/Downloads/guandan-p2p-vue3/android/app/build/outputs/apk/debug/app-debug.apk` |
-| **文件大小** | 7,206,363 字节 (≈ 6.87 MB) |
-| **MD5** | `441fb827d83bd65e58d137fc42f001cc` |
+| **APK 路径** | `android/app/build/outputs/apk/debug/app-debug.apk` |
 | **包名** | `com.guandan.p2p` |
 | **应用名** | Guandan P2P |
 | **targetSdk** | 36 (Android 16) |
 | **minSdk** | 24 (Android 7.0) |
-| **声明权限** | INTERNET / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE / CHANGE_WIFI_MULTICAST_STATE |
+| **声明权限** | INTERNET / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE / CHANGE_WIFI_MULTICAST_STATE / CAMERA |
 
 > ⚠️ **debug 签名 APK,非 release。** 不能上 Google Play 商店分发给普通用户;内部测试 / 熟人 4 人组局够用。
-> 内部 WebSocket server 监听端口固定 **8848**,host 端在 `android/app/src/main/java/com/guandan/p2p/WsServerPlugin.java:50` 配置,可改。
+> 内部 WebSocket server 默认监听端口 **8848**;host 端可在 `android/app/src/main/java/com/guandan/p2p/WsServerPlugin.java` 配置,也可通过 mDNS 自动发现,无需手输 IP。
 
 ---
 
@@ -39,7 +37,7 @@ adb devices
 # 应该看到 4 行 "device" 状态
 
 # 3. 4 部手机各跑一次(或者用 -s <serial> 指定)
-adb install -r /Users/yangyuanhao/Downloads/guandan-p2p-vue3/android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 # -r 允许覆盖安装,debug 包常用
 # 输出 "Success" 即成功
@@ -49,7 +47,7 @@ adb install -r /Users/yangyuanhao/Downloads/guandan-p2p-vue3/android/app/build/o
 
 ```bash
 adb devices | grep "device$" | awk '{print $1}' | xargs -I {} adb -s {} install -r \
-  /Users/yangyuanhao/Downloads/guandan-p2p-vue3/android/app/build/outputs/apk/debug/app-debug.apk
+  android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### 1.2 兜底方式:拷到手机本地点击安装
@@ -389,39 +387,53 @@ adb shell ping 192.168.43.1     # 替换成 host 实际 IP
 ### 9.2 P1 — host 不能主动踢人
 
 - **症状**: 房主想踢作弊玩家 → 无按钮 / 调 `forceDisconnectSeat` 是 no-op
-- **当前状态**: ❌ 未修
-- **临时 workaround**: host 关掉热点(其他 joiner 10s 心跳超时后被踢)
-- **影响**: 仅作弊处理,正常局不影响
+- **当前状态**: ✅ 已修复(v2.1+ 在 RoomView 提供踢人按钮,`network.js` 统一 `kickPlayer` 协议 + transport `forceDisconnectSeat`)
+- **影响**: 正常局不影响,作弊处理可用
 
 ### 9.3 P1 — WsServerPlugin.bindSeat 旧 no-op
 
 - **症状**: 与 P0 同根,plugin 的 bindSeat 之前是 no-op
-- **当前状态**: ✅ 已在 `465f7a9` 修复(plugin.bindSeat 改实际调 server.bindSeatById)
+- **当前状态**: ✅ 已修复(plugin.bindSeat 实际调 server.bindSeatById)
 - **影响**: 与 P0 同步修,无独立影响
 
 ### 9.4 P2 — broadcastToAll ConcurrentModification 风险
 
-- **症状**: 极少数情况下,某 joiner 在 host 广播时刚好断开 → host 端可能抛 `ConcurrentModificationException`,被 try-catch 吞掉,但日志会脏
-- **当前状态**: ❌ 未修
-- **影响**: 极低概率,不会卡局
+- **症状**: 极少数情况下,某 joiner 在 host 广播时刚好断开 → Java 端可能抛 `ConcurrentModificationException`
+- **当前状态**: ✅ 已规避(Java 层已加同步/CopyOnWrite 式遍历;JS 层 broadcast 走 transport 自己的 peers Map,删除操作在循环外完成)
+- **影响**: 不再出现脏日志
 
 ### 9.5 P2 — QR 库 import 失败视觉提示
 
 - **症状**: Capacitor WebView 里 `qrcode` 包 import 失败时,降级只显示 IP 文本 + 一行小字提示
-- **当前状态**: ❌ 未修
-- **影响**: 用户体验降级,不影响功能(手输 IP 仍可加入)
+- **当前状态**: ✅ 已修复(`QrFallbackCard.vue` + `qr-fallback.js`:生成 QR 失败时显示 IP/端口文本卡片,并支持一键复制)
+- **影响**: 扫码失败不再空白,可手输或复制 IP 加入
 
 ### 9.6 浏览器版与真机版不互通
 
 - **症状**: 桌面浏览器开 4 tab 用 6 位房间号联机(BroadcastChannel);Android 真机装 APK 用 IP:端口 联机(WebSocket)— 两套**不能跨设备联机**
-- **当前状态**: v1 设计如此(开发/真机两套环境)
-- **影响**: 联机调试只能在浏览器或真机二者选一
+- **当前状态**: ✅ 已支持(浏览器通过 `?host=IP:PORT` 以 WS client 加入真机 host;JoinView 扫描/输入 host 地址后自动跳转)
+- **影响**: 浏览器可作为第 4 个玩家加入真机房间,调试更灵活
 
 ### 9.7 host 没有迁移机制
 
 - **症状**: host 中途退出 → 全员散场,需要 host 重开 + 全员重连
-- **当前状态**: ❌ 未实现
-- **影响**: 测试中 host 切后台 / 死机 → 必须重启
+- **当前状态**: ✅ 已实现(v2.1+ host 迁移:原 host 退出时自动选举新 host,对局状态 + transport 重建,joiner 自动 reconnect)
+- **影响**: host 切后台/死机后牌局可继续,无需全员重启
+
+### 9.9 v0.4.22 新增 — mDNS 自动发现(待真机验证)
+
+- **状态**: 代码已接入 `capacitor-zeroconf`,原生 host 自动发布 `_guandan._tcp` 服务,JoinView 扫描时并行 mDNS 发现
+- **待验证**: 真机同一热点下,joiner 能否在“扫描局域网房间”列表直接看到 host,无需手输 IP
+
+### 9.10 v0.4.22 新增 — 触控反馈(haptics,待真机验证)
+
+- **状态**: 代码已接入 `@capacitor/haptics`,设置页可开关
+- **待验证**: 真机点击按钮/出牌/炸弹时是否有自然振动,部分浏览器是否静默无感
+
+### 9.11 v0.4.22 新增 — 首页/对局横屏适配(待真机验证)
+
+- **状态**: HomeView 与 GameViewMobile 已加横屏布局,Playwright E2E 覆盖 844×390
+- **待验证**: 800×360 / 1000×400 等真机分辨率下 UI 是否仍可用,手牌与操作栏是否不重叠
 
 ### 9.8 4 座位固定布局 (host 永远在底部)
 
@@ -449,6 +461,11 @@ adb shell ping 192.168.43.1     # 替换成 host 实际 IP
 □ 13. 异常掉线: 某 joiner 关闭 App → 10s 后 host 显示 AI 接管
 □ 14. 异常重连: 掉线 joiner 重新打开 App → 复用 seat
 □ 15. 非法牌型: 选 2 张不同花色不同 rank → 提示"非法牌型",不出
+□ 16. host 迁移: host 切后台/杀进程 → 新 host 上任,牌局继续
+□ 17. mDNS 发现: joiner 点“扫描局域网房间”能直接看到 host 房间,无需手输 IP
+□ 18. 触控反馈: 点击按钮/出牌/炸弹时有轻微振动(设置页可关闭)
+□ 19. 横屏适配: 手机横屏下首页/对局页布局正常,手牌与操作栏不重叠
+□ 20. 弱网压测: 模拟 10%-30% 丢包/100-500ms 延迟,牌局仍能推进或正常触发 host 迁移
 ```
 
 任意一项打 ✗ → 截图 + 复现步骤反馈给开发。

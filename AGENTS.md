@@ -10,7 +10,7 @@
   - P0-06 `_applySnapshot` 原子提交与严格校验、`HOST_MIGRATION_SECRET_STATE` 仅发给新 host；P0-08 transport 层跟踪 `_hostSeat`，`forceDisconnectSeat` 与 migration 不再硬编码 seat 0。
   - UX-P1：移动端横屏 action-bar 三列布局、更大触控目标、安全区适配、`handOverlap` 响应式计算；`JoinView.vue` 浏览器扫描结果改用 `?host=...` 进入跨设备 WS 房间。
   - 回归测试：修复 `v0423-adversarial-fixes.test.js` 中 P0-02 接风快照 `trickHistory` 缺 `cards` 字段导致校验失败的问题；同步刷新 `room-ui.test.js`、`v045-bug-fixes.test.js`、`v0417-adversarial-fixes.test.js` 等陈旧断言。
-  - 测试基线：`npm test` 54 套件 / 1950 case 全绿；`npm run e2e` 10 测试全绿；`npm run build` 成功。
+  - 测试基线：`npm test` 55 套件 / 1958 case 全绿；`npm run e2e` 12 测试全绿；`npm run build` 成功。
 
 - 2026-07-14：完成 P1 — 真正的第二发现通道：
   - `network.js` 实现 `scanLanRooms()`：通过 HTTP `/room-info` 快速路径 + WebSocket `ROOM_PROBE/ROOM_PROBE_ACK` 主动发现局域网 host；候选地址覆盖常见热点网段、当前页来源、历史 peer hostAddress 缓存。
@@ -122,7 +122,7 @@ npm install
 # 启动开发服务器（http://localhost:8848）
 npm run dev
 
-# 跑全部测试（54 套件 / 1950 通过 / 0 失败，v0.4.22 收尾基线）
+# 跑全部测试（55 套件 / 1958 通过 / 0 失败，v0.4.22 收尾基线）
 npm test
 
 # 跑单个测试套件
@@ -173,7 +173,7 @@ guandan-p2p-vue3/
 │   │   ├── audio.js                # Web Audio 出牌音 / BGM
 │   │   ├── storage.js              # localStorage 封装
 │   │   ├── effects.js              # 特效层
-│   │   └── *.test.js               # 54 套件 Node assert 单测（1950 case 全过,v0.4.22 收尾基线）
+│   │   └── *.test.js               # 55 套件 Node assert 单测（1958 case 全过,v0.4.22 收尾基线）
 │   ├── components/          # Vue SFC 业务组件
 │   │   ├── CardPlay.vue        # 出牌按钮 + 提示
 │   │   ├── ChatQuickPanel.vue  # 房间内快捷聊天
@@ -220,7 +220,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.22 收尾基线：54 套件 / 1950 case 全过。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架，简单直接。**v0.4.22 收尾基线：55 套件 / 1958 case 全过。**
 
 | 命令 | 测试范围 | 用例数 |
 |---|---|---|
@@ -232,7 +232,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 54 套件 | **1950 / 0 fail** (v0.4.22 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + haptics/network-mdns 17 + UI/UX 修复回归) |
+| `npm test` | 全部 55 套件 | **1958 / 0 fail** (v0.4.22 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + haptics/network-mdns/weaknet 25 + UI/UX 修复回归) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录

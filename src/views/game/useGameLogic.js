@@ -988,6 +988,13 @@ function commitPass(seat, source = 'manual') {
     const r = commitPlay(selfSeat.value, cards, 'manual')
     if (!r.ok) { haptics.error(); showToast(r.error || '出牌失败'); return }
     haptics.action()
+    const playedType = E.recognize(cards)
+    if (playedType && (
+      (playedType.type >= E.TYPE.BOMB_4 && playedType.type <= E.TYPE.BOMB_8) ||
+      playedType.type === E.TYPE.KINGS_BOMB
+    )) {
+      haptics.impact('heavy')
+    }
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
     selectedCardIds.value = new Set()
