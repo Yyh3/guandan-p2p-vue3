@@ -160,6 +160,7 @@ import WsServer, { isNativeCapacitor } from '@/common/ws-server.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 import InviteDialog from '@/components/InviteDialog.vue'
 import { showConfirm, showToast } from '@/common/dialog-bus.js'
+import * as haptics from '@/common/haptics.js'
 import IconPlay from '@/components/icons/IconPlay.vue'
 import IconLink from '@/components/icons/IconLink.vue'
 
@@ -491,6 +492,7 @@ onUnmounted(() => {
 })
 
 function showMenu() {
+  haptics.click()
   showConfirm({
     title: '退出房间',
     message: '确定要退出房间吗？',
@@ -503,7 +505,7 @@ function showMenu() {
     },
   })
 }
-function onEditMyInfo() { showNickEditor.value = true }
+function onEditMyInfo() { haptics.click(); showNickEditor.value = true }
 function onNickConfirm({ nickname, avatar }) {
   myName.value = nickname
   myAvatar.value = avatar
@@ -534,6 +536,7 @@ async function copyTextFallback(text) {
   }
 }
 async function onCopyIp() {
+  haptics.click()
   if (isHost.value && !canInviteCrossDevice.value) {
     // ★ P0-06 兜底:即使按钮已隐藏,也防止键盘/辅助技术触发复制 loopback IP
     showToast('当前模式仅支持本机多标签联机,跨手机请用 Android App 开房')
@@ -549,6 +552,7 @@ async function onCopyIp() {
   }
 }
 function openInvite() {
+  haptics.click()
   if (isHost.value && !canInviteCrossDevice.value) {
     // ★ P0-06 修复:浏览器 BC 模式明确提示不能跨设备邀请。
     showToast('当前模式仅支持本机多标签联机,跨手机请用 Android App 开房')
@@ -573,6 +577,7 @@ function showCopyToast(msg) {
   _copyToastTimer = setTimeout(() => { copyToast.value = '' }, 1800)
 }
 function onToggleReady() {
+  haptics.click()
   // ★ Phase 3:房主不显示准备/取消准备,点击自己座位的准备按钮无操作
   if (isHost.value) return
   myReady.value = !myReady.value
@@ -584,6 +589,7 @@ function onToggleReady() {
   tryStartGame()
 }
 function tryStartGame() {
+  haptics.action()
   if (!isHost.value) return
   if (peers.size < 4) return
   // ★ Phase 3:除房主外的 3 个 peer 都准备后才能开始
@@ -626,6 +632,7 @@ function performCutAndStart() {
   }, 120)
 }
 function onCut() {
+  haptics.click()
   if (!isHost.value) {
     showToast('等待房主切牌')
     return
@@ -637,6 +644,7 @@ function onCut() {
   performCutAndStart()
 }
 function onSwapWithTeammate() {
+  haptics.click()
   const teammateSeat = (hostSeat.value + 2) % 4
   if (!peers.has(teammateSeat)) return
   showConfirm({
@@ -655,6 +663,7 @@ function onSwapWithTeammate() {
   })
 }
 function onKickPlayer(seat) {
+  haptics.click()
   if (!isHost.value) return
   // ★ Phase 3:只能踢对手(非房主、非队友)
   if (!canKick(seat)) return

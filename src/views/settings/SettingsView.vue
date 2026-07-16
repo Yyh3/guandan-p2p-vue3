@@ -100,6 +100,18 @@
           </div>
           <p class="card-hint">出牌音效为炸弹/王炸时,朗读"炸弹"/"王炸"</p>
         </div>
+
+        <!-- v0.4.22:触控反馈开关 -->
+        <div class="card">
+          <div class="row">
+            <span class="row-label">触控反馈</span>
+            <label class="switch">
+              <input type="checkbox" v-model="hapticsEnabled" @change="saveAll" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <p class="card-hint">点击按钮时触发轻微振动,部分浏览器/设备可能不支持</p>
+        </div>
       </div>
     </section>
 
@@ -201,6 +213,7 @@ import { useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import audio from '@/common/audio.js'
 import { showConfirm, showToast } from '@/common/dialog-bus.js'
+import * as haptics from '@/common/haptics.js'
 import IconBack from '@/components/icons/IconBack.vue'
 import IconChevronDown from '@/components/icons/IconChevronDown.vue'
 // ★ V0410-08 修复:从 package.json 读版本号,不再硬编码
@@ -220,6 +233,8 @@ const bgmStyle = ref('energetic')
 const sfxMode = ref('synth')
 // ★ UX 改进:炸弹/王炸中文语音播报开关
 const voiceEnabled = ref(true)
+// v0.4.22:触控反馈开关
+const hapticsEnabled = ref(true)
 const animationEnabled = ref(true)
 const theme = ref('dark')
 // ★ UI-P0-01 修复:aiDifficulty ref 未声明导致设置页初始化抛错
@@ -237,6 +252,7 @@ const collapsedSections = ref({
   about: true,
 })
 function toggleSection(key) {
+  haptics.click()
   collapsedSections.value[key] = !collapsedSections.value[key]
 }
 
@@ -276,6 +292,7 @@ onMounted(() => {
   // ★ v0.4.9:SFX 模式(synth / real)
   sfxMode.value = s.sfxMode || audio.getSfxMode() || 'synth'
   voiceEnabled.value = s.voiceEnabled !== false
+  hapticsEnabled.value = s.hapticsEnabled !== false
   animationEnabled.value = s.animationEnabled !== false
   theme.value = s.theme || 'dark'
   // ★ v0.4.9:从 storage 灌入全局 AI 难度
@@ -298,6 +315,7 @@ function saveAll() {
     bgmStyle: bgmStyle.value,
     sfxMode: sfxMode.value,
     voiceEnabled: voiceEnabled.value,
+    hapticsEnabled: hapticsEnabled.value,
     animationEnabled: animationEnabled.value,
     theme: theme.value,
     aiDifficulty: aiDifficulty.value,
@@ -313,6 +331,7 @@ function saveAll() {
 
 function setStyle(id) {
   if (!bgmEnabled.value) return
+  haptics.select()
   bgmStyle.value = id
   audio.setBgmStyle(id)
   saveAll()
@@ -321,6 +340,7 @@ function setStyle(id) {
 // 试听当前风格(不保存,仅临时播放)
 function previewStyle(id) {
   if (!bgmEnabled.value) return
+  haptics.click()
   audio.setBgmStyle(id)
   if (typeof audio.startBgm === 'function') audio.startBgm()
 }
@@ -328,6 +348,7 @@ function previewStyle(id) {
 // ★ v0.4.9:SFX 模式切换
 function setSfxMode(id) {
   if (!sfxEnabled.value) return
+  haptics.select()
   sfxMode.value = id
   audio.setSfxMode(id)
   saveAll()
@@ -336,6 +357,7 @@ function setSfxMode(id) {
 // ★ v0.4.9:全局 AI 难度切换(立即持久化,AIView 重新进会读到)
 function setAiDifficulty(id) {
   if (id !== 'medium' && id !== 'hard') return
+  haptics.select()
   aiDifficulty.value = id
   storage.setSettings({ aiDifficulty: id })
 }
@@ -348,6 +370,7 @@ function setTheme(id) {
 
 // ★ P2-03 修复:设置页清空战绩统一走项目 ConfirmDialog / ToastOverlay,不用原生弹窗。
 function onClearHistory() {
+  haptics.click()
   const n = historyCount.value
   if (n === 0) {
     showToast('当前没有战绩可清空')
@@ -367,6 +390,7 @@ function onClearHistory() {
 }
 
 function onBack() {
+  haptics.click()
   router.push('/')
 }
 </script>
@@ -584,6 +608,21 @@ function onBack() {
   color: rgba(255,255,255,0.4);
   margin-top: 20px;
   letter-spacing: 1.5px;
+}
+
+/* ============================================================
+ * 横屏/宽屏双栏布局(平板横屏、PC、大屏手机横屏)
+ * ============================================================ */
+@media (min-width: 760px) and (min-height: 500px), (orientation: landscape) and (min-width: 640px) {
+  .page {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 20px;
+    padding: 60px 28px 28px;
+    align-content: start;
+  }
+  .topbar, .footer { grid-column: 1 / -1; }
+  .settings-section { margin-bottom: 20px; }
 }
 
 /* ====== 分组标题与间距 ====== */

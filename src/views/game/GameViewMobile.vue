@@ -356,12 +356,14 @@ import { useGameLogic } from './useGameLogic.js'
 import { useRouter, useRoute } from 'vue-router'
 import net from '@/common/network.js'
 import { showConfirm } from '@/common/dialog-bus.js'
+import * as haptics from '@/common/haptics.js'
 
 const router = useRouter()
 const route = useRoute()
-function goHome() { router.push('/') }
+function goHome() { haptics.click(); router.push('/') }
 // ★ P1-02 修复:返回房间时携带原 query,避免被误判为 host。
 function onBackToRoom() {
+  haptics.click()
   router.push({
     path: '/room',
     query: {
@@ -468,6 +470,7 @@ const handOverlap = computed(() => {
 
 // ★ P1-03 修复:移动端 host 退出与桌面端行为一致,先尝试 host 迁移再退出。
 function showMenu() {
+  haptics.click()
   showConfirm({
     title: '退出对局',
     message: '确定要退出对局吗？',

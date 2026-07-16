@@ -28,7 +28,7 @@
       <button
         class="glass-btn glass-btn-primary"
         data-testid="home-start-btn"
-        @click="() => router.push('/room?role=host')"
+        @click="goHost"
       >
         <IconPlay class="glass-btn-icon" :size="22" aria-hidden="true" />
         <span class="glass-btn-text">开始游戏</span>
@@ -41,7 +41,7 @@
         <button
           class="glass-btn glass-btn-secondary"
           data-testid="home-join-btn"
-          @click="() => router.push('/join')"
+          @click="goJoin"
         >
           <IconPhone class="glass-btn-icon" :size="20" aria-hidden="true" />
           <span class="glass-btn-text">加入房间</span>
@@ -49,7 +49,7 @@
         <button
           class="glass-btn glass-btn-secondary"
           data-testid="home-ai-btn"
-          @click="() => router.push('/ai')"
+          @click="goAI"
         >
           <IconRobot class="glass-btn-icon" :size="20" aria-hidden="true" />
           <span class="glass-btn-text">AI 对战</span>
@@ -59,7 +59,7 @@
       <button
         class="glass-btn glass-btn-link"
         data-testid="home-rules-btn"
-        @click="() => router.push('/guide')"
+        @click="goGuide"
       >
         <span class="glass-btn-text">游戏规则</span>
       </button>
@@ -110,6 +110,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import { isNativeCapacitor } from '@/common/ws-server.js'
+import * as haptics from '@/common/haptics.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 import IconPlay from '@/components/icons/IconPlay.vue'
 import IconPhone from '@/components/icons/IconPhone.vue'
@@ -153,13 +154,17 @@ onUnmounted(() => {
   if (kickedToastTimer) clearTimeout(kickedToastTimer)
 })
 
-function onEditNickname() { showNickEditor.value = true }
+function onEditNickname() { haptics.click(); showNickEditor.value = true }
 function onNickConfirm({ nickname, avatar }) {
   myName.value = nickname
   myAvatar.value = avatar
   showNickEditor.value = false
 }
-function onSettings() { router.push('/settings') }
+function onSettings() { haptics.click(); router.push('/settings') }
+function goHost() { haptics.click(); router.push('/room?role=host') }
+function goJoin() { haptics.click(); router.push('/join') }
+function goAI() { haptics.click(); router.push('/ai') }
+function goGuide() { haptics.click(); router.push('/guide') }
 </script>
 
 <style scoped>
@@ -564,5 +569,47 @@ function onSettings() { router.push('/settings') }
   .glass-btn { min-height: 56px; }
   .gear-btn { min-width: 48px; min-height: 48px; }
   .user-pill { min-height: 48px; }
+}
+
+/* ============================================================
+ * 横屏适配(手机横屏时把 Logo/按钮左右分栏,避免上下挤爆)
+ * ============================================================ */
+@media (orientation: landscape) and (max-height: 480px) {
+  .page {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    padding: 16px 32px calc(16px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-left, 0px));
+  }
+  .logo {
+    margin: 0;
+    flex: 0 0 auto;
+    max-width: 40vw;
+  }
+  .logo-cards { width: 96px; height: 64px; margin-bottom: 0; }
+  .card-layer { width: 44px; height: 64px; font-size: 22px; }
+  .card-back { left: 0; top: 2px; transform: rotate(-12deg); }
+  .card-mid { left: 26px; top: 0; }
+  .card-front { left: 52px; top: 2px; transform: rotate(12deg); }
+  .logo-title { font-size: 42px; letter-spacing: 8px; }
+  .logo-sub { font-size: 11px; text-align: center; }
+  .actions {
+    margin: 0;
+    flex: 1 1 320px;
+    max-width: 420px;
+    gap: 12px;
+  }
+  .glass-btn { height: 52px; font-size: 18px; }
+  .bottom-bar {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 420px;
+    margin: 0;
+    z-index: 10;
+  }
+  .kicked-toast { top: 12px; }
 }
 </style>

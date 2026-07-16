@@ -30,6 +30,7 @@ import net from '@/common/network.js'
 import { rotateSeats } from '@/common/seat-rotation.js'
 import storage from '@/common/storage.js'
 import { showToast } from '@/common/dialog-bus.js'
+import * as haptics from '@/common/haptics.js'
 
 const RANK_LABEL = { 3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',15:'2',16:'小王',17:'大王' }
 
@@ -821,6 +822,7 @@ export function useGameLogic(opts = {}) {
   }
   function toggleCardId(id) {
     if (isDealing.value) return
+    haptics.select()
     const next = new Set(selectedCardIds.value)
     if (next.has(id)) next.delete(id)
     else next.add(id)
@@ -833,6 +835,7 @@ export function useGameLogic(opts = {}) {
     toggleCardId(cardKey(c))
   }
   function onClear() {
+    haptics.click()
     selectedCardIds.value = new Set()
     selected.value = new Array(myHand.value.length).fill(false)
   }
@@ -847,6 +850,7 @@ export function useGameLogic(opts = {}) {
 
   function onSortHand() {
     if (isDealing.value) return
+    haptics.click()
     myHand.value = E.sortHandGrouped(myHand.value.slice())
     suitFilter.value = null
     hintCards.value = []
@@ -902,6 +906,7 @@ function commitPass(seat, source = 'manual') {
    */
   function onAutoFindBest() {
     if (isDealing.value || phase.value !== 'playing' || myHand.value.length === 0) return
+    haptics.click()
     onHintToggle(true)
   }
   function selectCardIds(ids) {
@@ -931,6 +936,7 @@ function commitPass(seat, source = 'manual') {
   }
 
   function onHintToggle(show) {
+    haptics.click()
     if (show) {
       // ★ V049-01 修复:onHintToggle 作用域内 diff 未定义,补齐
       const diff = gameDifficulty.value
@@ -977,17 +983,19 @@ function commitPass(seat, source = 'manual') {
 
   function onPlay() {
     const cards = selectedCardsFromIds()
-    if (cards.length === 0) { showToast('请先选牌'); return }
+    if (cards.length === 0) { haptics.error(); showToast('请先选牌'); return }
     // ★ BUG-003:走 commitPlay 统一广播 (保留本地 selected 重置)
     const r = commitPlay(selfSeat.value, cards, 'manual')
-    if (!r.ok) { showToast(r.error || '出牌失败'); return }
+    if (!r.ok) { haptics.error(); showToast(r.error || '出牌失败'); return }
+    haptics.action()
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
     selectedCardIds.value = new Set()
     suitFilter.value = null
   }
   function onPass() {
-    if (!lastPlay.value) { showToast('首家不能过牌'); return }
+    if (!lastPlay.value) { haptics.error(); showToast('首家不能过牌'); return }
+    haptics.action()
     // ★ BUG-003:走 commitPass 统一广播
     const r = commitPass(selfSeat.value, 'manual')
     if (!r.ok) { showToast(r.error || '过牌失败'); return }
@@ -995,6 +1003,7 @@ function commitPass(seat, source = 'manual') {
     mainActionsRef.value?.setShowing(false)
   }
   function onNext() {
+    haptics.click()
     if (isP2PMode.value) {
       // ★ GD-RC-001 修复:下一局发牌由网络 host 负责(原 selfSeat===0 失效)
       if (isNetworkHost.value) {
@@ -1054,6 +1063,7 @@ function commitPass(seat, source = 'manual') {
     //   这里再调 startDealAnimation() 会造成重开一局时动画被触发两次。
   }
   function onRestartMatch() {
+    haptics.click()
     const newSeed = _newRestartSeed()
     if (isP2PMode.value) {
       // ★ V049-03 修复:P2P 模式下 host 广播新 seed + levelRank,
@@ -1710,6 +1720,7 @@ function commitPass(seat, source = 'manual') {
 
   // ★ LOGIC-04 修复:发牌超时重试不再本地 fork
   function retryDeal() {
+    haptics.click()
     dealTimeout.value = false
     if (isP2PMode.value) {
       if (isNetworkHost.value) {

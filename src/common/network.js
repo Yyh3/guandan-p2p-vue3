@@ -32,6 +32,7 @@ import { BroadcastChannelTransport } from './network-transport-bc.js'
 import { WebSocketTransport } from './network-transport-ws.js'
 import { AndroidWsTransport } from './network-transport-android-ws.js'
 import { isNativeCapacitor } from './ws-server.js'
+import { isMdnsAvailable, registerMdnsService, stopMdns, watchMdnsServices } from './network-mdns.js'
 
 // ============== 模块状态 ==============
 const handlers = {}
@@ -41,6 +42,7 @@ let roomId = ''
 let selfSeat = 0
 let hostSeat = 0
 let transport = null
+let mdnsRegStop = null            // v0.4.22:mDNS 注册停止函数
 const peers = new Map()           // seat -> {nickname, avatar, uuid, ready, ...}
 
 // ============== Phase 2:hostEpoch 权威纪元 ==============
@@ -992,6 +994,8 @@ function startAsHost(self) {
     try { transport.setHostSeat(hostSeat) } catch (_) {}
     // v0.4.22 P1:让扫描端能通过 /room-info 或 ROOM_PROBE 发现本房间
     _bindRoomInfoProvider(transport)
+    // v0.4.22 P3:原生环境额外注册 mDNS 服务,真机无需知道 IP 即可发现房间
+    _registerHostMdns()
   }).catch((err) => {
     emit('error', err?.message || 'Transport open failed')
   })
@@ -1287,6 +1291,8 @@ function close(opts = {}) {
   stopHeartbeat()
   stopHeartbeatChecker()
   cancelJoinRetry()
+  if (mdnsRegStop) { try { mdnsRegStop() } catch (e) {} mdnsRegStop = null }
+  stopMdns().catch(() => {})
   if (transport) { try { transport.close() } catch (e) {} transport = null }
   selfInfo = null
   isHostFlag = false
@@ -1932,6 +1938,22 @@ function _bindRoomInfoProvider(tr) {
 }
 
 /**
+ * v0.4.22 P3:原生环境注册 mDNS 服务,让同局域网 joiner 无需猜测 IP。
+ */
+async function _registerHostMdns() {
+  if (!isMdnsAvailable()) return
+  if (!transport || typeof transport.getBoundPort !== 'function') return
+  const port = transport.getBoundPort()
+  if (!port || !roomId) return
+  // 停止旧注册(防止重建 transport 后残留)
+  if (mdnsRegStop) { try { await mdnsRegStop() } catch (_) {} mdnsRegStop = null }
+  const safeName = String(roomId).replace(/[^a-zA-Z0-9_-]/g, '')
+  const name = `guandan-${safeName || 'room'}`
+  const r = await registerMdnsService({ name, port, roomNo: roomId })
+  if (r.ok && r.stop) mdnsRegStop = r.stop
+}
+
+/**
  * 生成候选 host 地址列表(浏览器环境无 UDP/多播,只能猜测常见热点网段 + 当前页来源)。
  */
 function _generateLanCandidates() {
@@ -2071,6 +2093,23 @@ function _probeHostWs(hostAddress, timeoutMs) {
  */
 async function scanLanRooms(opts = {}) {
   if (typeof WebSocket === 'undefined' && typeof fetch === 'undefined') return []
+  const signal = opts?.signal
+  const [httpWs, mdns] = await Promise.all([
+    _scanHttpWsRooms(opts),
+    _scanMdnsRooms(signal, 800),
+  ])
+  if (signal?.aborted) return httpWs
+  const seen = new Set(httpWs.map(r => r.key))
+  for (const r of mdns) {
+    if (!seen.has(r.key)) {
+      seen.add(r.key)
+      httpWs.push(r)
+    }
+  }
+  return httpWs
+}
+
+async function _scanHttpWsRooms(opts = {}) {
   let candidates = Array.isArray(opts?.candidates) ? opts.candidates : _generateLanCandidates()
   if (candidates.length > MAX_SCAN_CANDIDATES) candidates = candidates.slice(0, MAX_SCAN_CANDIDATES)
   if (candidates.length === 0) return []
@@ -2102,6 +2141,38 @@ async function scanLanRooms(opts = {}) {
     if (signal?.aborted) break
     await Promise.all(candidates.slice(i, i + SCAN_CONCURRENCY).map(processOne))
   }
+  return found
+}
+
+/**
+ * v0.4.22 P3:原生环境通过 mDNS 扫描房间(无需猜测 IP)。
+ */
+async function _scanMdnsRooms(signal, timeoutMs = 800) {
+  if (!isMdnsAvailable()) return []
+  const found = []
+  let watcher = null
+  try {
+    watcher = await watchMdnsServices((svc) => {
+      if (!svc.roomNo) return
+      found.push(_normalizeRoomInfo(svc.ip, svc.port, {
+        roomNo: svc.roomNo,
+        playerCount: 0,
+        maxPlayers: 4,
+        hostNickname: '',
+      }))
+    })
+  } catch (e) {
+    return []
+  }
+  await new Promise((resolve) => {
+    const timer = _setTimeoutFn(resolve, timeoutMs)
+    if (signal) {
+      const onAbort = () => { _clearTimeoutFn(timer); resolve() }
+      if (signal.aborted) { onAbort(); return }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+  })
+  try { await watcher.stop() } catch (_) {}
   return found
 }
 

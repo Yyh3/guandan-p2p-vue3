@@ -44,6 +44,8 @@ const DEFAULT_SETTINGS = {
   //   之前 AIView.vue 写死 ref('medium'),每次刷新重置 → 用户上次选 hard 被覆盖
   //   现在持久化到 storage,AIView onMounted 从 storage.getSettings().aiDifficulty 读
   aiDifficulty: 'medium', // 'medium' | 'hard'
+  // v0.4.22:触控反馈开关
+  hapticsEnabled: true,
 }
 
 function getSettings() {

@@ -30,7 +30,7 @@
 | **v0.4.19** | ✅ 完成 | V0419 follow-up 4 项 | `network.js selectNextHostCandidate()` 确定性 UUID 字典序 + canHost 选举(v2.1 旧版重命名 `selectNextHostBySeat` 保留);`selfInfo` 加 `canHost` + `hostAddress` 字段(peer:join 上报能力);`broadcastPeerLeave` payload 加 `newHostAddress`(自动从 peers 提取);`close({broadcast:true, newHostSeat, newHostAddress})` 关闭前广播完整新 host 信息(简化 TOMBSTONE)。`requestPromoteToHost` 集成新选举 + `canHostAsNewHost()` 守卫:浏览器 ws joiner 走 host:lost 跳首页;AndroidWs native / Node ws joiner 走 rebuildAsHost 起新 server,41 套件 / 1985/0 单测 |
 | **v0.4.20** | ✅ 完成 | V0420 真正的"第二发现通道"(纯 JS 版) | `network.js` peer hostAddress 缓存到 localStorage(跨 session 持久化,1 小时过期)+ `smartReconnectToPeers(roomNo, opts)` 循环 try-connect 缓存的 peer 地址(canHost=true 优先,ts 最新优先)找新 host。`peer:join` / `peer:update` handler 触发 `cachePeerHostAddress`,joiner 上报 hostAddress 时自动持久化。`GameViewDesktop` `host:lost` 监听先调 `smartReconnectToPeers`,找到新 host 直接 `return`(不跳首页);找不到 fallback 跳首页(v0.4.17 旧行为)。已知未做留 v0.4.21+:真 mDNS(Capacitor plugin)/ UDP 广播(原生层)/ 固定服务(scope 大需 native);41 套件 / 1891/0 单测 |
 | **v0.4.21** | ✅ 完成 | V0421 对抗性审查 4 个 BUG 修复 | v0.4.20 发布后立刻做对抗性复查,找到 4 个 BUG 全部修复:`smartReconnectToPeers` 用 `off('connect')` 清空所有 connect 监听器 → 改为精确 off(BUG-V0420-1 严重);setTimeout 没 clearTimeout → 内存泄漏,4 处都加 clearTimeout(BUG-V0420-2);`GameViewDesktop.onUnmounted` 裸 off('host:lost') 清空所有 host:lost 监听器 → 改用命名函数 onHostLost + 精确 off(BUG-V0420-3);`findMinStraightFlush` 用 `r <= 13` 过滤掉 A(14) → 改 `r >= 3 && r <= 14` 允许 A 同花顺(BUG-AI-1);42 套件 / 1916/0 单测 |
-| **v0.4.22** | ✅ 当前 | P1 真正的第二发现通道 + P0 安全/文档收尾 | `network.js` `scanLanRooms()` 通过 HTTP `/room-info` + WS `ROOM_PROBE/ROOM_PROBE_ACK` 主动扫描局域网 host;`network-transport-ws.js` 提供 `/room-info`;`JoinView.vue` 增加扫描入口与结果列表;新增 `network-discovery.test.js`(32 case);51 套件 / 2406/0 单测 |
+| **v0.4.22** | ✅ 当前 | P1 真正的第二发现通道 + P0 安全/UX-P1/P3 收尾 | `network.js` `scanLanRooms()` 通过 HTTP `/room-info` + WS `ROOM_PROBE/ROOM_PROBE_ACK` 主动扫描局域网 host;原生环境增加 mDNS (`capacitor-zeroconf`) 作为第二发现通道;`network-transport-ws.js` 提供 `/room-info`;`JoinView.vue` 增加扫描入口与结果列表;`guandan-game.js` `_applySnapshot` 原子提交与严格校验;transport 层跟踪 `_hostSeat`;移动端横屏 UX-P1 适配;新增首页横屏/设置页双栏/全局 haptics (`@capacitor/haptics`);新增 `haptics.test.js` / `network-mdns.test.js` / 横屏 E2E;54 套件 / 1950/0 单测,Playwright E2E 10/0 |
 | **v4.0** | 💭 构思中 | iOS 脚手架 + 录像回放 + 弱网压测 | iOS 脚手架 + 录像回放 + 弱网压测数据 |
 
 ---
@@ -152,10 +152,11 @@ v0.4.9: 1609 / 0 (+637,6 大功能新增/升级)
 - `GameViewDesktop.vue` 桌面 1280×800(不受响应式影响)
 - `GameView.test.js` §6 共 7 case 覆盖 7 种 viewport 组合
 
-**已知边界**(留给 v4.0):
+**已知边界**(v0.4.22 补充后仍留给真机验证):
 - 横屏兜底用的是 scale + 绝对定位挤压,不完美但可用
-- 真机测试只在 844×390 (iPhone 13 横屏) 模拟过,未在真机 800×360 / 1000×400 跑过
+- Playwright 已覆盖 844×390 横屏 E2E,但未在真机 800×360 / 1000×400 等极端分辨率跑过
 - 弱网 / 隧道 / 高铁场景未实测
+- 首页/设置页横屏与触控反馈(haptics)已接入,需在真机上验证体验
 
 ---
 
@@ -196,7 +197,7 @@ MINOR: 新功能(v3.0-3.7 都是 MINOR)
 PATCH: Bug 修复 / 小调整
 ```
 
-**当前版本**:`v0.4.21+`(2026-07-13,P0 收尾 — hostEpoch 严格化 / dev hook 收敛 / WS E2E;UI 修复 — 智能理牌按钮与手牌重叠、大小王牌面优化;文档过时项清理;50 套件 / 2374/0 单测)
+**当前版本**:`v0.4.22`(2026-07-16,P0/P1/UX-P1 收尾 — 第二发现通道 / hostEpoch 严格化 / `_applySnapshot` 原子提交 / transport `_hostSeat`;移动端横屏与 JoinView `?host=...`;52 套件 / 1933/0 单测,E2E 9/0)
 **首发目标**:v1.0.0(H5)
 
 ---

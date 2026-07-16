@@ -392,6 +392,7 @@ const {
 
 // 路由相关的 UI 跳转(只能组件层做)
 function exitGame() {
+  haptics.click()
   try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
   router.replace('/')
 }
@@ -399,6 +400,7 @@ function onBack() { exitGame() }
 function goHome() { exitGame() }
 // ★ P1-02 修复:返回房间时携带原 room/role/host 等 query,避免 RoomView 把 joiner 误判为 host。
 function onBackToRoom() {
+  haptics.click()
   router.push({
     path: '/room',
     query: {
@@ -411,6 +413,7 @@ function onBackToRoom() {
   })
 }
 function showMenu() {
+  haptics.click()
   showConfirm({
     title: '退出对局',
     message: '确定要退出对局吗？',

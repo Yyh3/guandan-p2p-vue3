@@ -302,4 +302,4 @@ console.log('[NET]', msg)
 **下一步**:
 - 改 View 接网络事件 → `docs/UI.md`
 - 加消息事件 → 改 `network.js` 顶层 + View 监听
-- v4.0 候选:弱网/隧道/高铁压测、真正的 mDNS/UDP 设备发现通道。
+- v4.0 候选:弱网/隧道/高铁压测;iOS 端 mDNS 实测(Android 已接 `capacitor-zeroconf`,需真机验证)。

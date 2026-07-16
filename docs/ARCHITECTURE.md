@@ -119,11 +119,10 @@ Vue 响应式触发组件重渲染
 |------|--------|------|
 | 浏览器 dev | `BroadcastChannel` | 开发调试,4 标签联机 |
 | 浏览器 prod | `BroadcastChannel` | H5 演示(同 origin 即可) |
-| Capacitor APK | `BroadcastChannel` (内置 H5) | 临时演示,**真机不互通** |
-| 真机 v2.0 | **待实现** (TCP Socket / WiFi Direct) | 4 手机热点对局 |
+| Capacitor APK / Android WebView | `WebSocketTransport` / `AndroidWsTransport` | 真机 4 手机热点对局(v2.0 已落地) |
+| Capacitor iOS | 待实现(v4.0) | 4 手机热点对局 |
 
-**当前 v1.0 网络限制**:跨设备不联(详见 `docs/NETWORK.md`)。
-**v2.0 目标**:实现 TCP Socket 网络层,提供 Capacitor 原生插件。
+**当前网络能力**:真机 Android 已通过 WebSocket server + native bridge 跨设备联机;浏览器加入者可走 `?host=...` 以 WS client 直连真机 host。详见 `docs/NETWORK.md`。
 
 ---
 
