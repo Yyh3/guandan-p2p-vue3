@@ -126,12 +126,14 @@ console.log('\n=== 3. V0414-03: RoomView showMenu host 端传 broadcast:true ===
   check('RoomView.showMenu 函数存在', !!showMenuMatch)
   if (showMenuMatch) {
     const body = showMenuMatch[0]
-    // 3.2 showMenu 内部 net.close 调用传 broadcast: true(仅 host)
+    // 3.2 showMenu 内部 host 关闭传 broadcast: true,joiner 走 leaveRoom()
     //   旧版:net.close()
-    //   新版:net.close(isHost.value ? { broadcast: true } : {})
+    //   新版:if (isHost.value) net.close({ broadcast: true }); else net.leaveRoom()
     check('showMenu 含 net.close 调用', /net\.close\s*\(/.test(body))
-    check('showMenu 含 isHost.value ? { broadcast: true } : {} 三元(★ v0.4.16 新增)',
-      /isHost\.value\s*\?\s*\{\s*broadcast:\s*true\s*\}\s*:\s*\{\s*\}/.test(body))
+    check('showMenu host 分支传 broadcast: true',
+      /broadcast:\s*true/.test(body))
+    check('showMenu joiner 分支调用 net.leaveRoom()(★ P1-12 新增)',
+      /net\.leaveRoom\s*\(/.test(body))
   }
 
   // 3.3 防御:joiner 端不应该传 broadcast(自己走不需要告诉别人)

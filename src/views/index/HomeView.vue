@@ -83,7 +83,7 @@
         title="点击修改昵称 / 头像"
         @click="onEditNickname"
       >
-        <span class="user-pill-avatar">{{ myAvatar }}</span>
+        <span class="user-pill-avatar" aria-hidden="true">{{ myAvatar }}</span>
         <span class="user-pill-name">{{ myName || '未命名玩家' }}</span>
       </button>
     </footer>

@@ -37,9 +37,9 @@
     @click="$emit('click', $event)"
   >
     <!-- 角色角标(队友 🤝 / 对手 ⚔ / 自己 👑)— 左上角悬浮 -->
-    <div v-if="roleTag" class="seat-tag" :class="`tag-${role}`">
-      <span class="tag-emoji">{{ roleEmoji }}</span>
-      {{ roleTag }}
+    <div v-if="roleTag" class="seat-tag" :class="`tag-${role}`" :aria-label="roleTag">
+      <span class="tag-emoji" aria-hidden="true">{{ roleEmoji }}</span>
+      <span aria-hidden="true">{{ roleTag }}</span>
     </div>
 
     <!-- 思考中气泡(队友/AI 思考时) -->
@@ -48,21 +48,22 @@
     </div>
 
     <!-- 已出完对勾 -->
-    <div v-if="isDone" class="done-mark">✓</div>
+    <div v-if="isDone" class="done-mark" aria-label="已出完" role="img"><span aria-hidden="true">✓</span></div>
 
     <!-- v3.7:自座位改名按钮 ✎(右上角,18x18)— 只在 role=self 显示 -->
     <button
       v-if="role === 'self' && !isDone"
       class="seat-edit-btn"
       :title="allowEdit ? '改名' : '对局中不能改名'"
+      :aria-label="allowEdit ? '改名' : '对局中不能改名'"
       @click.stop="$emit('editRequest', $event)"
-    >✎</button>
+    ><span aria-hidden="true">✎</span></button>
 
     <!-- 主卡:头像 + 信息 -->
     <div class="seat-main">
       <!-- 头像框(56x56 圆形,emoji) -->
-      <div class="seat-avatar">
-        <span class="avatar-icon">{{ avatar }}</span>
+      <div class="seat-avatar" aria-label="头像">
+        <span class="avatar-icon" aria-hidden="true">{{ avatar }}</span>
       </div>
 
       <!-- 右侧信息列 -->
@@ -70,7 +71,7 @@
         <div class="seat-name" :title="name">{{ truncateName(name) }}</div>
         <div class="seat-meta">
           <span class="meta-coins" v-if="coins != null">
-            <span class="coin-ico">💰</span>{{ formatCoins(coins) }}
+            <span class="coin-ico" aria-hidden="true">💰</span>{{ formatCoins(coins) }}
           </span>
           <span class="meta-level" v-if="level != null">LV{{ level }}</span>
         </div>

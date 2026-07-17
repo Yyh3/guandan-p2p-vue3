@@ -11,6 +11,9 @@
           class="avatar-cell"
           :class="{ active: picked === a }"
           @click="picked = a"
+          role="img"
+          :aria-label="`头像 ${a}`"
+          aria-hidden="true"
         >{{ a }}</div>
       </div>
 

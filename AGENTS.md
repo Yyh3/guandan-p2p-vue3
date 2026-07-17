@@ -6,11 +6,27 @@
 
 ## 当前任务记录
 
+- 2026-07-17：完成修复报告（`tmp/adversarial-review-followup.md`）中剩余 P1/P2 问题：
+  - P2-05 BGM 安装包瘦身：删除 `bgm-ripples.mp3` / `bgm-asian-drums.mp3` / `bgm-firesong.mp3` / `bgm-galway.mp3`，安装包内置 BGM 从 7 首精简为 3 首；`audio.js` 更新 `BGM_TRACKS` 并令非法/旧版风格自动回退 `energetic`；`SettingsView.vue` 音乐风格列表改为 3 首并加旧值迁移；同步刷新 `v048-mp3-bgm.test.js`。
+  - P2-06 AI 代码分割：`guandan-game.js` 与 `useGameLogic.js` 改为运行时动态导入 `guandan-ai.js`，生产构建产物出现独立 `guandan-ai-*.js` chunk，不再打包进主 chunk。
+  - P2-08 发牌进度反馈：`useGameLogic.js` 暴露 `dealProgress` ref 并对接 `deal-animation.js` 的 `onProgress`；`GameViewDesktop.vue` / `GameViewMobile.vue` 发牌时显示百分比进度条。
+  - P2-02 Emoji 无障碍：`RoomView.vue` / `HudTop.vue` / `GameViewDesktop.vue` / `GameViewMobile.vue` / `PlayerSeat.vue` / `MainActions.vue` / `PlayHintButton.vue` / `QuickActions.vue` / `ChatQuickPanel.vue` / `CardPlay.vue` / `NicknameEditor.vue` / `HistoryView.vue` / `InviteDialog.vue` / `HomeView.vue` 中所有 Emoji 图标按钮/装饰加 `aria-label` 或 `aria-hidden`。
+  - P2-07 牌桌装饰区瘦身：`GameViewDesktop.vue` / `GameViewMobile.vue` 的 `.bg-felt::before` / `.bg-wood-edge` 椭圆尺寸从 `-86vh/-92vh` 缩至 `-60vh/-64vh`，有效出牌区与手牌区更宽裕。
+  - 测试基线：`npm test` 56 套件 / 1965 case 全绿；`npm run e2e` 12 测试全绿；`npm run build` 成功；`npx cap sync android` 完成。
+
 - 2026-07-16：完成 v0.4.22 对抗性审查收尾与测试基线回归：
   - P0-06 `_applySnapshot` 原子提交与严格校验、`HOST_MIGRATION_SECRET_STATE` 仅发给新 host；P0-08 transport 层跟踪 `_hostSeat`，`forceDisconnectSeat` 与 migration 不再硬编码 seat 0。
+  - P0-10 host 迁移 ACK：`MIGRATION_PREPARE` / `MIGRATION_READY` / `MIGRATION_COMMIT` 三阶段握手，旧 host 发送私密 snapshot 后等待新 host 回复 `MIGRATION_READY` 才广播公开 `PEER_LEAVE`，防止迁移状态提前泄露或旧 host 过早关闭。
   - UX-P1：移动端横屏 action-bar 三列布局、更大触控目标、安全区适配、`handOverlap` 响应式计算；`JoinView.vue` 浏览器扫描结果改用 `?host=...` 进入跨设备 WS 房间。
-  - 回归测试：修复 `v0423-adversarial-fixes.test.js` 中 P0-02 接风快照 `trickHistory` 缺 `cards` 字段导致校验失败的问题；同步刷新 `room-ui.test.js`、`v045-bug-fixes.test.js`、`v0417-adversarial-fixes.test.js` 等陈旧断言。
+  - 回归测试：修复 `v0423-adversarial-fixes.test.js` 中 P0-02 接风快照 `trickHistory` 缺 `cards` 字段导致校验失败的问题；刷新 `v045-bug-fixes.test.js` 以适应 P0-10 的 ACK 握手（手动模拟 `MIGRATION_READY` 后验证 `PEER_LEAVE`）。
   - 测试基线：`npm test` 55 套件 / 1958 case 全绿；`npm run e2e` 12 测试全绿；`npm run build` 成功。
+
+- 2026-07-16：完成阶段二 P1 状态与协议收尾：
+  - P1-12 joiner 优雅离开协议：`network.js` 新增 `LEAVE_REQUEST` 消息与 `leaveRoom()` API；host 收到后立即清理 seat 并广播 `PEER_LEAVE` / `AI_TAKEOVER`，避免 joiner 退出后 host 仍等心跳超时；`RoomView.vue` 与 `GameViewDesktop.vue` / `GameViewMobile.vue` 的 joiner 退出路径改用 `net.leaveRoom()`。
+  - P1-13 返回房间复用 network session：`RoomView.vue` 将监听注册与网络初始化拆分；若已有活跃 session 且房间号/角色匹配，直接 `attachRoomListeners()` + `syncRoomStateFromNetwork()`，不再重复 `startAsHost/joinRoom`，消除 `network session already active` 错误与重复监听。
+  - P1-15 QR 编码可打开的加入 URL：`qr-fallback.js` 新增 `buildRoomJoinUrl()`，生成 `http://IP:port/#/room?role=joiner&roomNo=ROOM&host=IP:port`；`RoomView.vue` 二维码、`QrFallbackCard.vue` 链接改用该 URL；`parseQrScanResult()` 从 hash query 提取 `roomNo`；`JoinView.vue` 扫码后自动填充房间号。
+  - 回归测试：新增 `src/common/network-graceful-leave.test.js`（17 case），更新 `src/common/qr-fallback.test.js` 与 `src/views/room/RoomView.test.js`，同步刷新 `v049-bug-fixes.test.js` / `v0416-adversarial-fixes.test.js` 中断言。
+  - 测试基线：`npm test` 56 套件 / 1982 case 全绿；`npm run e2e` 12 测试全绿；`npm run build` 成功。
 
 - 2026-07-14：完成 P1 — 真正的第二发现通道：
   - `network.js` 实现 `scanLanRooms()`：通过 HTTP `/room-info` 快速路径 + WebSocket `ROOM_PROBE/ROOM_PROBE_ACK` 主动发现局域网 host；候选地址覆盖常见热点网段、当前页来源、历史 peer hostAddress 缓存。
@@ -232,7 +248,7 @@ guandan-p2p-vue3/
 | `npm run test:rotation` | seat-rotation 4 selfSeat × 4 position 全覆盖（GameView.test.js） | 65 |
 | `npm run test:kick` | 房主踢人 3 transport 对称实现 + self:kicked 事件 | 51 |
 | `npm run test:room` | 房间 UI 字符串断言（room-ui + RoomView, v3.x 菱形 + 星空） | 60 + 11 |
-| `npm test` | 全部 55 套件 | **1958 / 0 fail** (v0.4.22 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 30 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + haptics/network-mdns/weaknet 25 + UI/UX 修复回归) |
+| `npm test` | 全部 56 套件 | **1982 / 0 fail** (v0.4.22 阶段二 P1 收尾基线,含 v0412-adversarial-fixes 34 + v0414-adversarial-review 53 + v0.4.15 边缘防御 19 + v0416-adversarial-fixes 31 + v0417-adversarial-fixes 38 + v0418-adversarial-fixes 20 + v0419-adversarial-fixes 36 + v0420-adversarial-fixes 35 + v0421-adversarial-fixes 29 + v0422-adversarial-fixes 19 + v0423-adversarial-fixes 10 + Phase 2 hostEpoch 8 case + haptics/network-mdns/weaknet 25 + network-graceful-leave 17 + UI/UX 修复回归) |
 
 **测试文件规范**：
 - 文件名：`<name>.test.js`，跟被测文件同目录
@@ -313,6 +329,7 @@ createGame({ players, seed, ghostRank }) → {
 // 事件总线 + 状态
 on(event, handler) / off(event, handler) / emit(event, data)  // 事件总线
 close()
+leaveRoom()                                                 // v0.4.22 P1-12：joiner 主动优雅离开（先发 LEAVE_REQUEST 再 close）
 isHost / isConnected / getSelfInfo() / getPeers()
 getRoomId() / setRoomId() / getSelfSeat() / setSelfSeat()
 startAsHost(roomId)  / joinRoom(hostIp, roomId)             // v1.0：兼容房间号 / hostIp:hostPort

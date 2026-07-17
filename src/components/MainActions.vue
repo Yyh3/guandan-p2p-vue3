@@ -17,8 +17,9 @@
         :class="{ 'is-disabled-state': !canPass }"
         :disabled="!canPass"
         @click="$emit('pass')"
+        aria-label="不出"
       >
-        <span class="btn-icon">—</span>
+        <span class="btn-icon" aria-hidden="true">—</span>
         <span class="btn-text">不出</span>
       </button>
 
@@ -35,8 +36,9 @@
         :class="{ 'is-disabled-state': !canPlay }"
         :disabled="!canPlay"
         @click="$emit('play')"
+        aria-label="出牌"
       >
-        <span class="btn-icon">✓</span>
+        <span class="btn-icon" aria-hidden="true">✓</span>
         <span class="btn-text">出牌</span>
       </button>
     </div>

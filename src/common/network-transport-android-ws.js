@@ -98,14 +98,24 @@ export class AndroidWsTransport {
       this._emit({ type: '_DISCONNECT', payload: { seat }, ts: Date.now() })
     })
     const offMsg = await WsServer.addListener('message', (data) => {
-      const seat = (data && typeof data.seat === 'number') ? data.seat : -1
-      const connId = (data && typeof data.connId === 'number') ? data.connId : -1
-      const raw = (data && typeof data.message === 'string') ? data.message : ''
+      const seat = Number.isInteger(data?.seat) ? data.seat : -1
+      const connId = Number.isInteger(data?.connId) ? data.connId : -1
+      const raw = typeof data?.message === 'string' ? data.message : ''
       this._lastSenderSeat = seat
       this._lastSenderConnId = connId
       try {
         const msg = JSON.parse(raw)
-        this._emit(msg)
+        // ★ P0-01:未绑定 seat 的连接只允许 JOIN / ROOM_PROBE
+        if (seat < 0 && msg.type !== 'JOIN' && msg.type !== 'ROOM_PROBE') {
+          return
+        }
+        // 插件提供的 seat/connId 是可信身份,覆盖客户端可能伪造的 msg.from
+        msg.from = seat
+        this._emit({
+          ...msg,
+          trustedSenderSeat: seat,
+          trustedConnectionId: connId,
+        })
       } catch (e) {
         // 非法 JSON 忽略
       }
@@ -189,6 +199,23 @@ export class AndroidWsTransport {
     } catch (e) {
       // swallow
     }
+  }
+
+  /**
+   * ★ P1-13:host 对未绑定 seat 的匿名连接(如 ROOM_PROBE)定向回复。
+   * 优先使用原生 plugin 的 sendToConnection;不存在时返回 false,调用方回退到 seat 路由。
+   */
+  async sendToConnection(connId, msg) {
+    if (this._mode !== 'self') return false
+    if (connId == null || connId < 0) return false
+    const data = JSON.stringify(msg)
+    try {
+      if (typeof WsServer.sendToConnection === 'function') {
+        await WsServer.sendToConnection({ connId, message: data })
+        return true
+      }
+    } catch (e) { /* swallow */ }
+    return false
   }
 
   _sendClient(data) {

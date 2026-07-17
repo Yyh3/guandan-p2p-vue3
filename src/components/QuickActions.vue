@@ -6,14 +6,14 @@
    *          按钮尺寸 48 → 44,弱化"主操作"视觉(不再 primary 渐变)。
    -->
   <div class="quick-actions">
-    <button class="qa-btn" :title="sortTitle" @click="$emit('sort')">
-      <span class="qa-icon">🃏</span>
+    <button class="qa-btn" :title="sortTitle" :aria-label="sortTitle" @click="$emit('sort')">
+      <span class="qa-icon" aria-hidden="true">🃏</span>
     </button>
-    <button class="qa-btn" :title="autoTitle" @click="$emit('autoFind')">
-      <span class="qa-icon">⚡</span>
+    <button class="qa-btn" :title="autoTitle" :aria-label="autoTitle" @click="$emit('autoFind')">
+      <span class="qa-icon" aria-hidden="true">⚡</span>
     </button>
-    <button class="qa-btn" :title="chatTitle" @click="$emit('chat')">
-      <span class="qa-icon">💬</span>
+    <button class="qa-btn" :title="chatTitle" :aria-label="chatTitle" @click="$emit('chat')">
+      <span class="qa-icon" aria-hidden="true">💬</span>
       <span v-if="unreadCount > 0" class="qa-badge">{{ unreadCount }}</span>
     </button>
   </div>

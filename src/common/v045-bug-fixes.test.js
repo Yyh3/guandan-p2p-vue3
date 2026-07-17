@@ -84,6 +84,14 @@ console.log('\n=== 2. host 主动退出调 requestHostMigration(API 行为) ==='
   const snap = { hands: 'mock', currentPlayer: 1, levelRank: 14 }
   const r = Host.requestHostMigration(2, snap)
   assert('host 调 requestHostMigration(2, snap) 返回 true', r === true)
+  // v0.4.22 P0-10:旧 host 发送定向 HOST_MIGRATION_SECRET_STATE 后,
+  //   需等待新 host 回复 MIGRATION_READY 才广播公开 PEER_LEAVE。
+  //   这里模拟新 host 回复 MIGRATION_READY。
+  const tr = Host._getTransport()
+  if (tr && tr._emit) {
+    tr._emit({ type: 'MIGRATION_READY', from: 2, trustedSenderSeat: 2, ts: Date.now() })
+  }
+  await new Promise(resolve => setTimeout(resolve, 20))
   // v0.4.22 P0-06:公开 PEER_LEAVE 只含迁移元数据,完整 snapshot 通过定向 HOST_MIGRATION_SECRET_STATE 发给新 host
   const peerLeave = capturedSends.find(m => m.type === 'PEER_LEAVE')
   const secret = capturedSends.find(m => m.type === 'HOST_MIGRATION_SECRET_STATE')

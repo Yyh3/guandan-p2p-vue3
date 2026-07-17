@@ -192,7 +192,7 @@ console.log('\n=== 6. P1-4: game.applyPlay 防御 cards-not-found + useGameLogic
   assert('useGameLogic 有 _appliedActionIds Set', /const _appliedActionIds\s*=\s*new Set\(\)/.test(src))
   assert('useGameLogic 有 _dedupActionId(actionId) 函数', /function _dedupActionId/.test(src))
   assert('useGameLogic onP2PPlay 调用 _dedupActionId 去重',
-    /onP2PPlay[\s\S]*?_dedupActionId\(payload\.actionId \?\? payload\.ts\)/.test(src)
+    /onP2PPlay[\s\S]*?_dedupActionId\(payload\.commitId \?\? payload\.actionId \?\? payload\.ts\)/.test(src)
   )
 }
 

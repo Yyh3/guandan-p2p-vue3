@@ -2,8 +2,8 @@
  * v0.4.8 N-3:真实 BGM 集成测试
  *
  * 覆盖:
- *   1. BGM_TRACKS map 完整性(7 首 MP3 都有对应文件)
- *   2. setBgmStyle 接受 7 个 key,reject 未知 key
+ *   1. BGM_TRACKS map 完整性(3 首 MP3 都有对应文件)
+ *   2. setBgmStyle 接受 3 个 key,reject 未知 key
  *   3. isBgmMp3() API 存在
  *   4. startBgm / stopBgm 在 Node 环境(无 window.Audio)走 Web Audio fallback,不抛错
  *   5. setBgmVolume 在无 audio el 时不抛错
@@ -27,7 +27,7 @@ function eq(name, a, b) {
 const audioUrl = './audio.js?t=' + Date.now() + '_' + Math.random()
 const audio = await import(audioUrl)
 
-console.log('\n=== 1. BGM_TRACKS 7 首 MP3 文件存在 ===')
+console.log('\n=== 1. BGM_TRACKS 3 首 MP3 文件存在 ===')
 {
   const fs = await import('fs')
   const path = await import('path')
@@ -36,10 +36,6 @@ console.log('\n=== 1. BGM_TRACKS 7 首 MP3 文件存在 ===')
     energetic: 'bgm-chinese.mp3',
     calm: 'bgm-carefree.mp3',
     bossa: 'bgm-bossa.mp3',
-    ripples: 'bgm-ripples.mp3',
-    intense: 'bgm-asian-drums.mp3',
-    warm: 'bgm-firesong.mp3',
-    casual: 'bgm-galway.mp3',
   }
   let totalSize = 0
   for (const [style, fname] of Object.entries(tracks)) {
@@ -51,27 +47,29 @@ console.log('\n=== 1. BGM_TRACKS 7 首 MP3 文件存在 ===')
       assert(`BGM ${style} ${fname} 大小 > 100KB (实际 ${(sz / 1024).toFixed(0)}KB)`, sz > 100 * 1024)
     }
   }
-  assert(`7 首总大小 < 40MB (实际 ${(totalSize / 1024 / 1024).toFixed(1)}MB)`, totalSize < 40 * 1024 * 1024)
+  assert(`3 首总大小 < 40MB (实际 ${(totalSize / 1024 / 1024).toFixed(1)}MB)`, totalSize < 40 * 1024 * 1024)
 }
 
-console.log('\n=== 2. setBgmStyle 接受 7 个 key ===')
+console.log('\n=== 2. setBgmStyle 接受 3 个 key ===')
 {
-  const styles = ['energetic', 'normal', 'main', 'calm', 'idle', 'lobby', 'bossa', 'ripples', 'intense', 'drums', 'warm', 'casual']
+  const styles = ['energetic', 'normal', 'main', 'calm', 'idle', 'lobby', 'bossa']
   for (const s of styles) {
     audio.setBgmStyle(s)
     assert(`setBgmStyle('${s}') 接受 → getBgmStyle='${s}'`, audio.getBgmStyle() === s)
   }
 }
 
-console.log('\n=== 3. setBgmStyle 拒绝未知 key ===')
+console.log('\n=== 3. setBgmStyle 未知 key 回退到 energetic ===')
 {
-  const prev = audio.getBgmStyle()
+  audio.setBgmStyle('bossa')
   audio.setBgmStyle('unknown-style')
-  assert(`setBgmStyle('unknown-style') 不改当前 style`, audio.getBgmStyle() === prev)
+  assert(`setBgmStyle('unknown-style') 回退到 energetic`, audio.getBgmStyle() === 'energetic')
+  audio.setBgmStyle('bossa')
   audio.setBgmStyle('')
-  assert(`setBgmStyle('') 也不改`, audio.getBgmStyle() === prev)
+  assert(`setBgmStyle('') 回退到 energetic`, audio.getBgmStyle() === 'energetic')
+  audio.setBgmStyle('bossa')
   audio.setBgmStyle(null)
-  assert(`setBgmStyle(null) 也不改`, audio.getBgmStyle() === prev)
+  assert(`setBgmStyle(null) 回退到 energetic`, audio.getBgmStyle() === 'energetic')
 }
 
 console.log('\n=== 4. isBgmMp3() API 存在 + 状态正确 ===')
@@ -117,18 +115,17 @@ console.log('\n=== 7. setBgmStyle 切换时不抛错(Node 走合成) ===')
   try { audio.setBgmStyle('calm') } catch (e) { err = e }
   assert('startBgm 后 setBgmStyle(calm) 不抛错', err === null)
   assert('切换后 getBgmStyle=calm', audio.getBgmStyle() === 'calm')
-  try { audio.setBgmStyle('intense') } catch (e) { err = e }
-  assert('切 intense 也不抛错', err === null)
+  try { audio.setBgmStyle('bossa') } catch (e) { err = e }
+  assert('切 bossa 也不抛错', err === null)
   audio.stopBgm()
 }
 
-console.log('\n=== 8. 7 首 MP3 都是合法 MPEG audio ===')
+console.log('\n=== 8. 3 首 MP3 都是合法 MPEG audio ===')
 {
   const fs = await import('fs')
   const path = await import('path')
   const audioDir = path.resolve('./src/assets/audio')
-  const files = ['bgm-chinese.mp3', 'bgm-carefree.mp3', 'bgm-bossa.mp3', 'bgm-ripples.mp3',
-    'bgm-asian-drums.mp3', 'bgm-firesong.mp3', 'bgm-galway.mp3']
+  const files = ['bgm-chinese.mp3', 'bgm-carefree.mp3', 'bgm-bossa.mp3']
   for (const f of files) {
     const fp = path.join(audioDir, f)
     if (!fs.existsSync(fp)) continue

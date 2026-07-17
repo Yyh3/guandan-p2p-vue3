@@ -1,7 +1,7 @@
 <template>
   <div class="invite-overlay" @click.self="onClose">
     <div class="invite-card app-panel-dark">
-      <button class="invite-close" @click="onClose" aria-label="关闭">✕</button>
+      <button class="invite-close" @click="onClose" aria-label="关闭"><span aria-hidden="true">✕</span></button>
       <h3 class="invite-title">邀请好友</h3>
       <p class="invite-hint">让好友连接同一热点后加入</p>
 
@@ -9,6 +9,7 @@
         <QrFallbackCard
           :host-ip="hostIp"
           :host-port="hostPort"
+          :room-no="roomNo"
           :qrcode-url="qrDataUrl"
           @copied="onCopied"
         />

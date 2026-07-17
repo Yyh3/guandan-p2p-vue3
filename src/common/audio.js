@@ -23,7 +23,7 @@
  *   import audio from '@/common/audio.js'
  *   audio.unlock()                          // 首次用户交互后调用,解锁 AudioContext
  *   audio.startBgm()                        // 开背景音乐(默认 energetic 风格)
- *   audio.setBgmStyle('energetic'|'calm'|...) // 切换 BGM 风格(支持 7 种 key)
+ *   audio.setBgmStyle('energetic'|'calm'|'bossa') // 切换 BGM 风格(内置 3 首)
  *   audio.stopBgm()
  *   audio.setBgmEnabled(bool)
  *   audio.setBgmVolume(0..1)
@@ -66,12 +66,12 @@ let bgmPadIdx = 0
 let lastTickAt = 0
 const TICK_COOLDOWN_MS = 500
 
-// v0.4.8 N-3:真实 BGM 加载 — Kevin MacLeod CC-BY 7 首 MP3
+// v0.4.8 N-3:真实 BGM 加载 — Kevin MacLeod CC-BY,安装包精简为 3 首 MP3
 //   - Vite 用 new URL(import.meta.url) 静态资源处理,会自动 hash + 复制到 dist/assets/
 //   - Node 测试环境跑 audio.test.js 时不会触发 startBgmMp3,但 new URL 调用本身不 throw
 //   - 用 key → URL map 风格切换;加载失败时降级 Web Audio 合成
 const BGM_TRACKS = {
-  // 核心 3 首(终审建议保留)
+  // 安装包内置 3 首(主对局 / 等待结算 / 备选)
   energetic: 'bgm-chinese.mp3',     // 主对局 — 中式器乐,茶馆打牌氛围
   normal:    'bgm-chinese.mp3',
   main:      'bgm-chinese.mp3',
@@ -79,12 +79,6 @@ const BGM_TRACKS = {
   idle:      'bgm-carefree.mp3',
   lobby:     'bgm-carefree.mp3',
   bossa:     'bgm-bossa.mp3',       // 备选 — Bossa Antigua 慵懒闲适
-  // 备用 4 首
-  ripples:   'bgm-ripples.mp3',     // 舒缓氛围 — 残局紧张时刻
-  intense:   'bgm-asian-drums.mp3', // 亚洲鼓乐 — 炸弹连击
-  drums:     'bgm-asian-drums.mp3',
-  warm:      'bgm-firesong.mp3',    // 温暖民谣 — 大厅/房间等待
-  casual:    'bgm-galway.mp3',      // 爱尔兰风笛 — 轻松休闲
 }
 
 // ★ v0.4.9:真实 SFX 采样表
@@ -658,17 +652,17 @@ function setBgmEnabled(on) {
 }
 
 function setBgmStyle(style) {
-  // v0.4.8 N-3:支持 7 种 BGM 风格 key(任何 BGM_TRACKS 里的 key 都接受)
-  //   兼容旧版 'energetic' | 'calm'
+  // v0.4.23:精简为 3 种 BGM 风格 key(任何 BGM_TRACKS 里的 key 都接受)
+  //   兼容旧版 'energetic' | 'calm';旧/非法值自动回退到 energetic
   const allowed = Object.keys(BGM_TRACKS)
-  if (!allowed.includes(style)) return
-  const changed = bgmStyle !== style
-  bgmStyle = style
+  const resolved = allowed.includes(style) ? style : 'energetic'
+  const changed = resolved !== bgmStyle
+  bgmStyle = resolved
   // 如果当前在播放,且 style 改了,无缝切歌
   if (changed && bgmStarted) {
     if (bgmUseMp3) {
       // 切 MP3
-      startMp3Bgm(style)
+      startMp3Bgm(resolved)
     } else if (bgmTimer) {
       // 切合成 — 清掉旧 timer,从新 tempo 重启
       clearTimeout(bgmTimer)

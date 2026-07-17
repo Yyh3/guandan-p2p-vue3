@@ -21,9 +21,18 @@
  */
 
 import * as E from './guandan-engine.js'
-import * as AI from './guandan-ai.js'
+
+// ★ v0.4.23:AI 模块改为动态导入,实现代码分割,避免进入主 chunk。
+let aiModule = null
+async function _loadAI() {
+  if (aiModule) return aiModule
+  aiModule = await import('./guandan-ai.js')
+  return aiModule
+}
 
 const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
+
+const SNAPSHOT_VERSION = 2
 
 function createGame(opts) {
   const { seats = 4, levelRank = 15, isHost = true, aiPlayers: initialAI = [], seed = null, difficulty = 'medium', selfSeat = 0 } = opts
@@ -464,7 +473,7 @@ function applyPlay(seat, cards, hand, rec) {
     // v3.x P2-21 修复:之前 setTimeout ID 没存,状态变化时无法取消,可能触发过期回调
     // ★ P1-13:aiTimer 是模块级变量,不在可序列化 state 中
     if (aiTimer) clearTimeout(aiTimer)
-    aiTimer = setTimeout(() => {
+    aiTimer = setTimeout(async () => {
       aiTimer = null
       if (state.currentPlayer !== seat) return
       const hand = state.hands[seat]
@@ -476,6 +485,7 @@ function applyPlay(seat, cards, hand, rec) {
       // ★ V0410-07 修复:传 state.difficulty 给 AI.decide,自动 AI 也用全局 AI 难度
       //   旧版只 useGameLogic 的提示/帮出路径传 difficulty,guandan-game 自己的
       //   scheduleAI 走默认 medium → AI 对手/接管场景 hard 难度不生效
+      const AI = await _loadAI()
       const r = AI.decide(hand, state.lastPlay, state.levelRank, ctx, state.difficulty)
       if (r.type === 'play') {
         // ★ 静态审查 BUG-I 修复:先调 playerPlay 本地校验,成功后再 broadcast,
@@ -656,11 +666,9 @@ function applyPlay(seat, cards, hand, rec) {
     }
   }
 
-  return {
+  const api = {
     on, off, emit,
     getState,
-    // ★ 测试/诊断用:返回内部 state 的可变引用(仅测试使用,生产代码不要写)
-    _state: state,
     // ★ v0.4.14 对抗性审查 (V0412-05 / V0412-07):完整 + 深拷贝的 state 快照
     //   用于 host 迁移 / 重连 / 网络同步。getState() 仍保留兼容 UI 计算 / debug。
     getSnapshot,
@@ -688,10 +696,24 @@ function applyPlay(seat, cards, hand, rec) {
       if (!authoritativeState || typeof authoritativeState !== 'object') {
         return { ok: false, error: 'missing_authoritative_state' }
       }
-      // ★ P0-04/05:必须携带完整 hands,否则视为 host 崩溃(无完整 state),拒绝升级
+      // ★ P0-04/05:必须携带完整 hands + handCounts,否则视为 host 崩溃(无完整 state),拒绝升级
       const hands = authoritativeState.hands
+      const handCounts = authoritativeState.handCounts
       if (!Array.isArray(hands) || hands.length !== 4 || !hands.every(h => Array.isArray(h))) {
         return { ok: false, error: 'missing_authoritative_state' }
+      }
+      if (!Array.isArray(handCounts) || handCounts.length !== 4 ||
+          !handCounts.every(n => Number.isInteger(n) && n >= 0 && n <= 27)) {
+        return { ok: false, error: 'incomplete_authoritative_state' }
+      }
+      const inactive = new Set([
+        ...(Array.isArray(authoritativeState.finishedOrder) ? authoritativeState.finishedOrder : []),
+        ...(Array.isArray(authoritativeState.abandonedSeats) ? authoritativeState.abandonedSeats : []),
+      ])
+      for (let seat = 0; seat < 4; seat++) {
+        if (!inactive.has(seat) && hands[seat].length !== handCounts[seat]) {
+          return { ok: false, error: 'incomplete_authoritative_state' }
+        }
       }
       const r = this.applySnapshot(authoritativeState)
       if (!r.ok) return r
@@ -852,26 +874,52 @@ function applyPlay(seat, cards, hand, rec) {
     //   任何字段非法都不能留下"应用一半"的损坏状态。
     _applySnapshot(snap) {
       if (!snap || typeof snap !== 'object') return { ok: false, error: 'invalid_snapshot' }
-      const isValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
+      const localIsValidSeat = (v) => typeof v === 'number' && v >= 0 && v <= 3
       const validPhase = ['idle', 'dealing', 'playing', 'trick_end', 'finished']
+
+      // ★ P1-05:若 snapshot 显式声明 schemaVersion,则必须匹配
+      if ('schemaVersion' in snap && snap.schemaVersion !== SNAPSHOT_VERSION) {
+        return { ok: false, error: 'unsupported_snapshot_version' }
+      }
+
+      // ★ P1-08:单张牌校验;hand id 集合用于 P1-09 跨区重复检查
+      const handIds = new Set()
+      function isValidCard(c) {
+        if (!c || typeof c !== 'object') return false
+        if (typeof c.rank !== 'number' || typeof c.suit !== 'number') return false
+        if (c.rank < 3 || c.rank > 17) return false
+        if (c.suit < -1 || c.suit > 3) return false
+        if (c.suit === -1 && !(c.rank === 16 || c.rank === 17)) return false
+        if ('id' in c) {
+          if (!Number.isInteger(c.id) || c.id < 0 || c.id > 107) return false
+        }
+        return true
+      }
+      function validateCardArray(arr, forbidIds = null) {
+        if (!Array.isArray(arr)) return false
+        const localIds = new Set()
+        for (const c of arr) {
+          if (!isValidCard(c)) return false
+          if ('id' in c) {
+            if (forbidIds && forbidIds.has(c.id)) return false
+            if (localIds.has(c.id)) return false
+            localIds.add(c.id)
+          }
+        }
+        return true
+      }
 
       // ★ P0-09 修复:hands 必须整体合法,任一字段非法都直接拒绝,不纠正为 []。
       function validateHands(hands) {
         if (!Array.isArray(hands) || hands.length !== 4) return false
         let total = 0
-        const seenIds = new Set()
         for (const h of hands) {
           if (!Array.isArray(h)) return false
           if (h.length > 27) return false
           total += h.length
+          if (!validateCardArray(h)) return false
           for (const c of h) {
-            if (!c || typeof c !== 'object') return false
-            if (typeof c.rank !== 'number' || typeof c.suit !== 'number') return false
-            if ('id' in c) {
-              if (typeof c.id !== 'number') return false
-              if (seenIds.has(c.id)) return false
-              seenIds.add(c.id)
-            }
+            if ('id' in c) handIds.add(c.id)
           }
         }
         if (total > 108) return false
@@ -886,15 +934,15 @@ function applyPlay(seat, cards, hand, rec) {
         next.hands = snap.hands.map(h => Array.isArray(h) ? h.slice() : [])
       }
       if ('handCounts' in snap) {
-        if (!Array.isArray(snap.handCounts) || snap.handCounts.length !== 4 || !snap.handCounts.every(n => typeof n === 'number')) {
+        // ★ P1-06:handCounts 必须是 0~27 的整数
+        if (!Array.isArray(snap.handCounts) || snap.handCounts.length !== 4 ||
+            !snap.handCounts.every(n => Number.isInteger(n) && n >= 0 && n <= 27)) {
           return { ok: false, error: 'invalid_handCounts' }
         }
         next.handCounts = snap.handCounts.slice()
       }
       if ('tableCards' in snap) {
-        if (!Array.isArray(snap.tableCards) || !snap.tableCards.every(c => c && typeof c === 'object' && typeof c.rank === 'number' && typeof c.suit === 'number')) {
-          return { ok: false, error: 'invalid_tableCards' }
-        }
+        if (!validateCardArray(snap.tableCards, handIds)) return { ok: false, error: 'invalid_tableCards' }
         next.tableCards = snap.tableCards.slice()
       }
       if ('lastPlay' in snap) {
@@ -903,8 +951,8 @@ function applyPlay(seat, cards, hand, rec) {
           if (!lp || typeof lp !== 'object' ||
               (typeof lp.type !== 'number' && typeof lp.type !== 'string') ||
               typeof lp.mainRank !== 'number' ||
-              typeof lp.length !== 'number' || !isValidSeat(lp.who) ||
-              !Array.isArray(lp.cards)) {
+              typeof lp.length !== 'number' || !localIsValidSeat(lp.who) ||
+              !Array.isArray(lp.cards) || !validateCardArray(lp.cards, handIds)) {
             return { ok: false, error: 'invalid_lastPlay' }
           }
         }
@@ -912,22 +960,22 @@ function applyPlay(seat, cards, hand, rec) {
       }
 
       if ('currentPlayer' in snap) {
-        if (!isValidSeat(snap.currentPlayer)) return { ok: false, error: 'invalid_currentPlayer' }
+        if (!localIsValidSeat(snap.currentPlayer)) return { ok: false, error: 'invalid_currentPlayer' }
         next.currentPlayer = snap.currentPlayer
       }
       if ('firstPlayer' in snap) {
-        if (!isValidSeat(snap.firstPlayer)) return { ok: false, error: 'invalid_firstPlayer' }
+        if (!localIsValidSeat(snap.firstPlayer)) return { ok: false, error: 'invalid_firstPlayer' }
         next.firstPlayer = snap.firstPlayer
       }
       if ('leaderPlayer' in snap) {
-        if (!isValidSeat(snap.leaderPlayer)) return { ok: false, error: 'invalid_leaderPlayer' }
+        if (!localIsValidSeat(snap.leaderPlayer)) return { ok: false, error: 'invalid_leaderPlayer' }
         next.leaderPlayer = snap.leaderPlayer
       }
       if ('trickHistory' in snap) {
         if (!Array.isArray(snap.trickHistory) || !snap.trickHistory.every(entry => {
-          if (!entry || typeof entry !== 'object' || !isValidSeat(entry.seat)) return false
+          if (!entry || typeof entry !== 'object' || !localIsValidSeat(entry.seat)) return false
           if (entry.pass === true) return true
-          return Array.isArray(entry.cards)
+          return Array.isArray(entry.cards) && validateCardArray(entry.cards, handIds)
         })) {
           return { ok: false, error: 'invalid_trickHistory' }
         }
@@ -938,13 +986,17 @@ function applyPlay(seat, cards, hand, rec) {
         next.difficulty = snap.difficulty
       }
       if ('finishedOrder' in snap) {
+        // ★ P1-07:finishedOrder 不允许重复
         if (!Array.isArray(snap.finishedOrder) ||
-            !snap.finishedOrder.every(s => isValidSeat(s))) return { ok: false, error: 'invalid_finishedOrder' }
+            snap.finishedOrder.length !== new Set(snap.finishedOrder).size ||
+            !snap.finishedOrder.every(s => localIsValidSeat(s))) return { ok: false, error: 'invalid_finishedOrder' }
         next.finishedOrder = snap.finishedOrder.slice()
       }
       if ('abandonedSeats' in snap) {
+        // ★ P1-07:abandonedSeats 不允许重复
         if (!Array.isArray(snap.abandonedSeats) ||
-            !snap.abandonedSeats.every(s => isValidSeat(s))) return { ok: false, error: 'invalid_abandonedSeats' }
+            snap.abandonedSeats.length !== new Set(snap.abandonedSeats).size ||
+            !snap.abandonedSeats.every(s => localIsValidSeat(s))) return { ok: false, error: 'invalid_abandonedSeats' }
         next.abandonedSeats = snap.abandonedSeats.slice()
       }
 
@@ -1013,6 +1065,13 @@ function applyPlay(seat, cards, hand, rec) {
       return { ok: true }
     },
   }
+  // ★ P1-14:生产构建(Vite)不暴露可变 _state;Node 测试环境保留以便单测访问
+  const isViteTest = typeof import.meta.env !== 'undefined' && import.meta.env.MODE === 'test'
+  const isNodeEnv = typeof process !== 'undefined'
+  if (isViteTest || isNodeEnv) {
+    api._state = state
+  }
+  return api
 }
 
 export { createGame }

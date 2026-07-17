@@ -87,7 +87,7 @@
 
     <!-- ===== 顶部左侧:菜单 + 本局打 + 倍数 ===== -->
     <div class="hud-topleft">
-      <button class="menu-btn" @click="$emit('menu')" title="菜单">≡</button>
+      <button class="menu-btn" @click="$emit('menu')" title="菜单" aria-label="菜单"><span aria-hidden="true">≡</span></button>
       <!-- v3.x:级别徽章 — 金色金属渐变 + 黑色"打 X" -->
       <div class="hud-card level-card badge-gold" :title="`本局打 ${levelLabel}`">
         <div class="hud-label">打</div>
@@ -107,8 +107,9 @@
           class="icon-btn"
           :class="{ active: iconActive === 'fight' }"
           @click="$emit('icon', 'fight')"
+          aria-label="对局"
         >
-          <span class="emoji">🏆</span>
+          <span class="emoji" aria-hidden="true">🏆</span>
           <span v-if="fightBadge > 0" class="badge">{{ fightBadge }}</span>
           <span class="tip">对局</span>
         </button>
@@ -116,24 +117,27 @@
           class="icon-btn"
           :class="{ active: iconActive === 'pattern' }"
           @click="$emit('icon', 'pattern')"
+          aria-label="牌型"
         >
-          <span class="emoji">📊</span>
+          <span class="emoji" aria-hidden="true">📊</span>
           <span class="tip">牌型</span>
         </button>
         <button
           class="icon-btn"
           :class="{ active: iconActive === 'more' }"
           @click="$emit('icon', 'more')"
+          aria-label="更多"
         >
-          <span class="emoji">⋯</span>
+          <span class="emoji" aria-hidden="true">⋯</span>
           <span class="tip">更多</span>
         </button>
         <button
           class="icon-btn"
           :class="{ active: iconActive === 'settings' }"
           @click="$emit('icon', 'settings')"
+          aria-label="设置"
         >
-          <span class="emoji">⚙</span>
+          <span class="emoji" aria-hidden="true">⚙</span>
           <span class="tip">设置</span>
         </button>
       </div>

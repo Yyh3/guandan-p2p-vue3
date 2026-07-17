@@ -302,7 +302,7 @@ console.log('\n=== 11. P0-01 单牌级选择 ===')
   check('onClear 清空选择', logic.selectedCount.value === 0)
 
   // 提示后按具体牌 ID 选中
-  logic.onHintToggle(true)
+  await logic.onHintToggle(true)
   check('提示后 selectedCount > 0', logic.selectedCount.value > 0)
   const selected = logic.selectedCardsFromIds()
   check('selectedCardsFromIds 返回选中牌', selected.length === logic.selectedCount.value)

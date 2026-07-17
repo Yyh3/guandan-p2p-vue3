@@ -26,14 +26,14 @@
 
     <!-- 顶部栏 -->
     <header class="room-header">
-      <button class="header-menu" @click="showMenu" title="菜单" data-testid="menu-btn">≡</button>
+      <button class="header-menu" @click="showMenu" title="菜单" aria-label="菜单" data-testid="menu-btn"><span aria-hidden="true">≡</span></button>
       <div class="header-title">
         <span class="header-label">房间</span>
         <span class="header-roomno">{{ roomNo }}</span>
       </div>
       <div class="header-meta">
         <span class="net-status" :class="netStatusClass">{{ netStatus }}</span>
-        <button class="header-more" @click="onEditMyInfo" title="编辑昵称" data-testid="edit-info-btn">⋯</button>
+        <button class="header-more" @click="onEditMyInfo" title="编辑昵称" aria-label="编辑昵称" data-testid="edit-info-btn"><span aria-hidden="true">⋯</span></button>
       </div>
     </header>
 
@@ -82,7 +82,7 @@
       <div v-if="isHostSeat(s)" class="seat-badge seat-badge-crown" aria-label="房主">👑</div>
       <div class="seat-avatar-wrap">
         <div class="seat-avatar">
-          <span class="avatar-icon">{{ getPeer(s)?.avatar || '🀄' }}</span>
+          <span class="avatar-icon" aria-hidden="true">{{ getPeer(s)?.avatar || '🀄' }}</span>
           <div v-if="getPeer(s)?.ready" class="ready-mark" aria-label="已准备">✓</div>
         </div>
       </div>
@@ -91,7 +91,7 @@
         {{ myReady ? '取消准备' : '准备' }}
       </button>
       <div v-else-if="isSelfSeat(s) && isHost" class="seat-host-label">房主</div>
-      <button v-if="isHost && canKick(s)" class="seat-kick" @click="onKickPlayer(s)" title="踢出房间" :data-testid="`kick-seat-${s}`">✕</button>
+      <button v-if="isHost && canKick(s)" class="seat-kick" @click="onKickPlayer(s)" title="踢出房间" aria-label="踢出该玩家" :data-testid="`kick-seat-${s}`"><span aria-hidden="true">✕</span></button>
       <button v-if="isHost && isTeammateSeat(s) && getPeer(s)" class="seat-swap" @click="onSwapWithTeammate" data-testid="swap-btn">换队友</button>
     </div>
 
@@ -108,7 +108,7 @@
     </div>
 
     <!-- 切牌（保留但弱化） -->
-    <div class="cut-card" @click="onCut" data-testid="cut-card">♠♦♣♥<br/><span class="cut-card-text">切牌</span></div>
+    <div class="cut-card" @click="onCut" data-testid="cut-card" role="img" aria-label="切牌"><span aria-hidden="true">♠♦♣♥</span><br/><span class="cut-card-text">切牌</span></div>
 
     <!-- 同步切牌覆盖层 -->
     <div v-if="isCutting" class="cut-overlay" role="dialog" aria-modal="true" aria-label="切牌定首家">
@@ -157,6 +157,7 @@ import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import net from '@/common/network.js'
 import WsServer, { isNativeCapacitor } from '@/common/ws-server.js'
+import { buildRoomJoinUrl } from '@/common/qr-fallback.js'
 import NicknameEditor from '@/components/NicknameEditor.vue'
 import InviteDialog from '@/components/InviteDialog.vue'
 import { showConfirm, showToast } from '@/common/dialog-bus.js'
@@ -305,7 +306,9 @@ async function generateQr() {
   if (!hostIp.value) return
   const lib = await ensureQrcodeLib()
   if (!lib) return
-  const text = `ws://${hostIp.value}:${hostPort.value}`
+  // ★ P1-15:二维码编码可打开的 http join URL,普通扫码器也能识别。
+  const text = buildRoomJoinUrl(hostIp.value, hostPort.value, roomNo.value)
+  if (!text) return
   try {
     qrDataUrl.value = await lib.toDataURL(text, { width: 180, margin: 1 })
   } catch (e) {
@@ -328,7 +331,8 @@ function formatHostAddr() {
   return `${hostIp.value}:${hostPort.value}`
 }
 
-async function initNetwork() {
+// ★ P1-13:把 RoomView 的网络监听与网络初始化拆开,支持从 GameView 返回房间时复用已有 session。
+function attachRoomListeners() {
   onNet('connect', ({ seat, info }) => {
     netStatus.value = '🟢'
     if (seat != null && info) {
@@ -440,7 +444,60 @@ async function initNetwork() {
       if (netHostSeat != null && netHostSeat >= 0 && netHostSeat <= 3) hostSeat.value = netHostSeat
     } catch (e) { /* swallow */ }
   })
+}
 
+async function syncRoomStateFromNetwork() {
+  try {
+    const ns = net.getSelfSeat ? net.getSelfSeat() : null
+    if (ns != null && ns >= 0 && ns <= 3) mySeat.value = ns
+    const nh = net.getHostSeat ? net.getHostSeat() : null
+    if (nh != null && nh >= 0 && nh <= 3) hostSeat.value = nh
+  } catch (e) { /* swallow */ }
+  peers.clear()
+  try {
+    const netPeers = net.getPeers ? net.getPeers() : null
+    if (netPeers) {
+      for (const [s, info] of netPeers.entries()) {
+        peers.set(s, { ...info })
+      }
+    }
+  } catch (e) { /* swallow */ }
+  const me = mySeat.value != null ? peers.get(mySeat.value) : null
+  if (me) {
+    if (me.nickname) myName.value = me.nickname
+    if (me.avatar) myAvatar.value = me.avatar
+    myReady.value = !!me.ready
+  }
+  netStatus.value = net.isConnected && net.isConnected() ? '🟢' : '🔴'
+  if (isHost.value && isNative.value) {
+    try {
+      const ipRes = await WsServer.getLocalIp()
+      hostIp.value = ipRes?.ip || ''
+      const t = net._getTransport && net._getTransport()
+      if (t && typeof t.getBoundPort === 'function') hostPort.value = t.getBoundPort() || 8848
+      await generateQr()
+    } catch (e) {
+      hostIp.value = '(获取失败)'
+    }
+  }
+}
+
+async function initNetwork() {
+  // ★ P1-13:若已有活跃 session 且房间号/角色匹配,直接复用,避免重复 startAsHost/joinRoom。
+  const hasSession = typeof net.isConnected === 'function' && net.isConnected()
+  if (hasSession) {
+    const sameRoom = net.getRoomId() === roomNo.value
+    const sameRole = net.isHost() === isHost.value
+    if (sameRoom && sameRole) {
+      attachRoomListeners()
+      await syncRoomStateFromNetwork()
+      return
+    }
+    // session 不匹配(房间号或角色变了),关闭后重新初始化
+    try { net.close() } catch (e) { /* swallow */ }
+  }
+
+  attachRoomListeners()
   if (isHost.value) {
     net.setRoomId(roomNo.value)
     const r = net.startAsHost({ nickname: myName.value, avatar: myAvatar.value })
@@ -500,7 +557,10 @@ function showMenu() {
     cancelText: '取消',
     onConfirm: () => {
       cleanupRoomListeners()
-      try { net.close(isHost.value ? { broadcast: true } : {}) } catch (e) { /* swallow */ }
+      try {
+        if (isHost.value) net.close({ broadcast: true })
+        else net.leaveRoom()
+      } catch (e) { /* swallow */ }
       router.push('/')
     },
   })

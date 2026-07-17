@@ -51,7 +51,7 @@
 import { computed } from 'vue'
 import {
   formatHostAddress,
-  buildJoinUrl,
+  buildRoomJoinUrl,
   shouldShowFallback,
   describeFallbackMode,
   clipboardPayload,
@@ -61,12 +61,13 @@ const props = defineProps({
   hostIp: { type: String, default: null },
   hostPort: { type: [Number, String], default: 8848 },
   qrcodeUrl: { type: String, default: null },
+  roomNo: { type: String, default: '' },
 })
 
 const emit = defineEmits(['copied'])
 
 const mode = computed(() => describeFallbackMode(props.qrcodeUrl))
-const joinUrl = computed(() => buildJoinUrl(props.hostIp, props.hostPort))
+const joinUrl = computed(() => buildRoomJoinUrl(props.hostIp, props.hostPort, props.roomNo))
 
 function onCopy() {
   const text = clipboardPayload(props.hostIp, props.hostPort)

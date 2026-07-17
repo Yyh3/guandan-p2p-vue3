@@ -43,7 +43,7 @@
       <!-- 左:菜单 + 本局打 + 倍数 -->
       <div class="hud-left">
         <button class="menu-btn" @click="showMenu" title="菜单" aria-label="菜单">
-          <span class="menu-icon">≡</span>
+          <span class="menu-icon" aria-hidden="true">≡</span>
         </button>
         <div class="hud-card level-card">
           <div class="hud-label">本局打</div>
@@ -112,7 +112,7 @@
         <span v-if="seatData.left.showCount" class="opp-count" :class="{ urgent: seatData.left.isUrgent }">
           {{ seatData.left.cardCount }}
         </span>
-        <span v-if="seatData.left.isDone" class="opp-done">✓</span>
+        <span v-if="seatData.left.isDone" class="opp-done" aria-hidden="true">✓</span>
       </button>
     </div>
     <div v-if="seatData.right" class="seat-right-mobile">
@@ -126,7 +126,7 @@
         <span v-if="seatData.right.showCount" class="opp-count" :class="{ urgent: seatData.right.isUrgent }">
           {{ seatData.right.cardCount }}
         </span>
-        <span v-if="seatData.right.isDone" class="opp-done">✓</span>
+        <span v-if="seatData.right.isDone" class="opp-done" aria-hidden="true">✓</span>
       </button>
     </div>
 
@@ -156,7 +156,12 @@
 
     <!-- ===== 6. 状态提示条 (发牌中 / 等待) ===== -->
     <div v-if="isDealing || phase === 'finished'" class="status-tip-mobile">
-      <span v-if="isDealing">🃏 发牌中...</span>
+      <template v-if="isDealing">
+        <span>🃏 发牌中 {{ dealProgress }}%</span>
+        <div class="deal-progress-bar" aria-hidden="true">
+          <div class="deal-progress-fill" :style="{ width: dealProgress + '%' }"></div>
+        </div>
+      </template>
       <span v-else-if="phase === 'finished'">本局结束</span>
     </div>
 
@@ -187,7 +192,7 @@
           >
             <span class="result-rank-mobile">{{ ['头游','二游','三游','末游'][i] }}</span>
             <span class="result-name-mobile">{{ playerName(seat) }}</span>
-            <span class="result-team-mobile">{{ isWinningSeat(seat) ? '🏆 胜方' : '💀 负方' }}</span>
+            <span class="result-team-mobile"><span aria-hidden="true">{{ isWinningSeat(seat) ? '🏆' : '💀' }}</span> {{ isWinningSeat(seat) ? '胜方' : '负方' }}</span>
           </div>
         </div>
         <div class="result-actions-mobile">
@@ -222,7 +227,7 @@
       @click="onAutoFindBest"
       title="智能理牌 · 自动凑炸弹/顺子/三带二"
     >
-      <span class="ss-icon">✨</span>
+      <span class="ss-icon" aria-hidden="true">✨</span>
       <span class="ss-text">理牌</span>
     </button>
     <div class="hand-area" :class="{ disabled: isDealing, 'is-urgent': urgent && myTurn }">
@@ -273,8 +278,9 @@
         :disabled="!lastPlay"
         @click="onPass"
         title="不出"
+        aria-label="不出"
       >
-        <span class="action-icon">—</span>
+        <span class="action-icon" aria-hidden="true">—</span>
         <span class="action-text">不出</span>
       </button>
       <button
@@ -283,8 +289,9 @@
         @click="onHintToggle(true)"
         :class="{ active: hintCards.length > 0 }"
         title="提示"
+        aria-label="提示"
       >
-        <span class="action-icon">💡</span>
+        <span class="action-icon" aria-hidden="true">💡</span>
         <span class="action-text">提示</span>
       </button>
       <button
@@ -292,8 +299,9 @@
         :disabled="selectedCount === 0"
         @click="onPlay"
         title="出牌"
+        aria-label="出牌"
       >
-        <span class="action-icon">✓</span>
+        <span class="action-icon" aria-hidden="true">✓</span>
         <span class="action-text">出牌</span>
       </button>
     </div>
@@ -308,7 +316,7 @@
     <!-- ===== 10. host 迁移提示 ===== -->
     <transition name="toast">
       <div v-if="hostMigrationToast" class="host-mig-toast" :class="{ 'is-self': hostMigrationToast.isMyself }" role="status" aria-live="polite">
-        <span class="mig-icon">👑</span>
+        <span class="mig-icon" aria-hidden="true">👑</span>
         <span class="mig-text">{{ hostMigrationToast.text }}</span>
       </div>
     </transition>
@@ -376,7 +384,10 @@ function onBackToRoom() {
   })
 }
 function exitGame() {
-  try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
+  try {
+    if (isNetworkHost.value) net.close({ broadcast: true, reason: 'user_leave' })
+    else net.leaveRoom({ reason: 'user_leave' })
+  } catch (e) {}
   router.replace('/')
 }
 
@@ -402,7 +413,7 @@ const {
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
   players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, turnTimeLeft, finishedOrder,
-  isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
+  isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
   isRestartAfterA, isNetworkHost, game,
@@ -632,9 +643,9 @@ onUnmounted(() => {
   content: '';
   position: absolute;
   left: 50%;
-  top: -86vh;
-  width: 124vw;
-  height: 160vh;
+  top: -60vh;
+  width: 110vw;
+  height: 130vh;
   min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
@@ -652,9 +663,9 @@ onUnmounted(() => {
 .bg-wood-edge {
   position: absolute;
   left: 50%;
-  top: -92vh;
-  width: 128vw;
-  height: 170vh;
+  top: -64vh;
+  width: 112vw;
+  height: 136vh;
   min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
@@ -1066,6 +1077,22 @@ button {
   z-index: 7;
   letter-spacing: 2px;
   backdrop-filter: blur(6px);
+  min-width: 120px;
+  text-align: center;
+}
+.deal-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.deal-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd54f, #ffca28);
+  border-radius: 2px;
+  transition: width 80ms linear;
 }
 
 /* ============================================================

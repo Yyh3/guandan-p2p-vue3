@@ -28,6 +28,19 @@ export function buildJoinUrl(hostIp, hostPort) {
   return `http://${hostIp}:${port}`
 }
 
+// ★ P1-15:构建可被任意浏览器/扫码器打开的 room join URL
+//   使用 hash 路由,让未安装 App 的浏览器也能直接加入房间。
+//   返回形如 http://IP:port/#/room?role=joiner&roomNo=ROOM&host=IP:port
+export function buildRoomJoinUrl(hostIp, hostPort, roomNo) {
+  if (hostIp == null || hostIp === '') return null
+  const port = hostPort == null || hostPort === '' ? 8848 : hostPort
+  const room = roomNo == null || roomNo === '' ? '' : String(roomNo)
+  const hostAddr = `${hostIp}:${port}`
+  const params = new URLSearchParams({ role: 'joiner', host: hostAddr })
+  if (room) params.set('roomNo', room)
+  return `http://${hostAddr}/#/room?${params.toString()}`
+}
+
 // 判断是否应该展示 QR fallback 卡片
 //   永远 true(IP 存在时) — 卡片是兜底,不是 qr 失败后才出现
 //   null IP 时不渲染(等 initNetwork 拿到 hostIp)
@@ -63,11 +76,13 @@ export function clipboardPayload(hostIp, hostPort) {
 
 // ★ v0.4.9:解析 QR 扫描结果(joinRemoteRoom 走 IP:port 格式)
 //
-//   支持 3 种格式:
+//   支持 4 种格式:
 //     1) 纯 IP:port  "192.168.43.1:8848"
 //     2) join URL    "http://192.168.43.1:8848" 或 "https://..."
 //     3) 含路径      "http://192.168.43.1:8848/#/join"  → 取 origin
-//   返回 { host, port } 或 null(无法解析)
+//     4) P1-15 room URL "http://192.168.43.1:8848/#/room?role=joiner&roomNo=123456&host=192.168.43.1:8848"
+//        → 同时提取 roomNo
+//   返回 { host, port, roomNo? } 或 null(无法解析)
 //
 // ★ V049-09 修复:IP / port 范围校验
 //   旧版:只匹配数字格式,接受 999.999.999.999:99999 等明显非法值
@@ -101,7 +116,7 @@ export function parseQrScanResult(text) {
       port,
     }
   }
-  // 2) http(s)://... → 提取 host:port
+  // 2) http(s)://... → 提取 host:port,并尝试从 hash query 取 roomNo
   try {
     const url = new URL(trimmed)
     if (url.hostname && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname)) {
@@ -109,9 +124,18 @@ export function parseQrScanResult(text) {
       if (!_isValidIpv4Octets(octets)) return null
       const port = url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80)
       if (!_isValidPort(port)) return null
+      // P1-15:优先从 hash fragment 的 query 中取 roomNo,也兼容普通 search
+      let roomNo = null
+      const query = url.hash ? url.hash.replace(/^#/, '') : url.search
+      if (query) {
+        const params = new URLSearchParams(query.startsWith('?') ? query : query.replace(/^[^?]*\?/, ''))
+        const rn = params.get('roomNo')
+        if (rn) roomNo = rn
+      }
       return {
         host: url.hostname,
         port,
+        roomNo,
       }
     }
     // hostname 不是 IP(比如域名)→ 暂不支持

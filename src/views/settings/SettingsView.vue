@@ -68,9 +68,8 @@
           </div>
         </div>
 
-        <!-- ★ UX 改进:默认 3 首 BGM,其余作为可选资源提示 -->
         <div class="card card-subtle">
-          <p class="card-hint">当前内置 7 首 BGM。为减小安装包,未来版本将默认只保留 3 首,其余可在此按需下载。</p>
+          <p class="card-hint">当前内置 3 首 BGM,已精简安装包体积。</p>
         </div>
 
         <div class="card">
@@ -256,15 +255,11 @@ function toggleSection(key) {
   collapsedSections.value[key] = !collapsedSections.value[key]
 }
 
-// v0.4.8 N-3:7 首真实 BGM(Kevin MacLeod CC-BY),用户可在设置页切换
+// v0.4.23:安装包精简为 3 首真实 BGM(Kevin MacLeod CC-BY)
 const bgmStyles = [
   { id: 'energetic', label: '中式器乐' },  // bgm-chinese.mp3 主对局
   { id: 'calm', label: '轻快明快' },       // bgm-carefree.mp3 等待/结算
   { id: 'bossa', label: 'Bossa 爵士' },    // bgm-bossa.mp3 慵懒闲适
-  { id: 'ripples', label: '舒缓氛围' },    // bgm-ripples.mp3 残局
-  { id: 'intense', label: '亚洲鼓乐' },    // bgm-asian-drums.mp3 炸弹连击
-  { id: 'warm', label: '温暖民谣' },       // bgm-firesong.mp3 大厅
-  { id: 'casual', label: '爱尔兰风笛' },   // bgm-galway.mp3 休闲
 ]
 // ★ v0.4.9:SFX 风格(合成 vs 真实采样)
 const sfxModes = [
@@ -288,7 +283,9 @@ onMounted(() => {
   bgmVolume.value = Math.round((s.bgmVolume ?? 0.5) * 100)
   sfxVolume.value = Math.round((s.sfxVolume ?? 0.7) * 100)
   // 优先用 storage 持久化的值,fallback 到 audio 模块当前值
-  bgmStyle.value = s.bgmStyle || audio.getBgmStyle() || 'energetic'
+  //   若旧版存储了已移除的风格,自动回退到 energetic
+  const allowedStyleIds = new Set(bgmStyles.map(x => x.id))
+  bgmStyle.value = allowedStyleIds.has(s.bgmStyle) ? s.bgmStyle : 'energetic'
   // ★ v0.4.9:SFX 模式(synth / real)
   sfxMode.value = s.sfxMode || audio.getSfxMode() || 'synth'
   voiceEnabled.value = s.voiceEnabled !== false

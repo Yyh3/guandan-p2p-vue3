@@ -38,9 +38,9 @@ console.log('\n=== 1. V0410-01: ROUND_END 广播加 isNetworkHost 守卫 + round
   assert('roundEnd handler 内 isNetworkHost.value 守卫已加(防 joiner 广播)',
     !!roundEndBroadcastMatch
   )
-  // roundId 稳定化:不再用 Date.now()
-  const roundIdMatch = src.match(/roundId:\s*`r\$\{st\?\.round[^`]*ranksKey[^`]*`/)
-  assert('ROUND_END roundId 用 host round + ranksKey 生成(不用 Date.now())',
+  // roundId 稳定化:不再用 Date.now(),且包含 matchInstanceId 防重开碰撞
+  const roundIdMatch = src.match(/roundId[^,}]*`[^`]*\$\{matchInstanceId[^`]*r\$\{st\?\.round[^`]*ranksKey[^`]*`/)
+  assert('ROUND_END roundId 用 matchInstanceId + host round + ranksKey 生成(不用 Date.now())',
     !!roundIdMatch
   )
   // 不再含 Date.now() in roundId

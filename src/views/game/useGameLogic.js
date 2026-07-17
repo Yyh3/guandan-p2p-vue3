@@ -22,9 +22,16 @@
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { createGame } from '@/common/guandan-game.js'
 import * as E from '@/common/guandan-engine.js'
-import AI from '@/common/guandan-ai.js'
 import dealAnim from '@/common/deal-animation.js'
 import audio from '@/common/audio.js'
+
+// ★ v0.4.23:AI 模块改为运行时动态导入,实现代码分割,避免打包进主 chunk。
+let aiModulePromise = null
+async function _loadAI() {
+  if (aiModulePromise) return aiModulePromise
+  aiModulePromise = import('../../common/guandan-ai.js')
+  return aiModulePromise
+}
 import { bombFxForType, floatingPosition } from '@/common/effects.js'
 import net from '@/common/network.js'
 import { rotateSeats } from '@/common/seat-rotation.js'
@@ -88,6 +95,8 @@ export function useGameLogic(opts = {}) {
   const dealTimeout = ref(false)
   // ★ LOGIC-04 修复:当前 deal 标识,超时重试时避免本地 fork
   const currentDealId = ref('')
+  // ★ P0-09:每轮比赛的唯一标识,用于 ROUND_END / 历史记录去重
+  let matchInstanceId = ''
 
   // 4 个玩家座位(0=下=自己, 1=左, 2=上=队友, 3=右)
   const players = ref([
@@ -122,6 +131,7 @@ export function useGameLogic(opts = {}) {
 
   // v3 状态
   const isDealing = ref(false)
+  const dealProgress = ref(0)
   const hintCards = ref([])
   const bombFx = ref(null)
   const floatingPasses = ref([])
@@ -161,6 +171,7 @@ export function useGameLogic(opts = {}) {
   const hostMigrationToast = ref(null)
   const hostMigrationBadge = ref(false)
   let hostMigToastTimer = null
+  let hostMigBadgeTimer = null
   function showHostMigrationToast({ isMyself, newHostSeat }) {
     if (isMyself) {
       hostMigrationToast.value = { text: '你已成为新房主', isMyself: true }
@@ -173,6 +184,10 @@ export function useGameLogic(opts = {}) {
       hostMigrationToast.value = null
     }, isMyself ? 5000 : 3000)
     hostMigrationBadge.value = true
+    if (hostMigBadgeTimer) clearTimeout(hostMigBadgeTimer)
+    hostMigBadgeTimer = addTimer(() => {
+      hostMigrationBadge.value = false
+    }, 5000)
   }
   // ★ BUG-RC2-003 修复:抽 refreshUiFromGameState() 公共函数
   //   任何 _applySnapshot / applySnapshot 之后都应统一刷新 UI refs
@@ -217,34 +232,39 @@ export function useGameLogic(opts = {}) {
     const oldHostSeat = payload.oldHostSeat ?? 0
     const newHostSeat = payload.newHostSeat
     if (newHostSeat == null) return
+    // ★ P0-03:本机成为新 host 时,必须先把 game 升到 host 权威模式,再 toast / rebuild。
+    if (isMyself && game.value && game.value.promoteToHost) {
+      const promoted = game.value.promoteToHost(payload.snapshot)
+      if (!promoted?.ok) {
+        showToast('房主迁移失败，本局将结束')
+        try { net.emit && net.emit('host:lost', { reason: promoted?.error || 'promote_failed', ts: Date.now() }) } catch (_) {}
+        return
+      }
+    } else if (!isMyself && game.value && payload.snapshot) {
+      const applied = game.value.applySnapshot ? game.value.applySnapshot(payload.snapshot) : { ok: true }
+      if (!applied?.ok) {
+        console.warn('[P2P] host migration snapshot apply failed', applied?.error)
+        return
+      }
+    }
     showHostMigrationToast({ isMyself, newHostSeat })
     // ★ Phase 1:host 迁移座位稳定。
     //   network 层保持新 host 原 seat 不变,isHostFlag=true;
     //   game 层只把旧 host seat 标记 abandoned,currentPlayer 等指向新 host;
     //   UI 层同步 selfSeat / isNetworkHost / myHand。
-    //   修法:
-    //   1) 同步 selfSeat.value / isNetworkHost.value 到 net 权威值
-    //   2) applySnapshot 接 host 端权威完整 state(seat 映射不变)
-    //   3) 调 game.migrateHost(oldHostSeat, newHostSeat) 把旧 host 标记弃赛、currentPlayer 交给新 host
-    //   4) refreshUiFromGameState() 刷 UI refs
     try {
       // 1) 同步 useGameLogic 内部状态
       const netSelfSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
       selfSeat.value = netSelfSeat
       const netIsHost = (() => { try { return !!net.isHost && net.isHost() } catch { return false } })()
       isNetworkHost.value = netIsHost
-      // 2) 先 applySnapshot — 把 state 恢复到"迁移前"完整状态(seat 映射 = 不变)
-      if (game.value && payload.snapshot) {
-        if (game.value.applySnapshot) game.value.applySnapshot(payload.snapshot)
-        else if (game.value._applySnapshot) game.value._applySnapshot(payload.snapshot)
-      }
-      // 3) 再 migrateHost — 旧 host 标记 abandoned,新 host 保持原 seat
+      // 2) 再 migrateHost — 旧 host 标记 abandoned,新 host 保持原 seat
       if (game.value && game.value.migrateHost) {
         game.value.migrateHost(oldHostSeat, newHostSeat)
       }
       // ★ P1-03:旧 host 座位由 AI 接管,同步 players UI(加 (AI) 后缀)
       onP2PAITakeover({ seat: oldHostSeat })
-      // 4) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
+      // 3) 刷 UI refs(旁观者也走这条,跟新 host 同步最新 game state)
       refreshUiFromGameState()
     } catch (e) { console.warn('host migration state sync err', e) }
     // ★ v0.4.16 对抗性复查 (V0414-02):本机是新 host 时,必须重建服务端 transport
@@ -523,6 +543,7 @@ export function useGameLogic(opts = {}) {
   }
   function startDealAnimation() {
     isDealing.value = true
+    dealProgress.value = 0
     dealTimeout.value = false
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
@@ -562,6 +583,7 @@ export function useGameLogic(opts = {}) {
       dealAnim.start({
         container, center, targets,
         cardsPerSeat: 27, stagger: 70, flightDuration: 380,
+        onProgress: (p) => { dealProgress.value = Math.round(p * 100) },
         onComplete: () => {
           if (dealTimeoutId) { clearTimeout(dealTimeoutId); dealTimeoutId = null }
           isDealing.value = false
@@ -624,6 +646,12 @@ export function useGameLogic(opts = {}) {
     const seed = opts2.seed
     const firstSeat = opts2.firstSeat != null ? opts2.firstSeat : opts.firstSeat
     currentDealId.value = String(seed ?? Date.now())
+    // ★ P0-09:每局新比赛生成唯一 matchInstanceId;reuse 时保留已有(如 retryDeal)
+    if (opts2.reuse !== true || !matchInstanceId) {
+      matchInstanceId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    }
     // ★ Phase3 UI 修复:用 getter 替代常量快照,selfSeat 在 host 迁移后会变,
     //   旧常量 me 在事件监听器里不会更新,导致 turn/play 等事件按旧 seat 处理。
     // ★ P2-01:getMe 回退到 0 当 selfSeat 非法,避免 players[-1]
@@ -776,18 +804,18 @@ export function useGameLogic(opts = {}) {
       //   修复后:加 isNetworkHost.value 守卫,joiner 端静默走本地结算 + 等 host 广播
       if (isP2PMode.value && isNetworkHost.value && !suppressRoundEndBroadcast) {
         const st = game.value && game.value.getState ? game.value.getState() : null
-        // ★ V0410-01 roundId 稳定化:用 host round + ranks 生成,不用 Date.now()
-        //   旧版 Date.now() 不同端同一局会产生不同 roundId,接收端 lastAppliedRoundId
-        //   去重失效。修复后 roundId 由 host 权威生成,所有端一致。
+        // ★ P0-09:roundId 包含 matchInstanceId,防止重开后与上一轮碰撞
         const ranksKey = (ranks || []).join('-') || 'none'
+        const roundId = `${matchInstanceId}:r${st?.round ?? 0}:${ranksKey}`
         const payload = {
           ranks,
           levelUp: lu,
           newLevelRank,
-          roundId: `r${st?.round ?? 0}-${ranksKey}`,
+          roundId,
           tribute: st?.tribute ?? null,
           teamLevels: st?.teamLevels ?? [newLevelRank, newLevelRank],
           round: st?.round ?? 0,
+          matchInstanceId,
           // ★ V049-02 修复:ROUND_END payload 带过 A 标志 + 前等级
           //   joiner 端 onP2PRoundEnd 用权威值,不再从本地 state 推断
           isRestartAfterA: !!ira,
@@ -796,17 +824,18 @@ export function useGameLogic(opts = {}) {
         net.broadcast({ type: 'ROUND_END', payload })
       }
       // ★ GD-RC-001 修复:网络 host 才写历史(原 selfSeat===0 在 host 换队友后失效)
+      // ★ P1-15/P1-16:历史记录增加 matchInstanceId,避免重开后去重碰撞
       if (!isP2PMode.value || isNetworkHost.value) {
         const st = game.value?.getState ? game.value.getState() : null
         storage.addHistory({
           time: Date.now(),
           ranks, levelUp: lu, levelRank: newLevelRank,
           players: players.value.map(p => ({ name: p.name, avatar: p.avatar })),
-          // ★ Phase 3-B:历史记录携带本局标识与玩家座位,用于去重与按实际座位统计
           matchId: net.getRoomId ? net.getRoomId() : 'local',
+          matchInstanceId,
           roundId: st?.round ?? 0,
           mySeat: selfSeat.value,
-          myPlayerId: selfSeat.value,
+          myPlayerId: (() => { try { return net.getSelfInfo?.()?.uuid || selfSeat.value } catch { return selfSeat.value } })(),
         })
       }
     })
@@ -875,13 +904,14 @@ function commitPlay(seat, cards, source = 'manual') {
   const actionId = _generateActionId()
   // ★ P0-03 host 权威模型:joiner 只发 PLAY_INTENT,不动本地 game;host 校验后广播 PLAY_COMMITTED
   if (isP2PMode.value && !isNetworkHost.value) {
-    net.broadcast({ type: 'PLAY_INTENT', payload: { seat, cards, source, actionId, ts: Date.now() } })
+    net.broadcast({ type: 'PLAY_INTENT', payload: { seat, cards, source, clientActionId: actionId, actionId, ts: Date.now() } })
     return { ok: true, pending: true }
   }
   const r = game.value.playerPlay(seat, cards)
   if (!r || !r.ok) return r || { ok: false, error: 'playerPlay 失败' }
   if (isP2PMode.value) {
-    net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source, actionId, ts: Date.now() } })
+    // ★ P0-02:host 直接出的牌也使用 commitId,joiner 统一按 commitId 去重
+    net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat, cards, source, commitId: actionId, actionId, ts: Date.now() } })
   }
   return r
 }
@@ -889,13 +919,13 @@ function commitPass(seat, source = 'manual') {
   if (!game.value) return { ok: false, error: 'game not initialized' }
   const actionId = _generateActionId()
   if (isP2PMode.value && !isNetworkHost.value) {
-    net.broadcast({ type: 'PASS_INTENT', payload: { seat, source, actionId, ts: Date.now() } })
+    net.broadcast({ type: 'PASS_INTENT', payload: { seat, source, clientActionId: actionId, actionId, ts: Date.now() } })
     return { ok: true, pending: true }
   }
   const r = game.value.playerPass(seat)
   if (!r || !r.ok) return r || { ok: false, error: 'playerPass 失败' }
   if (isP2PMode.value) {
-    net.broadcast({ type: 'PASS_COMMITTED', payload: { seat, source, actionId, ts: Date.now() } })
+    net.broadcast({ type: 'PASS_COMMITTED', payload: { seat, source, commitId: actionId, actionId, ts: Date.now() } })
   }
   return r
 }
@@ -935,13 +965,14 @@ function commitPass(seat, source = 'manual') {
     selectCardIds(ids)
   }
 
-  function onHintToggle(show) {
+  async function onHintToggle(show) {
     haptics.click()
     if (show) {
       // ★ V049-01 修复:onHintToggle 作用域内 diff 未定义,补齐
       const diff = gameDifficulty.value
       // 跟牌场景:用 AI.decide 找最小可压(autoPlayGrouped 贪最强,不看 lastPlay,会导致提示用炸弹)
       // 首家场景:lastPlay=null,继续用 autoPlayGrouped 领出
+      const AI = await _loadAI()
       const r = lastPlay.value
         ? AI.decide(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
         : AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
@@ -1072,6 +1103,11 @@ function commitPass(seat, source = 'manual') {
   function onRestartMatch() {
     haptics.click()
     const newSeed = _newRestartSeed()
+    // ★ P0-09:重开新一轮时生成新 matchInstanceId,清空上轮去重 ID
+    matchInstanceId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    _lastAppliedRoundEndId = null
     if (isP2PMode.value) {
       // ★ V049-03 修复:P2P 模式下 host 广播新 seed + levelRank,
       //   joiner 收到后用同一 seed restartMatch 保证牌局一致
@@ -1084,7 +1120,7 @@ function commitPass(seat, source = 'manual') {
           try {
             net.broadcast({
               type: 'MATCH_RESTART',
-              payload: { levelRank: 15, seed: newSeed, restartId: `rr${Date.now()}` },
+              payload: { levelRank: 15, seed: newSeed, restartId: `rr${Date.now()}`, matchInstanceId },
             })
           } catch (e) { /* 离线或非 host 时 noop */ }
           afterMatchRestartRefresh()
@@ -1225,6 +1261,22 @@ function commitPass(seat, source = 'manual') {
     }
     return false
   }
+  // ★ P0-02:host 端按 playerUuid + clientActionId 去重 intent,防止恶意客户端复用旧 ID。
+  const _processedClientIntents = new Set()
+  const _processedClientIntentsOrder = []
+  function _dedupClientIntent(seat, clientActionId) {
+    if (clientActionId == null) return false
+    const uuid = (() => { try { return net.getPeers()?.get(seat)?.uuid || net.getSelfInfo?.()?.uuid } catch { return null } })()
+    const key = uuid ? `${uuid}:${clientActionId}` : `${seat}:${clientActionId}`
+    if (_processedClientIntents.has(key)) return true
+    _processedClientIntents.add(key)
+    _processedClientIntentsOrder.push(key)
+    if (_processedClientIntentsOrder.length > _ACTION_DEDUP_MAX) {
+      const old = _processedClientIntentsOrder.shift()
+      _processedClientIntents.delete(old)
+    }
+    return false
+  }
   function _generateActionId() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID()
@@ -1243,28 +1295,34 @@ function commitPass(seat, source = 'manual') {
     // 只有当前网络 host 处理 intent
     if (!isNetworkHost.value) return
     if (from !== payload.seat) return
+    const clientActionId = payload.clientActionId ?? payload.actionId
+    if (_dedupClientIntent(payload.seat, clientActionId)) return
     const st = game.value.getState()
     if (st.phase !== 'playing') return
     if (st.currentPlayer !== payload.seat) return
     if (!Array.isArray(payload.cards) || payload.cards.length === 0) return
     const r = game.value.playerPlay(payload.seat, payload.cards)
     if (r && r.ok) {
-      net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: payload.seat, cards: payload.cards, source: payload.source || 'manual', actionId: payload.actionId, ts: payload.ts || Date.now() } })
+      // ★ P0-02:host 为每次权威提交生成新的 commitId,与 clientActionId 分离
+      net.broadcast({ type: 'PLAY_COMMITTED', payload: { seat: payload.seat, cards: payload.cards, source: payload.source || 'manual', commitId: _generateActionId(), clientActionId, actionId: clientActionId, ts: payload.ts || Date.now() } })
     } else {
-      net.sendTo(payload.seat, { type: 'PLAY_REJECTED', payload: { actionId: payload.actionId, seat: payload.seat, error: r?.error || 'invalid_play' } })
+      net.sendTo(payload.seat, { type: 'PLAY_REJECTED', payload: { clientActionId, actionId: clientActionId, seat: payload.seat, error: r?.error || 'invalid_play' } })
     }
   }
   function onP2PPlayCommitted(payload, from, msg) {
     if (!payload || !game.value) return
     // 只接受当前 host 广播的 COMMITTED
     if (!_isHostAuthority(msg)) return
-    if (_dedupActionId(payload.actionId ?? payload.ts)) return
+    // ★ P0-02:joiner 用 host 生成的 commitId 去重,不再受 clientActionId 复用影响
+    if (_dedupActionId(payload.commitId ?? payload.actionId ?? payload.ts)) return
     try {
       game.value.applyPlay(payload.seat, payload.cards)
     } catch (e) { console.warn('applyPlay err', e) }
   }
   function onP2PPlayRejected(payload, from, msg) {
     if (!payload) return
+    // ★ P1-12:只有 host 权威的拒绝才显示
+    if (!_isHostAuthority(msg)) return
     if (payload.seat !== selfSeat.value) return
     showToast(payload.error || '出牌被 host 拒绝')
   }
@@ -1273,27 +1331,31 @@ function commitPass(seat, source = 'manual') {
     if (!payload || !game.value) return
     if (!isNetworkHost.value) return
     if (from !== payload.seat) return
+    const clientActionId = payload.clientActionId ?? payload.actionId
+    if (_dedupClientIntent(payload.seat, clientActionId)) return
     const st = game.value.getState()
     if (st.phase !== 'playing') return
     if (st.currentPlayer !== payload.seat) return
     if (!st.lastPlay) return
     const r = game.value.playerPass(payload.seat)
     if (r && r.ok) {
-      net.broadcast({ type: 'PASS_COMMITTED', payload: { seat: payload.seat, source: payload.source || 'manual', actionId: payload.actionId, ts: payload.ts || Date.now() } })
+      net.broadcast({ type: 'PASS_COMMITTED', payload: { seat: payload.seat, source: payload.source || 'manual', commitId: _generateActionId(), clientActionId, actionId: clientActionId, ts: payload.ts || Date.now() } })
     } else {
-      net.sendTo(payload.seat, { type: 'PASS_REJECTED', payload: { actionId: payload.actionId, seat: payload.seat, error: r?.error || 'invalid_pass' } })
+      net.sendTo(payload.seat, { type: 'PASS_REJECTED', payload: { clientActionId, actionId: clientActionId, seat: payload.seat, error: r?.error || 'invalid_pass' } })
     }
   }
   function onP2PPassCommitted(payload, from, msg) {
     if (!payload || !game.value) return
     if (!_isHostAuthority(msg)) return
-    if (_dedupActionId(payload.actionId ?? payload.ts)) return
+    if (_dedupActionId(payload.commitId ?? payload.actionId ?? payload.ts)) return
     try {
       game.value.applyPass(payload.seat)
     } catch (e) { console.warn('applyPass err', e) }
   }
   function onP2PPassRejected(payload, from, msg) {
     if (!payload) return
+    // ★ P1-12:只有 host 权威的拒绝才显示
+    if (!_isHostAuthority(msg)) return
     if (payload.seat !== selfSeat.value) return
     showToast(payload.error || '过牌被 host 拒绝')
   }
@@ -1331,6 +1393,11 @@ function commitPass(seat, source = 'manual') {
     // ★ V0410-03 修复:restartId 去重 — 同一 restartId 只应用一次,防重放攻击
     if (_appliedRestartIds.has(payload.restartId)) return
     _appliedRestartIds.add(payload.restartId)
+    // ★ P0-09:同步 host 的 matchInstanceId,清空上轮 ROUND_END 去重
+    matchInstanceId = payload.matchInstanceId || ((typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+    _lastAppliedRoundEndId = null
     const lr = (typeof payload.levelRank === 'number') ? payload.levelRank : 15
     // ★ Phase 2:joiner 不本地 restartMatch 发牌,而是重建 joiner 模式 game 等待 host 逐座 DEAL
     replaceGame(() => createGame({
@@ -1419,6 +1486,23 @@ function commitPass(seat, source = 'manual') {
     }
     phase.value = 'finished'
     stopTimer()
+    // ★ P1-15:每个 joiner 客户端也保存自己的战绩(不再只由 host 写)
+    if (isP2PMode.value && !isNetworkHost.value) {
+      try {
+        storage.addHistory({
+          time: Date.now(),
+          ranks: payload.ranks,
+          levelUp: payload.levelUp || 0,
+          levelRank: payload.newLevelRank,
+          players: players.value.map(p => ({ name: p.name, avatar: p.avatar })),
+          matchId: net.getRoomId ? net.getRoomId() : 'local',
+          matchInstanceId: payload.matchInstanceId || matchInstanceId,
+          roundId: payload.round,
+          mySeat: selfSeat.value,
+          myPlayerId: (() => { try { return net.getSelfInfo?.()?.uuid || selfSeat.value } catch { return selfSeat.value } })(),
+        })
+      } catch (e) { console.warn('[P2P] joiner save history failed', e) }
+    }
   }
   // ★ GD-RC-005 修复:snapshot 接收端用 targetSeat 判定(原 seat: 0 语义混乱)
   //   host 定向 sendTo(connSeat, { type: 'STATE_SNAPSHOT', targetSeat, snapshot })
@@ -1532,7 +1616,7 @@ function commitPass(seat, source = 'manual') {
     if (cur === seat && isNetworkHost.value) {
       // ★ Phase3 UI 修复:500ms 后再读 state,避免 setTimeout 外读取的 st 过期
       //   (期间可能已有其他玩家出牌/过牌,currentPlayer / hand / lastPlay 都已变)。
-      addTimer(() => {
+      addTimer(async () => {
         if (!game.value) return
         const st = game.value.getState()
         if (st.phase !== 'playing' || st.currentPlayer !== seat) return
@@ -1543,7 +1627,8 @@ function commitPass(seat, source = 'manual') {
             mySeatIndex: seat,
             teammateSeatIndex: (seat + 2) % 4,
           }
-          // Phase 4:统一使用静态导入的 AI，避免与动态导入并存产生构建警告
+          // v0.4.23:AI 动态导入,避免进入主 chunk
+          const AI = await _loadAI()
           const r = AI.decide(hand, st.lastPlay, st.levelRank, ctx, st.difficulty || 'medium')
           // ★ BUG-003:AI 接管出牌走 commitPlay 统一广播
           if (r.type === 'play') {
@@ -1759,7 +1844,7 @@ function commitPass(seat, source = 'manual') {
     round, levelRank, levelLabel, nextLevelLabel, levelUp, multiplier,
     players, myHand, selected, selectedCardIds, selectedColKeys, tableCards, lastPlay,
     phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder, game,
-    isDealing, hintCards, bombFx, floatingPasses, playedHistory,
+    isDealing, dealProgress, hintCards, bombFx, floatingPasses, playedHistory,
     suitFilter, isShaking, lastCardCounts, showNickToast, showChatPanel,
     chatPhraseToast, hostMigrationToast, hostMigrationBadge, urgent,
     isRestartAfterA,  // ★ v0.4.9:过 A 标志

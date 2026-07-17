@@ -16,6 +16,7 @@
 import {
   formatHostAddress,
   buildJoinUrl,
+  buildRoomJoinUrl,
   shouldShowFallback,
   describeFallbackMode,
   clipboardPayload,
@@ -62,7 +63,7 @@ eq('空字符串 port → 省略端口',
   formatHostAddress('127.0.0.1', ''),
   '127.0.0.1')
 
-console.log('\n=== 2. buildJoinUrl — http://IP:port 拼接 ===')
+console.log('\n=== 2. buildJoinUrl / buildRoomJoinUrl — http://IP:port 拼接 ===')
 
 eq('基本 IPv4 + 端口',
   buildJoinUrl('192.168.43.1', 8848),
@@ -83,6 +84,18 @@ eq('空字符串 port → 默认 8848 (v3.x P1-14 修复)',
 eq('hostname (localhost) 也接受',
   buildJoinUrl('localhost', 3000),
   'http://localhost:3000')
+
+// P1-15:带房间号的 hash join URL
+const roomUrl = buildRoomJoinUrl('192.168.43.1', 8848, '123456')
+eq('buildRoomJoinUrl 生成 hash join URL',
+  roomUrl,
+  'http://192.168.43.1:8848/#/room?role=joiner&host=192.168.43.1%3A8848&roomNo=123456')
+
+assert('buildRoomJoinUrl 缺 roomNo 时不带 roomNo 参数',
+  buildRoomJoinUrl('192.168.43.1', 8848).indexOf('roomNo=') === -1)
+
+assert('buildRoomJoinUrl null IP → null',
+  buildRoomJoinUrl(null, 8848, '123') === null)
 
 console.log('\n=== 3. shouldShowFallback — 卡片显示判断 ===')
 
@@ -191,6 +204,13 @@ console.log('\n=== 5. parseQrScanResult: 解析 QR 扫描结果 ===')
   // 5) 含路径的 URL(取 origin)
   const r5 = parseQrScanResult('http://192.168.43.1:8848/#/join')
   assert('★ URL 含路径仍解析正确', r5 && r5.host === '192.168.43.1' && r5.port === 8848)
+
+  // P1-15:room join URL 提取 roomNo
+  const r5b = parseQrScanResult('http://192.168.43.1:8848/#/room?role=joiner&host=192.168.43.1:8848&roomNo=123456')
+  assert('★ room URL 解析正确', r5b && r5b.host === '192.168.43.1' && r5b.port === 8848 && r5b.roomNo === '123456')
+
+  const r5c = parseQrScanResult('http://192.168.43.1:8848/#/room?role=joiner&host=192.168.43.1:8848')
+  assert('★ room URL 无 roomNo 时 roomNo 为 null', r5c && r5c.host === '192.168.43.1' && r5c.port === 8848 && r5c.roomNo === null)
 
   // 6) 不同端口
   const r6 = parseQrScanResult('http://10.0.0.5:9000')

@@ -26,7 +26,7 @@
     >
       <div class="chat-panel" @click.stop>
         <div class="chat-header">
-          <span class="chat-title">💬 聊天</span>
+          <span class="chat-title"><span aria-hidden="true">💬</span> 聊天</span>
           <button class="chat-close" @click="$emit('close')" title="关闭(Esc)">×</button>
         </div>
         <div class="chat-hint">点击短语,向房间内玩家广播(v2.0 接入,目前仅本地显示)</div>

@@ -355,7 +355,7 @@ console.log('\n=== 9. V049-09: parseQrScanResult IP/port 范围校验 ===')
   eq('合法 192.168.43.1(默认 8848)', ok4, { host: '192.168.43.1', port: 8848 })
   // URL 形式且 IP 合法
   const ok5 = parseQrScanResult('http://192.168.43.1:8848')
-  eq('合法 http URL', ok5, { host: '192.168.43.1', port: 8848 })
+  eq('合法 http URL', ok5, { host: '192.168.43.1', port: 8848, roomNo: null })
   // URL 形式 IP 不合法
   assert('http://999.999.999.999:8848 拒绝', parseQrScanResult('http://999.999.999.999:8848') === null)
   // 域名拒绝

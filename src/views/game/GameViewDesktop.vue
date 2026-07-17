@@ -40,6 +40,14 @@
       />
     </div>
 
+    <!-- 发牌进度提示 -->
+    <div v-if="isDealing" class="deal-progress-overlay">
+      <span class="deal-progress-label" role="status" aria-live="polite">🃏 发牌中 {{ dealProgress }}%</span>
+      <div class="deal-progress-bar" aria-hidden="true">
+        <div class="deal-progress-fill" :style="{ width: dealProgress + '%' }"></div>
+      </div>
+    </div>
+
     <!-- 特效层(覆盖全屏) -->
     <EffectLayer
       :bomb-fx="bombFx"
@@ -97,6 +105,7 @@
         class="suit-tab"
         :class="['suit-' + s, { active: suitFilter === s }]"
         @click="onSuitTab(s)"
+        :aria-label="['黑桃','方块','梅花','红桃'][s] + '筛选'"
       >{{ ['♠', '♦', '♣', '♥'][s] }}</button>
     </div>
 
@@ -143,13 +152,13 @@
               @click="onAutoFindBest"
               title="智能理牌 · 自动凑炸弹/顺子/三带二"
             >
-              <span class="sparkle">✨</span>智能理牌
+              <span class="sparkle" aria-hidden="true">✨</span>智能理牌
             </button>
           </div>
         </template>
       </MainActions>
       <div class="action-bar-sub">
-        <button class="sub-btn" @click="onClear">🗑 清空</button>
+        <button class="sub-btn" @click="onClear" aria-label="清空选择"><span aria-hidden="true">🗑</span> 清空</button>
       </div>
     </div>
 
@@ -168,7 +177,7 @@
           >
             <span class="result-rank">{{ ['头游', '二游', '三游', '末游'][i] }}</span>
             <span class="result-name">{{ playerName(seat) }}</span>
-            <span class="result-team">{{ isWinningSeat(seat) ? '🏆 胜方' : '💀 负方' }}</span>
+            <span class="result-team"><span aria-hidden="true">{{ isWinningSeat(seat) ? '🏆' : '💀' }}</span> {{ isWinningSeat(seat) ? '胜方' : '负方' }}</span>
           </div>
         </div>
         <div class="result-actions">
@@ -206,7 +215,7 @@
     <!-- v2.1 P3:host 迁移提示 — 新 host 显示"你已成为新房主",旁观者显示"X 已成为新房主" -->
     <transition name="toast">
       <div v-if="hostMigrationToast" class="host-mig-toast" :class="{ 'is-self': hostMigrationToast.isMyself }" role="status" aria-live="polite">
-        <span class="mig-icon">👑</span>
+        <span class="mig-icon" aria-hidden="true">👑</span>
         <span class="mig-text">{{ hostMigrationToast.text }}</span>
       </div>
     </transition>
@@ -363,7 +372,7 @@ const {
   round, levelLabel, nextLevelLabel, levelUp, multiplier,
   players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder,
-  isDealing, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
+  isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
   showNickToast, showChatPanel, chatPhraseToast,
   hostMigrationToast, hostMigrationBadge, urgent,
   isP2PMode, selfSeat, game, isNetworkHost,
@@ -393,7 +402,10 @@ const {
 // 路由相关的 UI 跳转(只能组件层做)
 function exitGame() {
   haptics.click()
-  try { net.close({ broadcast: true, reason: 'user_leave' }) } catch (e) {}
+  try {
+    if (isNetworkHost.value) net.close({ broadcast: true, reason: 'user_leave' })
+    else net.leaveRoom({ reason: 'user_leave' })
+  } catch (e) {}
   router.replace('/')
 }
 function onBack() { exitGame() }
@@ -501,9 +513,9 @@ function onNickEditorConfirmed(p) {
   content: '';
   position: absolute;
   left: 50%;
-  top: -86vh;
-  width: 124vw;
-  height: 160vh;
+  top: -60vh;
+  width: 110vw;
+  height: 130vh;
   min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
@@ -521,9 +533,9 @@ function onNickEditorConfirmed(p) {
 .bg-wood-edge {
   position: absolute;
   left: 50%;
-  top: -92vh;
-  width: 126vw;
-  height: 168vh;
+  top: -64vh;
+  width: 112vw;
+  height: 136vh;
   min-width: 720px;
   transform: translateX(-50%);
   border-radius: 50%;
@@ -542,6 +554,42 @@ function onNickEditorConfirmed(p) {
   background:
     radial-gradient(ellipse at center, #1f7a55 0%, #14533b 60%, #0a3d2c 100%);
   z-index: 0;
+}
+
+/* ============================================================
+ * v0.4.23:发牌进度提示(覆盖牌桌中央)
+ * ============================================================ */
+.deal-progress-overlay {
+  position: fixed;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  z-index: 5;
+  letter-spacing: 2px;
+  backdrop-filter: blur(6px);
+  min-width: 140px;
+  text-align: center;
+}
+.deal-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.deal-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd54f, #ffca28);
+  border-radius: 2px;
+  transition: width 80ms linear;
 }
 
 /* ============================================================

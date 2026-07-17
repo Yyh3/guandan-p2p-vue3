@@ -232,6 +232,7 @@ async function openScanner() {
         const parsed = parseQrScanResult(decodedText)
         if (parsed) {
           hostAddress.value = `${parsed.host}:${parsed.port}`
+          if (parsed.roomNo) roomNo.value = parsed.roomNo
           closeScanner()
         } else {
           scannerError.value = `无法解析该二维码内容: ${decodedText.slice(0, 50)}`

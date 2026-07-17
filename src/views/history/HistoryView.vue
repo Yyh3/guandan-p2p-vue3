@@ -64,7 +64,7 @@
     </div>
 
     <div v-if="history.length === 0" class="empty">
-      <div class="empty-icon">🏆</div>
+      <div class="empty-icon" aria-hidden="true">🏆</div>
       <p class="empty-text">暂无对局记录</p>
       <p class="empty-hint">完成第一局后，这里会显示胜率、升级趋势和最近战绩。</p>
       <button class="empty-action" @click="router.push('/')">去开一局</button>
@@ -83,8 +83,8 @@
           </div>
         </div>
         <div class="item-team">
-          <span v-if="isMyTeamWin(rec, rec.mySeat ?? 0)" class="win">🏆 你方获胜</span>
-          <span v-else class="lose">💀 对方获胜</span>
+          <span v-if="isMyTeamWin(rec, rec.mySeat ?? 0)" class="win"><span aria-hidden="true">🏆</span> 你方获胜</span>
+          <span v-else class="lose"><span aria-hidden="true">💀</span> 对方获胜</span>
         </div>
       </div>
     </div>

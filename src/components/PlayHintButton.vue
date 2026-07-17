@@ -5,16 +5,18 @@
       :class="{ active: showing }"
       :disabled="disabled"
       @click="onToggle"
+      :aria-label="showing ? '取消提示' : '提示'"
     >
-      <span class="hint-icon">{{ showing ? '✕' : '💡' }}</span>
+      <span class="hint-icon" aria-hidden="true">{{ showing ? '✕' : '💡' }}</span>
       <span class="hint-text">{{ showing ? '取消' : '提示' }}</span>
     </button>
     <button
       v-if="showing"
       class="app-btn app-btn-primary auto-btn"
       @click="onAutoPlay"
+      aria-label="按提示出牌"
     >
-      <span class="hint-icon">⚡</span>
+      <span class="hint-icon" aria-hidden="true">⚡</span>
       <span class="hint-text">按提示出</span>
     </button>
   </div>

@@ -176,5 +176,22 @@ check('script 中 performCutAndStart 函数存在',
   /function performCutAndStart\(\)/.test(roomFull))
 
 // =========================================================================
+section('8. P1-12 / P1-13 协议与 session 复用契约')
+// =========================================================================
+
+check('script 中定义 attachRoomListeners 函数',
+  /function attachRoomListeners\(\)/.test(roomFull))
+check('script 中定义 syncRoomStateFromNetwork 函数',
+  /async function syncRoomStateFromNetwork\(\)/.test(roomFull))
+check('initNetwork 中复用 session 前检查 net.isConnected',
+  /net\.isConnected\(\)/.test(roomFull))
+check('initNetwork 中比较 net.getRoomId() 与 roomNo',
+  /net\.getRoomId\(\) === roomNo\.value/.test(roomFull))
+check('initNetwork 中比较 net.isHost() 与 isHost',
+  /net\.isHost\(\) === isHost\.value/.test(roomFull))
+check('showMenu 中 joiner 调用 net.leaveRoom()',
+  /net\.leaveRoom\(\)/.test(roomFull))
+
+// =========================================================================
 console.log('\n========== 测试结果: ' + pass + ' 通过 / ' + fail + ' 失败 ==========')
 if (fail > 0) process.exit(1)

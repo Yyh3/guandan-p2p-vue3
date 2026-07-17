@@ -51,7 +51,7 @@ check('音乐风格容器使用 .style-list 而非 grid', /class="style-list"/.t
 check('音乐风格项使用 .style-row 紧凑行', /class="style-row"/.test(template))
 check('CSS 中 .style-list 存在', /\.style-list\s*\{/.test(style))
 check('CSS 中 .style-row 存在', /\.style-row\s*\{/.test(style))
-check('音乐风格项包含 7 首 BGM 提示文案', /当前内置 7 首 BGM/.test(template))
+check('音乐风格项包含 3 首 BGM 提示文案', /当前内置 3 首 BGM/.test(template))
 
 section('3. SVG 图标替换 emoji')
 check('script 引入 IconBack', /import IconBack from ['"]@\/components\/icons\/IconBack\.vue['"]/.test(full))

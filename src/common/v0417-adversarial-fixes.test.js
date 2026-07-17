@@ -175,9 +175,9 @@ console.log('\n=== 6. V0416-06: README 测试数字一致 ===')
   const baseline1887 = /基线是\s*1887|当前基线.*1887|1887\s*\/\s*0\s*(单测|用例|test)/.test(readmeSrc)
   check('README 没有把 1887 当作当前测试基线', !baseline1887)
 
-  // 6.3 README "测试覆盖" 段落应该提到当前 v0416-adversarial-fixes 30 case
-  check('README 测试覆盖提到 v0416-adversarial-fixes 30 case',
-    /v0416-adversarial-fixes\s+30\s+case/.test(readmeSrc))
+  // 6.3 README "测试覆盖" 段落应该提到当前 v0416-adversarial-fixes 31 case
+  check('README 测试覆盖提到 v0416-adversarial-fixes 31 case',
+    /v0416-adversarial-fixes\s+31\s+case/.test(readmeSrc))
 
   // 6.4 README 不能同时有 v0.4.15 当前 + v0.4.16 当前 — 只能一个"当前"
   //    (v0.4.15 段标 ✅完成,v0.4.16 段标 ✅当前)

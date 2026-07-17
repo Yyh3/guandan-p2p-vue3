@@ -40,6 +40,7 @@ const WsServer = registerPlugin('WsServer', {
       stopServer: async (opts) => { if (log) log.push({ m: 'stopServer', opts }); return { ok: true } },
       getLocalIp: async () => ({ ip: '127.0.0.1' }),
       sendToClient: make('sendToClient', { ok: false, sent: false }),
+      sendToConnection: make('sendToConnection', { ok: false, sent: false }),
       broadcast: make('broadcast', { ok: true, sent: 0 }),
       bindSeat: make('bindSeat', { ok: true, bound: true }),
       closeClient: make('closeClient', { ok: true }),  // v2.1 P1:测试环境默认 no-op-success

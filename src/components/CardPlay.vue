@@ -80,7 +80,7 @@
     </template>
 
     <!-- 提示灯泡(浮在右上) -->
-    <span v-if="hinted && !selected" class="hint-pin">💡</span>
+    <span v-if="hinted && !selected" class="hint-pin" aria-hidden="true">💡</span>
   </div>
 </template>
 
