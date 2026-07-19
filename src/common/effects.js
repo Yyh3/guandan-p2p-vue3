@@ -5,8 +5,10 @@
 
 /**
  * 牌型 → 中央大字特效
+ * ★ v0.4.25:扩展非炸弹特殊牌型(顺子/连对/钢板/三带二)轻量强调动画;
+ *   shake 字段标记是否伴随屏幕震动(仅炸弹级震屏,其余不打扰)
  * @param {string|number} type TYPE.X(recognize 返回)或字符串牌型名
- * @returns {{ kind: 'bomb'|'joker'|'super'|'none', text: string } | null}
+ * @returns {{ kind: string, text: string, shake: boolean } | null}
  */
 // ★ v0.4.24 修复:引擎 TYPE 是数字枚举,game 'play' 事件直接携带数字 type —
 //   先做数字→字符串映射,数字入参也能命中炸弹/王炸/同花顺特效(旧版全部返回 null)
@@ -18,14 +20,19 @@ const TYPE_NUM_TO_NAME = {
 }
 export function bombFxForType(type) {
   if (typeof type === 'number') type = TYPE_NUM_TO_NAME[type]
-  if (type === 'JOKER_BOMB') return { kind: 'joker', text: '王炸' }
+  if (type === 'JOKER_BOMB') return { kind: 'joker', text: '王炸', shake: true }
   if (typeof type === 'string' && type.startsWith('BOMB')) {
     if (type === 'BOMB_6' || type === 'BOMB_7' || type === 'BOMB_8' || type === 'BOMB_9' || type === 'BOMB_10') {
-      return { kind: 'super', text: '超级炸弹' }
+      return { kind: 'super', text: '超级炸弹', shake: true }
     }
-    return { kind: 'bomb', text: '炸弹' }
+    return { kind: 'bomb', text: '炸弹', shake: true }
   }
-  if (type === 'STRAIGHT_FLUSH') return { kind: 'super', text: '同花顺' }
+  if (type === 'STRAIGHT_FLUSH') return { kind: 'super', text: '同花顺', shake: true }
+  // ★ v0.4.25:非炸弹特殊牌型 — 中央弹跳大字强调(不震屏,颜色区分牌型)
+  if (type === 'STRAIGHT_TRIPLE') return { kind: 'plate', text: '钢板', shake: false }
+  if (type === 'STRAIGHT_PAIR') return { kind: 'pairseq', text: '连对', shake: false }
+  if (type === 'STRAIGHT') return { kind: 'straight', text: '顺子', shake: false }
+  if (type === 'TRIPLE_PAIR') return { kind: 'triplepair', text: '三带二', shake: false }
   return null
 }
 

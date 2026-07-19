@@ -33,7 +33,7 @@
    *   - 不引入 vw / vh 极端单位(避免键盘弹出 / 状态栏变化抖动)
    *   - scroll 用 -webkit-overflow-scrolling: touch
    -->
-  <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape }">
+  <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape, 'simple-mode': simpleMode }">
     <!-- v3.x:背景 — 椭圆 felt 翡翠绿 + 木纹边(跟桌面端一致的视觉语言,UI-REDESIGN-V3-SPEC.md §3.1+§3.6) -->
     <div class="bg-felt"></div>
     <div class="bg-wood-edge" aria-hidden="true"></div>
@@ -138,6 +138,12 @@
         :table-cards="tableCards"
         :first-player-name="firstPlayerName"
         :first-player-emoji="firstPlayerEmoji"
+        :last-player-name="lastPlayerName"
+        :last-player-emoji="lastPlayerEmoji"
+        :last-player-pos="lastPlayerPos"
+        :team-levels="teamLevels"
+        :level-rank-num="levelRank"
+        :self-seat="selfSeat"
         :is-level="isLevel"
         :is-dealing="isDealing"
         :level-label="levelLabel"
@@ -222,6 +228,8 @@
     </div>
 
     <!-- ===== 7. 手牌 28% (按 rank 分组竖叠,9 列 56px 宽) ===== -->
+    <!-- v0.4.25:记牌器(右缘悬浮,理牌按钮上方) -->
+    <CardCounter class="counter-fab-mobile" :rows="cardCounter" :level-rank="levelRank" />
     <button
       class="smart-sort-float"
       :disabled="isDealing || phase !== 'playing' || myHand.length === 0"
@@ -232,7 +240,21 @@
       <span class="ss-text">理牌</span>
     </button>
     <div class="hand-area" :class="{ disabled: isDealing, 'is-urgent': urgent && myTurn }">
-      <div class="hand-inner" :style="{ '--overlap': handOverlap + 'px' }">
+      <!-- v0.4.25:选中牌型实时预览(识别 + 可压指示) -->
+      <transition name="preview-fade">
+        <div
+          v-if="selectedPreview"
+          class="selected-preview"
+          :class="{ invalid: !selectedPreview.ok, can: selectedPreview.beat === true, cant: selectedPreview.beat === false }"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="sp-text">{{ selectedPreview.text }}</span>
+          <span v-if="selectedPreview.beat === true" class="sp-verdict ok">✓ 可压</span>
+          <span v-else-if="selectedPreview.beat === false" class="sp-verdict no">✗ 压不过</span>
+        </div>
+      </transition>
+      <div class="hand-inner" :style="{ '--overlap': handOverlap + 'px' }" @touchmove="onHandTouchMove">
         <div
           v-for="col in handColumns"
           :key="columnKey(col)"
@@ -254,9 +276,10 @@
             v-for="(c, i) in col.cards"
             :key="cardKey(c)"
             class="hand-card"
+            :data-card-key="cardKey(c)"
             :style="{ zIndex: i + 1, top: (i * -12) + 'px' }"
             @click="onCardClick(c)"
-            @touchstart="onCardTouchStart($event, col)"
+            @touchstart="onCardTouchStart($event, col, c)"
             @touchend="onCardTouchEnd"
             @touchmove="onCardTouchEnd"
             @touchcancel="onCardTouchEnd"
@@ -358,6 +381,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 import PlayerSeat from '@/components/PlayerSeat.vue'
 import TableCenter from '@/components/TableCenter.vue'
+import CardCounter from '@/components/CardCounter.vue'
+import storage from '@/common/storage.js'
 import EffectLayer from '@/components/EffectLayer.vue'
 import CardPlay from '@/components/CardPlay.vue'
 import ChatQuickPanel from '@/components/ChatQuickPanel.vue'
@@ -422,7 +447,7 @@ const mainActionsRef = ref(null)
 
 const {
   // state
-  round, levelLabel, nextLevelLabel, levelUp, multiplier,
+  round, levelLabel, nextLevelLabel, levelUp, multiplier, levelRank, teamLevels,
   players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, turnTimeLeft, finishedOrder,
   isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
@@ -430,13 +455,14 @@ const {
   hostMigrationToast, hostMigrationBadge, urgent,
   isRestartAfterA, isNetworkHost, game,
   // computed
-  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
-  seatData, handColumns, selectedCount,
+  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+  seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
   playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+  dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch,
   onIcon, retryDeal,
@@ -460,8 +486,10 @@ const {
 //   click 并复位;touchstart 先复位上一轮残留标志(长按后滑走/取消没产生 click 的场景)。
 const longPressTimer = ref(null)
 const longPressFired = ref(false)
+// v0.4.25:简洁模式(设置页「外观」开关)— 隐藏装饰纹理/光效,进对局时读取一次
+const simpleMode = ref(storage.getSettings().simpleMode === true)
 const LONG_PRESS_MS = 500
-function onCardTouchStart(e, col) {
+function onCardTouchStart(e, col, c) {
   longPressFired.value = false
   if (longPressTimer.value) clearTimeout(longPressTimer.value)
   longPressTimer.value = setTimeout(() => {
@@ -469,12 +497,30 @@ function onCardTouchStart(e, col) {
     longPressFired.value = true
     toggleCol(col)
   }, LONG_PRESS_MS)
+  // ★ v0.4.25:拖动连选 — touchstart 起拖(与长按计时共存,移动会取消长按)
+  if (c) dragStart(c)
 }
 function onCardTouchEnd() {
   if (longPressTimer.value) {
     clearTimeout(longPressTimer.value)
     longPressTimer.value = null
   }
+  // ★ v0.4.25:拖动连选收尾(touchend 总会派发到 touchstart 元素,不怕滑出)
+  dragEnd()
+}
+// ★ v0.4.25:拖动连选 — 手指滑动时命中检测经过的牌(移动即取消长按计时)
+function onHandTouchMove(e) {
+  onCardTouchEnd()
+  if (!dragIsActive()) return
+  e.preventDefault()
+  const t = e.touches && e.touches[0]
+  if (!t) return
+  const el = document.elementFromPoint(t.clientX, t.clientY)
+  const cardEl = el && el.closest ? el.closest('.hand-card') : null
+  const k = cardEl && cardEl.dataset ? cardEl.dataset.cardKey : null
+  if (!k) return
+  const c = myHand.value.find(x => cardKey(x) === k)
+  if (c) dragOver(c)
 }
 function onCardClick(c) {
   // 长按后的合成 click:吞掉,不复位选择状态
@@ -482,6 +528,8 @@ function onCardClick(c) {
     longPressFired.value = false
     return
   }
+  // ★ v0.4.25:拖动连选后的合成 click:吞掉(拖动已完成批量选择)
+  if (consumeDragSuppress()) return
   toggleCardId(cardKey(c))
 }
 
@@ -527,17 +575,24 @@ function showMenu() {
       if (props.isP2PMode && isNetworkHost.value && game.value) {
         const snapshot = game.value.getSnapshot()
         if (snapshot.phase === 'playing' || snapshot.phase === 'dealing' || snapshot.phase === 'trick_end') {
+          // ★ v0.4.25 P1-01/02 修复:候选选举统一走 network.selectNextHostCandidate
+          //   (确定性 + canHost 优先 + seat 0..3 覆盖,UI 不再自行选举);
+          //   无候选时不迁移(旧版 ?? 2 会对不存在的 seat 2 发起迁移)
           const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
           const peers = net.getPeers ? net.getPeers() : new Map()
-          const candidates = [
-            (selfSeat + 2) % 4,
-            (selfSeat + 1) % 4,
-            (selfSeat + 3) % 4,
-          ]
-          const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
-          const newHostAddress = peers.get(newHostSeat)?.hostAddress
-          try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
-          migration = { newHostSeat, newHostAddress }
+          let newHostSeat = (typeof net.selectNextHostCandidate === 'function')
+            ? net.selectNextHostCandidate([selfSeat])
+            : null
+          if (newHostSeat == null) {
+            // 兜底:peers 缺 uuid 等导致选举为空时,退回座位优先级;仍无 → 无人可接管不迁移
+            newHostSeat = [(selfSeat + 2) % 4, (selfSeat + 1) % 4, (selfSeat + 3) % 4]
+              .find(s => s !== selfSeat && peers.has(s)) ?? null
+          }
+          if (newHostSeat != null) {
+            const newHostAddress = peers.get(newHostSeat)?.hostAddress
+            try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+            migration = { newHostSeat, newHostAddress }
+          }
         }
       }
       exitGame(migration)
@@ -1153,6 +1208,37 @@ button {
   100% { box-shadow: inset 0 4px 24px rgba(229, 57, 53, 0.25); }
 }
 
+/* v0.4.25:选中牌型实时预览 — 浮在手牌区上方居中(避开 -52px 的列 rank 标) */
+.selected-preview {
+  position: absolute;
+  top: -76px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1.5px solid rgba(255, 215, 0, 0.55);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  z-index: 60;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.selected-preview .sp-text { font-size: 12px; font-weight: 800; color: #ffd76a; }
+.selected-preview .sp-verdict { font-size: 11px; font-weight: 800; }
+.selected-preview .sp-verdict.ok { color: #66bb6a; }
+.selected-preview .sp-verdict.no { color: #ef5350; }
+.selected-preview.invalid { border-color: rgba(239, 83, 80, 0.6); }
+.selected-preview.invalid .sp-text { color: #ef9a9a; }
+.selected-preview.can { border-color: rgba(102, 187, 106, 0.7); box-shadow: 0 0 10px rgba(102, 187, 106, 0.35); }
+.selected-preview.cant { border-color: rgba(239, 83, 80, 0.7); }
+.preview-fade-enter-active, .preview-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.preview-fade-enter-from, .preview-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(4px); }
+.page.is-landscape .selected-preview { top: -70px; padding: 3px 10px; }
+
 .hand-inner {
   display: flex;
   flex-direction: row;
@@ -1293,6 +1379,14 @@ button {
  * 6. 操作栏 14%(≤115px @812)
  * 4 大按钮:智能理牌 / 不出 / 提示 / 出牌
  * ============================================================ */
+/* v0.4.25:记牌器悬浮位(理牌按钮正上方) */
+.counter-fab-mobile {
+  position: fixed;
+  right: 10px;
+  bottom: calc(clamp(76px, 14vh, 115px) + 68px);
+  z-index: 70;
+}
+
 /* 智能理牌悬浮按钮(手牌区右上角) */
 .smart-sort-float {
   position: fixed;
@@ -1464,10 +1558,11 @@ button {
   /* 重新分配高度:5 段堆叠 */
 }
 
-/* 顶 HUD 压缩到 50px */
+/* 顶 HUD 压缩到 50px
+ * ★ v0.4.25 P1-15 修复:四值顺序 top right bottom left,右侧 inset-right / 左侧 inset-left(旧版写反) */
 .page.is-landscape .hud-top {
   height: 50px;
-  padding: 4px calc(6px + env(safe-area-inset-left, 0px)) 4px calc(6px + env(safe-area-inset-right, 0px));
+  padding: 4px calc(6px + env(safe-area-inset-right, 0px)) 4px calc(6px + env(safe-area-inset-left, 0px));
 }
 .page.is-landscape .hud-value { font-size: 14px; }
 .page.is-landscape .hud-label { font-size: 10px; }
@@ -1566,7 +1661,8 @@ button {
  *   否则 col-rank (top -10) 浮在 .hand-area 顶外的部分会被裁,用户看不到"级"badge */
 .page.is-landscape .hand-area {
   bottom: 56px;
-  padding: 12px calc(4px + env(safe-area-inset-left, 0px)) 6px calc(4px + env(safe-area-inset-right, 0px));
+  /* ★ v0.4.25 P1-15 修复:右侧 inset-right / 左侧 inset-left(旧版写反) */
+  padding: 12px calc(4px + env(safe-area-inset-right, 0px)) 6px calc(4px + env(safe-area-inset-left, 0px));
   max-height: 120px;
   overflow: visible;
 }
@@ -1587,6 +1683,16 @@ button {
   height: 50px;
   --hand-card-w: 36px;
   --hand-card-h: 50px;
+}
+/* ★ v0.4.25 P1-16 修复:横屏牌仅 36px 宽,低于 44px 触控目标标准 —
+ *   透明 ::before 把横向 hit area 扩到列宽 44px(视觉不变,点击/拖动命中更稳) */
+.page.is-landscape .hand-column .hand-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
 }
 /* 限制手牌卡竖叠 top,牌顶不浮出 .hand-area(只 col-rank 浮出 8px) */
 .page.is-landscape .hand-column .hand-card:nth-child(1) { top: 0 !important; }
@@ -1615,7 +1721,8 @@ button {
 .page.is-landscape .action-bar {
   bottom: 0;
   height: 56px;
-  padding: 4px calc(6px + env(safe-area-inset-left, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-right, 0px));
+  /* ★ v0.4.25 P1-15 修复:右侧 inset-right / 左侧 inset-left(旧版写反) */
+  padding: 4px calc(6px + env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-left, 0px));
   grid-template-columns: 0.9fr 0.9fr 1.2fr; /* ★ UX-P1-01 修复:3 个按钮对应 3 列 */
   gap: 6px;
 }

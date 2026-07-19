@@ -12,7 +12,10 @@
  *     - 'bossa'                              → bgm-bossa.mp3 (Bossa Antigua,慵懒闲适备选)
  *
  * SFX 部分:
- *   - 仍是 Web Audio API 合成(5 种牌型 + 炸弹层级 + 王炸 + 超级炸弹 + 报数 tick + 警告 + 蜂鸣)
+ *   - 仍是 Web Audio API 合成(5 种牌型 + 爆炸 + 王炸 + 超级炸弹 + 报数 tick + 警告 + 蜂鸣)
+ *   - v0.4.25:sfxBomb 重做真爆炸音(次声冲击 + 噪声低通扫频 + 碎裂高频)
+ *   - v0.4.25:特殊牌型中文语音播报(顺子/连对/钢板/三带二/同花顺/炸弹/王炸),
+ *     单张/对子/三张太频繁不播报
  *
  * 致谢:BGM 全部来自 Kevin MacLeod (incompetech.com),CC BY 4.0 授权
  *
@@ -779,64 +782,75 @@ function sfxStraight(count) {
 }
 
 /**
- * 炸弹音效 v2 — 多层合成(低频轰炸 + 高频爆裂 + 金属冲击 + reverb)
- * 设计目标:明显比 v3.6 的"短促嘟"更震撼
+ * 炸弹音效 v3 — 真爆炸(v0.4.25 重做)
+ * 三层合成:
+ *   1. 次声冲击(sine 70Hz → 24Hz,0.7s)— 胸口"咚"的一下低频体感
+ *   2. 爆炸主体(白噪声 → lowpass 2600Hz → 120Hz 扫频,0.85s)— 轰鸣由亮到闷
+ *   3. 碎裂高频(白噪声 → bandpass 5kHz,0.25s)— 冲击波碎屑感
+ * 旧版(square 80Hz + 短噪声)偏"嘟"电子音,不像爆炸。
  */
 function sfxBomb() {
   if (!ctx) return
   const now = ctx.currentTime
-  // 1. 低频轰炸(square 80Hz → 30Hz,0.5s,挂 lowpass 100Hz 让"浑厚")
-  const osc = ctx.createOscillator()
-  osc.type = 'square'
-  osc.frequency.setValueAtTime(80, now)
-  osc.frequency.exponentialRampToValueAtTime(30, now + 0.5)
-  const lp = ctx.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.value = 100
-  const g = ctx.createGain()
-  g.gain.setValueAtTime(0, now)
-  g.gain.linearRampToValueAtTime(0.6, now + 0.02)
-  g.gain.linearRampToValueAtTime(0.001, now + 0.55)
-  osc.connect(lp)
-  lp.connect(g)
-  g.connect(sfxGain)
-  _connectWithReverb(g)
-  osc.start(now)
-  osc.stop(now + 0.6)
 
-  // 2. 高频爆裂(白噪声 + bandpass 4kHz)
+  // 1. 次声冲击(低频体感)
+  const sub = ctx.createOscillator()
+  sub.type = 'sine'
+  sub.frequency.setValueAtTime(70, now)
+  sub.frequency.exponentialRampToValueAtTime(24, now + 0.6)
+  const sg = ctx.createGain()
+  sg.gain.setValueAtTime(0, now)
+  sg.gain.linearRampToValueAtTime(0.8, now + 0.015)
+  sg.gain.exponentialRampToValueAtTime(0.001, now + 0.7)
+  sub.connect(sg)
+  sg.connect(sfxGain)
+  _connectWithReverb(sg)
+  sub.start(now)
+  sub.stop(now + 0.75)
+
+  // 2. 爆炸主体(白噪声 + 低通扫频,前 60ms 满幅爆点后指数衰减)
+  const dur = 0.85
   const noise = ctx.createBufferSource()
-  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate)
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate)
   const data = buf.getChannelData(0)
   for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length)
+    const t = i / data.length
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 1.6)
   }
   noise.buffer = buf
-  const bp = ctx.createBiquadFilter()
-  bp.type = 'bandpass'
-  bp.frequency.value = 4000
-  bp.Q.value = 1.5
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(2600, now)
+  lp.frequency.exponentialRampToValueAtTime(120, now + dur)
   const ng = ctx.createGain()
-  ng.gain.setValueAtTime(0.45, now)
-  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.5)
-  noise.connect(bp)
-  bp.connect(ng)
+  ng.gain.setValueAtTime(0.7, now)
+  ng.gain.exponentialRampToValueAtTime(0.001, now + dur)
+  noise.connect(lp)
+  lp.connect(ng)
   ng.connect(sfxGain)
   _connectWithReverb(ng)
   noise.start(now)
-  noise.stop(now + 0.52)
+  noise.stop(now + dur)
 
-  // 3. 金属冲击(triangle 8kHz,120ms 短促)
-  const tri = ctx.createOscillator()
-  tri.type = 'triangle'
-  tri.frequency.setValueAtTime(8000, now)
-  const tg = ctx.createGain()
-  tg.gain.setValueAtTime(0.2, now)
-  tg.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
-  tri.connect(tg)
-  tg.connect(sfxGain)
-  tri.start(now)
-  tri.stop(now + 0.14)
+  // 3. 碎裂高频(短促冲击波)
+  const crack = ctx.createBufferSource()
+  const cbuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.25), ctx.sampleRate)
+  const cdata = cbuf.getChannelData(0)
+  for (let i = 0; i < cdata.length; i++) cdata[i] = (Math.random() * 2 - 1) * (1 - i / cdata.length)
+  crack.buffer = cbuf
+  const bp = ctx.createBiquadFilter()
+  bp.type = 'bandpass'
+  bp.frequency.value = 5000
+  bp.Q.value = 1.2
+  const cg = ctx.createGain()
+  cg.gain.setValueAtTime(0.3, now)
+  cg.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
+  crack.connect(bp)
+  bp.connect(cg)
+  cg.connect(sfxGain)
+  _connectWithReverb(cg)
+  crack.start(now)
+  crack.stop(now + 0.26)
 }
 
 /**
@@ -998,13 +1012,18 @@ function sfxUrgentBeep() {
  * @param {number} [count] - 牌张数,可选(用于音高递增)
  */
 /**
- * 炸弹中文语音播报(使用浏览器原生 speechSynthesis,无网络依赖)
- * @param {string} text - 默认"炸弹",王炸可传"王炸"
+ * 牌型中文语音播报(使用浏览器原生 speechSynthesis,无网络依赖)
+ * ★ v0.4.25:从仅炸弹/王炸扩展到全部特殊牌型;新播报会顶掉未播完的旧播报
+ * @param {string} text - 要播报的中文文本(如 "炸弹" / "顺子")
  */
-function speakBomb(text = '炸弹') {
+function _speak(text) {
   if (!voiceEnabled) return
   if (typeof window === 'undefined' || !window.speechSynthesis) return
   try {
+    // 顶掉队列里未播完的旧播报:连续出牌时只报最新一手,避免语音排队积压
+    if (typeof window.speechSynthesis.cancel === 'function') {
+      window.speechSynthesis.cancel()
+    }
     const u = new window.SpeechSynthesisUtterance(text)
     u.lang = 'zh-CN'
     u.rate = 1
@@ -1012,6 +1031,28 @@ function speakBomb(text = '炸弹') {
     u.volume = sfxVol * masterVol
     window.speechSynthesis.speak(u)
   } catch (e) { /* ignore */ }
+}
+
+// ★ v0.4.25:特殊牌型 → 中文播报文本;单张/对子/三张太频繁不播报(避免吵闹)
+const TYPE_SPEECH_TEXT = {
+  TRIPLE_PAIR: '三带二',
+  STRAIGHT: '顺子',
+  STRAIGHT_PAIR: '连对',
+  STRAIGHT_TRIPLE: '钢板',
+  STRAIGHT_FLUSH: '同花顺',
+  BOMB_4: '炸弹', BOMB_5: '炸弹',
+  BOMB_6: '炸弹', BOMB_7: '炸弹', BOMB_8: '炸弹',
+  JOKER_BOMB: '王炸',
+}
+
+/**
+ * 按牌型播报中文名(仅 TYPE_SPEECH_TEXT 里的特殊牌型)
+ * @param {string} type - 牌型名(需已用 _normalizeSfxType 归一化为字符串)
+ */
+function speakType(type) {
+  const text = TYPE_SPEECH_TEXT[type]
+  if (!text) return
+  _speak(text)
 }
 
 // ★ v0.4.24 修复:引擎 TYPE 是数字枚举(SINGLE=1..KINGS_BOMB=14),game 层
@@ -1033,6 +1074,8 @@ function _normalizeSfxType(type) {
 function playSfxForType(type, count) {
   if (!sfxEnabled) return
   type = _normalizeSfxType(type)
+  // ★ v0.4.25:特殊牌型中文语音播报(炸弹/王炸/顺子/连对/钢板/三带二/同花顺)
+  if (type) speakType(type)
   if (!type) {
     if (sfxMode === 'real' && _shouldUseMp3('SINGLE') && playMp3Sfx('SINGLE')) return
     sfxSingle(count); return
@@ -1042,22 +1085,16 @@ function playSfxForType(type, count) {
   //   全坏时直接走 synth fallback,不浪费一次 playMp3Sfx 调用
   if (sfxMode === 'real' && _shouldUseMp3(type)) {
     if (playMp3Sfx(type)) {
-      // 炸弹/王炸额外播中文语音
-      if (type === 'JOKER_BOMB') speakBomb('王炸')
-      else if (type.startsWith('BOMB')) speakBomb('炸弹')
       return
     }
     // MP3 失败(sfxMode='real' 但文件不在/load 失败)→ 降级合成
   }
   if (!ctx) {
-    // Node / 未解锁:仍尝试语音(测试路径)
-    if (type === 'JOKER_BOMB') speakBomb('王炸')
-    else if (typeof type === 'string' && type.startsWith('BOMB')) speakBomb('炸弹')
+    // Node / 未解锁:语音已在上方播报,无需音效
     return
   }
-  if (type === 'JOKER_BOMB') { speakBomb('王炸'); return sfxJokerBomb() }
+  if (type === 'JOKER_BOMB') { return sfxJokerBomb() }
   if (typeof type === 'string' && type.startsWith('BOMB')) {
-    speakBomb('炸弹')
     // BOMB_6+ 用 sfxSuperBomb
     if (type.length > 5) {
       const num = parseInt(type.replace('BOMB_', ''), 10)

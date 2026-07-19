@@ -121,8 +121,15 @@
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.visual }" :size="16" aria-hidden="true" />
       </button>
       <div v-show="!collapsedSections.visual">
-        <div class="card placeholder-card">
-          <p class="card-hint">更多视觉主题与动画效果正在制作中</p>
+        <div class="card">
+          <div class="setting-row">
+            <span class="row-label">简洁模式</span>
+            <label class="switch">
+              <input type="checkbox" v-model="simpleMode" @change="saveAll" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <p class="card-hint">隐藏牌桌花纹、桌面光效和牌面纹理,界面更干净,低配设备更省电</p>
         </div>
       </div>
     </section>
@@ -236,6 +243,8 @@ const voiceEnabled = ref(true)
 const hapticsEnabled = ref(true)
 const animationEnabled = ref(true)
 const theme = ref('dark')
+// v0.4.25:简洁模式(隐藏装饰纹理/光效)
+const simpleMode = ref(false)
 // ★ UI-P0-01 修复:aiDifficulty ref 未声明导致设置页初始化抛错
 const aiDifficulty = ref('medium')
 const historyCount = ref(0)
@@ -292,6 +301,7 @@ onMounted(() => {
   hapticsEnabled.value = s.hapticsEnabled !== false
   animationEnabled.value = s.animationEnabled !== false
   theme.value = s.theme || 'dark'
+  simpleMode.value = s.simpleMode === true
   // ★ v0.4.9:从 storage 灌入全局 AI 难度
   aiDifficulty.value = s.aiDifficulty === 'hard' ? 'hard' : 'medium'
   historyCount.value = (storage.getHistory() || []).length
@@ -315,6 +325,7 @@ function saveAll() {
     hapticsEnabled: hapticsEnabled.value,
     animationEnabled: animationEnabled.value,
     theme: theme.value,
+    simpleMode: simpleMode.value,
     aiDifficulty: aiDifficulty.value,
   })
   // 实时反映到 audio 模块

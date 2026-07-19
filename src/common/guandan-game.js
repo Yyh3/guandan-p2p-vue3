@@ -936,16 +936,23 @@ function applyPlay(seat, cards, hand, rec) {
       }
 
       // ★ P0-09 修复:hands 必须整体合法,任一字段非法都直接拒绝,不纠正为 []。
+      // ★ v0.4.25 P0-08 修复:同一实体牌 id 不得同时出现在两家手牌(全局唯一),
+      //   旧版只查单 hand 内重复,恶意 snapshot 可复制一张牌到另一家制造作弊牌局
       function validateHands(hands) {
         if (!Array.isArray(hands) || hands.length !== 4) return false
         let total = 0
+        const globalIds = new Set()
         for (const h of hands) {
           if (!Array.isArray(h)) return false
           if (h.length > 27) return false
           total += h.length
           if (!validateCardArray(h)) return false
           for (const c of h) {
-            if ('id' in c) handIds.add(c.id)
+            if ('id' in c) {
+              if (globalIds.has(c.id)) return false
+              globalIds.add(c.id)
+              handIds.add(c.id)
+            }
           }
         }
         if (total > 108) return false

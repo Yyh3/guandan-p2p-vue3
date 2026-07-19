@@ -350,13 +350,15 @@ console.log('\n=== 14. SFX audio pool:多实例轮询 + autoplay unlock retry ==
   else globalThis.window = origWindow
 }
 
-console.log('\n=== 15. 炸弹中文语音播报 ===')
+console.log('\n=== 15. 牌型中文语音播报(v0.4.25 扩展到特殊牌型) ===')
 {
   const origWindow = globalThis.window
   const spoken = []
+  let cancelCount = 0
   globalThis.window = {
     speechSynthesis: {
-      speak(u) { spoken.push(u.text) }
+      speak(u) { spoken.push(u.text) },
+      cancel() { cancelCount++ },
     },
     SpeechSynthesisUtterance: function(text) {
       this.text = text
@@ -371,6 +373,36 @@ console.log('\n=== 15. 炸弹中文语音播报 ===')
   assert('★ BOMB_4 触发语音"炸弹"', spoken.includes('炸弹'))
   audio.playSfxForType('JOKER_BOMB')
   assert('★ JOKER_BOMB 触发语音"王炸"', spoken.includes('王炸'))
+  // v0.4.25:特殊牌型播报
+  audio.playSfxForType('STRAIGHT')
+  assert('★ STRAIGHT 触发语音"顺子"', spoken.includes('顺子'))
+  audio.playSfxForType('STRAIGHT_PAIR')
+  assert('★ STRAIGHT_PAIR 触发语音"连对"', spoken.includes('连对'))
+  audio.playSfxForType('STRAIGHT_TRIPLE')
+  assert('★ STRAIGHT_TRIPLE 触发语音"钢板"', spoken.includes('钢板'))
+  audio.playSfxForType('TRIPLE_PAIR')
+  assert('★ TRIPLE_PAIR 触发语音"三带二"', spoken.includes('三带二'))
+  audio.playSfxForType('STRAIGHT_FLUSH')
+  assert('★ STRAIGHT_FLUSH 触发语音"同花顺"', spoken.includes('同花顺'))
+  // 数字 type(v0.4.24 归一化)也要触发语音
+  spoken.length = 0
+  audio.playSfxForType(5)
+  assert('★ 数字 type 5(STRAIGHT)触发语音"顺子"', spoken.includes('顺子'))
+  audio.playSfxForType(8)
+  assert('★ 数字 type 8(BOMB_4)触发语音"炸弹"', spoken.includes('炸弹'))
+  // 普通牌型(太频繁)不播报
+  spoken.length = 0
+  audio.playSfxForType('SINGLE')
+  audio.playSfxForType('PAIR')
+  audio.playSfxForType('TRIPLE')
+  assert('★ SINGLE/PAIR/TRIPLE 不播报', spoken.length === 0)
+  // 每次播报前 cancel 旧语音(防排队积压)
+  assert('★ 播报前 cancel 旧语音', cancelCount >= 9)
+  // 语音开关关闭后不播报
+  audio.setVoiceEnabled(false)
+  audio.playSfxForType('BOMB_4')
+  assert('★ voiceEnabled=false 时不播报', spoken.length === 0)
+  audio.setVoiceEnabled(true)
   globalThis.window = origWindow
 }
 

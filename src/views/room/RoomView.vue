@@ -167,7 +167,13 @@ import IconLink from '@/components/icons/IconLink.vue'
 
 const route = useRoute()
 const router = useRouter()
-const isHost = ref(route.query.role !== 'joiner')
+// ★ v0.4.25 P0-05 修复:进入房间页时若已有活跃 session,角色必须以 network 为准 —
+//   joiner 在牌局中被迁移为新 host(net.isHost()=true)后点「返回房间」,
+//   若仍信旧路由 role=joiner,initNetwork 的 session 复用判断会拿 isHost.value=false
+//   去比对 net.isHost()=true → 误判不匹配,关闭刚启动的 server 并按旧 host 地址重加。
+//   路由 query 只能作为首次初始化参数,不能覆盖活跃网络权威。
+const sessionActiveAtEntry = typeof net.isConnected === 'function' && net.isConnected()
+const isHost = ref(sessionActiveAtEntry ? net.isHost() : route.query.role !== 'joiner')
 const isNative = ref(false)
 const hostIp = ref('')
 const hostPort = ref(8848)

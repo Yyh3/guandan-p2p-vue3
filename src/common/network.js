@@ -45,6 +45,43 @@ let transport = null
 let mdnsRegStop = null            // v0.4.22:mDNS 注册停止函数
 const peers = new Map()           // seat -> {nickname, avatar, uuid, ready, ...}
 
+// ============== v0.4.25 P0-01:座位恢复令牌(resume token)==============
+// 背景:旧版 host 收 JOIN 时只凭客户端自报 uuid 就复用 seat,攻击者提交别人的
+//   uuid 即可冒名顶替(peers entry 被替换,定向消息/私密 snapshot 发错设备)。
+// 协议:host 首次分配 seat 时生成不可预测 token,只通过定向 SYNC 发给该 seat
+//   本人(广播 SYNC 不带);重连必须同时提交 uuid + resumeToken 才能复用原 seat。
+//   - token 匹配 → 复用 seat(合法原主)
+//   - token 不符 + 原连接仍活跃 → DUPLICATE_SESSION 拒绝,peers 不动
+//   - token 不符 + 原连接已断 → 不顶替,按新玩家分配(原 seat 保留给持 token 者)
+// 注:host 迁移不带 token(新 host 对无记录 seat 走兼容路径,下次重连补发)。
+const seatResumeTokens = new Map()  // host: seat -> resumeToken
+// 座位连接活跃状态(host 视角):JOIN 绑定时 true,_DISCONNECT / 心跳释放 / kick 时 false。
+// BC 无真连接,活跃判定另看心跳时间(见 JOIN 复用分支)。
+const seatConnAlive = new Map()     // host: seat -> bool
+let _resumeToken = null             // joiner:本机持有的 token(随定向 SYNC 下发)
+
+// 生成不可预测 resumeToken(LAN 威胁模型:攻击者无法猜测)
+function _genResumeToken() {
+  return Math.random().toString(36).slice(2, 10) +
+    Date.now().toString(36) +
+    Math.random().toString(36).slice(2, 6)
+}
+
+// JOIN payload:有 token 时附上(不污染 selfInfo 本体)
+function _buildJoinPayload() {
+  return _resumeToken ? { ...selfInfo, resumeToken: _resumeToken } : selfInfo
+}
+
+// 从 sessionStorage 恢复本房间的 resumeToken(roomId 确定后调用)
+function _loadResumeToken() {
+  _resumeToken = null
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      _resumeToken = sessionStorage.getItem(`guandan_resume_${roomId}`) || null
+    }
+  } catch (_) { /* ignore */ }
+}
+
 // ============== Phase 2:hostEpoch 权威纪元 ==============
 // hostEpoch 在每次 host 权威变更(开房/host 迁移/重建)时自增,
 // 所有 host 权威消息必须携带并校验 epoch,防止 stale host 的过期消息被误用。
@@ -156,8 +193,10 @@ function _savePeerCache(roomNo, entries) {
 
 // 写入/更新单个 peer 的 hostAddress 缓存
 //   调用方:peer:join handler(收到 canHost + hostAddress 时)
+//   ★ v0.4.25 P0-07 修复:seat 0 也可缓存 — host 换座后 seat 0 是普通玩家,
+//     同样可能成为新 host 候选;旧版 seat<1 直接丢弃导致 seat 0 永远进不了重连缓存
 function cachePeerHostAddress(roomNo, seat, hostAddress, canHost) {
-  if (!roomNo || typeof seat !== 'number' || seat < 1 || seat > 3) return
+  if (!roomNo || !Number.isInteger(seat) || seat < 0 || seat > 3) return
   if (typeof hostAddress !== 'string' || !hostAddress) return
   const entries = _loadPeerCache(roomNo)
   const filtered = entries.filter(e => e.seat !== seat)
@@ -217,7 +256,7 @@ function scheduleJoinRetry() {
   joinRetryTimer = _setTimeoutFn(() => {
     joinRetryTimer = null
     if (!transport) return
-    sendMessage({ type: 'JOIN', payload: selfInfo })
+    sendMessage({ type: 'JOIN', payload: _buildJoinPayload() })
   }, JOIN_RETRY_DELAY_MS)
 }
 
@@ -386,7 +425,7 @@ function startHeartbeat() {
   if (rejoinSendTimer) return
   rejoinSendTimer = _setIntervalFn(() => {
     if (!transport) return
-    sendMessage({ type: 'JOIN', payload: selfInfo })
+    sendMessage({ type: 'JOIN', payload: _buildJoinPayload() })
   }, REJOIN_INTERVAL_MS)
 }
 
@@ -472,7 +511,12 @@ function _onTransportMessage(msg) {
   }
   // 定向消息过滤(to 字段:仅给某 seat 的消息,其他人忽略)
   //   host 不能过滤,因为 host 需要 relay 定向消息给目标 seat。
-  if (msg.to != null && !isHostFlag && msg.to !== selfSeat) return
+  //   ★ v0.4.25 P0-01 修复:加入阶段(selfSeat=-1)必须放行定向 SYNC —
+  //     这是 host 分配 seat + 下发 resumeToken 的权威消息;此时本端 seat 未分配,
+  //     若按 to!==selfSeat 过滤会把它丢掉,只剩广播 SYNC(无 token/seat 字段)
+  if (msg.to != null && !isHostFlag && msg.to !== selfSeat) {
+    if (!(selfSeat === -1 && msg.type === 'SYNC')) return
+  }
   emit('message', msg)
   emit('message:' + msg.type, msg.payload, msg.from, msg)
   if (isHostFlag) {
@@ -617,8 +661,37 @@ function _handleHostMessage(msg) {
       }
     }
     if (assignedSeat !== -1) {
-      const updated = { ...peers.get(assignedSeat), ...msg.payload, uuid: newUuid }
+      // ★ v0.4.25 P0-01:同 uuid 复用 seat 必须校验 resumeToken
+      const knownToken = seatResumeTokens.get(assignedSeat)
+      const presented = typeof msg.payload?.resumeToken === 'string' ? msg.payload.resumeToken : null
+      if (knownToken && presented !== knownToken) {
+        const alive = seatConnAlive.get(assignedSeat) === true &&
+          (Date.now() - (lastHeartbeat.get(assignedSeat) || 0)) < HEARTBEAT_TIMEOUT_MS
+        if (alive) {
+          // 原主连接仍活跃 → 冒名顶替,拒绝且 peers 不动
+          const dupMsg = { type: 'DUPLICATE_SESSION', payload: { reason: '该玩家仍在线,无法重复加入' }, to: msg.from }
+          if (typeof transport.sendToConnection === 'function' &&
+              Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
+            transport.sendToConnection(msg.trustedConnectionId, dupMsg).catch(() => {})
+          } else {
+            sendMessage(dupMsg)
+          }
+          return
+        }
+        // 原主已断线但 token 不符 → 不顶替,按新玩家分配(原 seat 保留给持 token 者)
+        assignedSeat = -1
+      }
+    }
+    if (assignedSeat !== -1) {
+      // token 匹配(或 host 无记录:迁移得来的 peers 条目走兼容路径)→ 允许复用
+      // ★ P0-01:resumeToken 是私密凭证,不得写进 peers entry(会随广播 SYNC 泄露)
+      const { resumeToken: _ignoredToken, ...safePayload } = msg.payload
+      const updated = { ...peers.get(assignedSeat), ...safePayload, uuid: newUuid }
       peers.set(assignedSeat, updated)
+      seatConnAlive.set(assignedSeat, true)
+      // host 无记录时补发;joiner 丢失时回传
+      let token = seatResumeTokens.get(assignedSeat)
+      if (!token) { token = _genResumeToken(); seatResumeTokens.set(assignedSeat, token) }
       lastHeartbeat.set(assignedSeat, Date.now())
       // ★ GD-RC-002 修复:host 端 _kickedSeats 在新玩家分配/复用 seat 时清理。
       //   之前清理代码写在 joiner 端 SYNC handler(line 468 附近),
@@ -638,11 +711,18 @@ function _handleHostMessage(msg) {
       if (transport && typeof transport.bindLastSenderSeat === 'function') {
         transport.bindLastSenderSeat(assignedSeat)
       }
-      sendMessage({
+      // ★ P0-01:resumeToken 只下发本人 — WS/AndroidWs 用 connId 单播,
+      //   BC 退回 seat 定向(加入窗口对 SYNC 放行)。广播 SYNC 绝不含 token。
+      const reuseSyncMsg = {
         type: 'SYNC',
-        payload: { peers: Array.from(peers.entries()) },
-        to: msg.from,
-      })
+        payload: { peers: Array.from(peers.entries()), resumeToken: token, seat: assignedSeat },
+      }
+      if (typeof transport.sendToConnection === 'function' &&
+          Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
+        transport.sendToConnection(msg.trustedConnectionId, reuseSyncMsg).catch(() => {})
+      } else {
+        sendMessage({ ...reuseSyncMsg, to: assignedSeat })
+      }
       // 顺便广播给老 joiner,让他们看到新昵称
       sendMessage({
         type: 'SYNC',
@@ -668,7 +748,13 @@ function _handleHostMessage(msg) {
       }
       return
     }
-    peers.set(assignedSeat, msg.payload)
+    // ★ P0-01:新 seat 分配 — 生成 resumeToken,仅随定向 SYNC 下发本人;
+    //   resumeToken 是私密凭证,不得写进 peers entry(会随广播 SYNC 泄露)
+    const { resumeToken: _ignoredJoinToken, ...safeJoinPayload } = msg.payload
+    const joinToken = _genResumeToken()
+    seatResumeTokens.set(assignedSeat, joinToken)
+    seatConnAlive.set(assignedSeat, true)
+    peers.set(assignedSeat, safeJoinPayload)
     lastHeartbeat.set(assignedSeat, Date.now())
     // ★ GD-RC-002 修复:同上,新分配 seat 时清理 _kickedSeats
     if (_kickedSeats.has(assignedSeat)) {
@@ -687,11 +773,19 @@ function _handleHostMessage(msg) {
     if (msg.payload && msg.payload.hostAddress) {
       try { cachePeerHostAddress(roomId, assignedSeat, msg.payload.hostAddress, msg.payload.canHost) } catch (_) {}
     }
-    sendMessage({
+    // ★ P0-01:resumeToken 只下发本人 — WS/AndroidWs 用 connId 单播(不经 seat 路由,
+    //   加入阶段 joiner selfSeat=-1 也能直达);BC 无 connId 退回 seat 定向
+    //   (joiner 端加入窗口对 SYNC 放行,见 _onTransportMessage)。广播 SYNC 绝不含 token。
+    const joinSyncMsg = {
       type: 'SYNC',
-      payload: { peers: Array.from(peers.entries()) },
-      to: assignedSeat,  // ★ 改成 assignedSeat,因为 BC 模式下 msg.from=-1 也能通,WS 必须用 assignedSeat
-    })
+      payload: { peers: Array.from(peers.entries()), resumeToken: joinToken, seat: assignedSeat },
+    }
+    if (typeof transport.sendToConnection === 'function' &&
+        Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
+      transport.sendToConnection(msg.trustedConnectionId, joinSyncMsg).catch(() => {})
+    } else {
+      sendMessage({ ...joinSyncMsg, to: assignedSeat })
+    }
     // 顺便广播给老 joiner
     sendMessage({
       type: 'SYNC',
@@ -742,6 +836,9 @@ function _handleHostMessage(msg) {
     //   旧代码只读 msg.from → 快路径从未生效,异常掉线都走满 6-8s 心跳。
     const seat = msg.from ?? msg.payload?.seat
     if (peers.has(seat)) {
+      // ★ v0.4.25 P0-01:连接已断 → 标记非活跃,之后同 uuid 无 token 重连
+      //   不会再被 DUPLICATE_SESSION 误拒(合法原主持 token 仍可随时复用)
+      seatConnAlive.set(seat, false)
       // ★ v2.4-p4 BUG-007:被踢 joiner 的 ws.onclose 触发的 _DISCONNECT 不要再触发清理
       //   (kickPlayer 已经清过 peers / lastHeartbeat / emit 过 peer:leave)
       if (_kickedSeats.has(seat)) return
@@ -792,6 +889,16 @@ function _handleJoinerMessage(msg) {
   } else if (msg.type === 'SYNC' && msg.payload && msg.payload.peers) {
     // ★ Phase 2:SYNC 只能由 host 权威发出
     if (!isAuthorityMessage(msg)) return
+    // ★ v0.4.25 P0-01:定向 SYNC 可能携带本 seat 的 resumeToken — 存下来供重连复用
+    //   (广播 SYNC 不含 token;token 仅 host→本人,随 roomId 存 sessionStorage 防页面刷新丢失)
+    if (typeof msg.payload?.resumeToken === 'string' && msg.payload.resumeToken) {
+      _resumeToken = msg.payload.resumeToken
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(`guandan_resume_${roomId}`, _resumeToken)
+        }
+      } catch (_) { /* ignore */ }
+    }
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
       peers.set(seat, info)
@@ -808,23 +915,50 @@ function _handleJoinerMessage(msg) {
       }
     }
     // 用 uuid 找自己
-    let assignedSeat = -1
-    for (let i = 1; i < 4; i++) {
-      const p = peers.get(i)
-      if (p && p.uuid === selfInfo?.uuid) { assignedSeat = i; break }
-    }
-    if (assignedSeat === -1) {
-      // ★ v3.8 P1:撞座 / SYNC 没带自己 → 300ms 后重发 JOIN
-      scheduleJoinRetry()
+    // ★ v0.4.25 P0-01:定向 SYNC 带 host 权威 seat 字段时优先采用 —
+    //   同 uuid 多 entry(冒名被拒后新旧并存)时 uuid 扫描会误中别人的 seat;
+    //   seat 字段仍需 peers[seat].uuid 与本人一致佐证,防止误收他人 SYNC(BC 广播)
+    // ★ v0.4.25 P0-01 追加:seat 已分配后不再逐 SYNC 重解析(否则紧随的广播 SYNC
+    //   会把已被 host 分到新 seat 的自己误扫回同 uuid 旧 entry);
+    //   仅当自己的 entry 消失/易主(host 重启或被移出)才回到未分配态重试 JOIN
+    //   (保留 v3.8 自愈路径,见 network-multitab 块 6)
+    if (selfSeat !== -1) {
+      const mine = peers.get(selfSeat)
+      if (!mine || mine.uuid !== selfInfo?.uuid) {
+        selfSeat = -1
+        scheduleJoinRetry()
+      }
       return
     }
-    cancelJoinRetry()
-    selfSeat = assignedSeat
-    peers.set(selfSeat, selfInfo)
-    emit('connect', { seat: selfSeat })
+    {
+      let assignedSeat = -1
+      const hintedSeat = msg.payload.seat
+      if (Number.isInteger(hintedSeat) && hintedSeat >= 1 && hintedSeat <= 3 &&
+          peers.get(hintedSeat)?.uuid === selfInfo?.uuid) {
+        assignedSeat = hintedSeat
+      } else {
+        for (let i = 1; i < 4; i++) {
+          const p = peers.get(i)
+          if (p && p.uuid === selfInfo?.uuid) { assignedSeat = i; break }
+        }
+      }
+      if (assignedSeat === -1) {
+        // ★ v3.8 P1:撞座 / SYNC 没带自己 → 300ms 后重发 JOIN
+        scheduleJoinRetry()
+        return
+      }
+      cancelJoinRetry()
+      selfSeat = assignedSeat
+      peers.set(selfSeat, selfInfo)
+      emit('connect', { seat: selfSeat })
+    }
   } else if (msg.type === 'ROOM_FULL') {
     cancelJoinRetry()
     emit('error', msg.payload?.reason || '房间已满')
+  } else if (msg.type === 'DUPLICATE_SESSION') {
+    // ★ v0.4.25 P0-01:同 uuid 但 resumeToken 不符且原主仍在线 → host 拒绝冒名重连
+    cancelJoinRetry()
+    emit('error', msg.payload?.reason || '该玩家仍在线,无法重复加入')
   } else if (msg.type === 'HOST_MIGRATION_SECRET_STATE') {
     // ★ P0-06 修复:host 主动迁移的完整 state 只定向发给新 host,
     //   非目标 seat 应忽略;收到后先暂存,等公开 PEER_LEAVE migrate 到达时一并应用。
@@ -1117,6 +1251,8 @@ function joinRoom(hostRoomId, self, opts) {
     }
   }
   roomId = isWsMode ? 'ws' : hostRoomId
+  // ★ v0.4.25 P0-01:roomId 确定后恢复本房间的 resumeToken(重连凭证)
+  _loadResumeToken()
 
   try {
     transport = _createTransport()
@@ -1142,7 +1278,7 @@ function joinRoom(hostRoomId, self, opts) {
     // transport 就绪后刷新 selfInfo,再发 JOIN
     selfInfo = { ...self, uuid, canHost: canHostAsNewHost(), hostAddress: getSelfHostAddress() }
     // 立即发 JOIN。joiner 端 selfSeat=-1,host 会按 uuid 复用或分配新 seat
-    sendMessage({ type: 'JOIN', payload: selfInfo })
+    sendMessage({ type: 'JOIN', payload: _buildJoinPayload() })
     // 启动心跳发送
     startHeartbeat()
   }).catch((err) => {
@@ -1258,7 +1394,11 @@ function joinRemoteRoom(hostAddress, self, roomNo) {
   // 复用 joinRoom 的 WS 路径 — 它内部会解析 hostIp/hostPort,创建 transport,open,发 JOIN,启心跳
   const r = joinRoom(hostAddress, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
   // ★ v0.4.24:覆盖 joinRoom WS 路径写死的 roomId='ws',让返回房间时能匹配复用 session
-  if (r && r.ok && roomNo) setRoomId(roomNo)
+  if (r && r.ok && roomNo) {
+    setRoomId(roomNo)
+    // ★ v0.4.25 P0-01:roomId 覆盖后按真实房间号重载 resumeToken
+    _loadResumeToken()
+  }
   return r
 }
 
@@ -1407,6 +1547,10 @@ function close(opts = {}) {
   _resetHostEpoch()
   peers.clear()
   lastHeartbeat.clear()
+  // ★ v0.4.25 P0-01:清理 resumeToken 与连接活跃状态
+  seatResumeTokens.clear()
+  seatConnAlive.clear()
+  _resumeToken = null
   // ★ v2.4-p4 BUG-007:清理 kick 状态,避免下次开房时被踢者还在 _kickedSeats 里
   _kickedSeats.clear()
   _selfKickedEmitted = false
@@ -1594,6 +1738,9 @@ function kickPlayer(seat, reason) {
     return { ok: false, error: 'seat ' + seat + ' 不存在' }
   }
   _kickedSeats.add(seat)
+  // ★ v0.4.25 P0-01:被踢玩家作废 resumeToken,防止其持 token 重新冒回同一 seat
+  seatResumeTokens.delete(seat)
+  seatConnAlive.set(seat, false)
   const ts = Date.now()
   const finalReason = reason || 'kicked'
   // ★ 1) 给目标 seat 定向发 KICKED(WS / AndroidWs 走 sendTo,BC sendTo 跟 broadcast 等价)
@@ -2341,6 +2488,9 @@ function _tickHeartbeatChecker() {
       lastHeartbeat.delete(seat)
       const info = peers.get(seat)
       peers.delete(seat)
+      // ★ v0.4.25 P0-01:心跳释放 seat 时同步清理 token 与连接状态
+      seatResumeTokens.delete(seat)
+      seatConnAlive.delete(seat)
       emit('peer:leave', { seat, info })
       emit('ai:takeover', { seat, info })  // ★ v2.0 BUG-7
       sendMessage({ type: 'PEER_LEAVE', payload: { seat } })

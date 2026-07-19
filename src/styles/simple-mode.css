@@ -1,0 +1,41 @@
+/* ============================================================
+ * v0.4.25 简洁模式(simple-mode)
+ * 设置页「外观 → 简洁模式」开启后,对局页 .page 挂 simple-mode class:
+ * 隐藏装饰性纹理/光效,保留信息与交互,界面更干净、更省电。
+ * 全局规则(跨 scoped 组件生效:TableCenter / CardPlay 内部装饰一并收敛)
+ * ============================================================ */
+
+/* 牌桌背景木纹边 / 顶部聚光 / 底衬 */
+.simple-mode .bg-wood-edge,
+.simple-mode .table-glow,
+.simple-mode .table-backdrop,
+/* 椭圆桌面装饰花纹(SVG 圆环 + PVP 字样) */
+.simple-mode .table-deco,
+/* 桌面木边高光 / 顶光 / 暗角 */
+.simple-mode .wood-edge,
+.simple-mode .table-toplight,
+.simple-mode .table-vignette {
+  display: none !important;
+}
+
+/* 牌面卷草纹直接去掉,牌更干净 */
+.simple-mode .card-play {
+  background-image: none !important;
+}
+.simple-mode .card-pattern {
+  opacity: 0 !important;
+}
+
+/* 牌背传统纹简化为纯色深红 */
+.simple-mode .card-back-inner .back-pattern {
+  opacity: 0.18 !important;
+}
+
+/* 桌面椭圆阴影收敛(保留木边描边层次,不再外发光) */
+.simple-mode .ellipse-table {
+  box-shadow:
+    inset 0 0 24px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 3px #a0683a,
+    inset 0 0 0 4px #8B5A2B,
+    0 8px 20px rgba(0, 0, 0, 0.45) !important;
+}

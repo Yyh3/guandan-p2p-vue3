@@ -6,6 +6,34 @@
 
 ## 当前任务记录
 
+- 2026-07-19：完成主流掼蛋手游对标 UX 六件套 + P1-16（用户调研驱动）：
+  - 选中牌型实时预览：`useGameLogic.selectedPreview`（`E.recognize` 识别 + `E.canBeat` 判可压），两端手牌区上方胶囊「顺子·5 张 ✓可压 / ✗压不过 / 无效牌型」。
+  - 拖动连选：`useGameLogic` 拖动状态机（`dragStart/dragOver/dragEnd/dragIsActive/consumeDragSuppress` + `setCardSelected`）；桌面 mousedown/mouseenter/mouseup，移动 touchstart/touchmove 命中检测（`data-card-key`）/touchend，与长按选列共存，拖动后合成 click 吞掉。
+  - 记牌器：`cardCounter` computed（总数 8/2 - playedHistory - 自己手牌），新组件 `CardCounter.vue`（右缘悬浮 + 折叠面板，级牌高亮、剩 0 置灰）。
+  - 飞牌轨迹：`lastPlayerPos` computed（lastPlay.who → bottom/top/left/right），TableCenter 牌堆按方位 class + `--fly-x/y` CSS 变量从出牌者方向飞入。
+  - 简洁模式：storage `simpleMode` + SettingsView 外观区开关 + 全局 `simple-mode.css`（隐藏牌桌花纹/光效/牌面纹理，收敛阴影），两端 `.page` 挂 class。
+  - 级牌进度轨：新组件 `LevelTrack.vue`（2→A 节点 + 双方队伍圆点），挂进 TableCenter 信息条下方（top:34px 避开座位遮挡）；`teamLevels` ref 在 refreshUiFromGameState 同步。
+  - P1-16：横屏 `.hand-card::before` 透明 hit area 扩到 44px（36px 牌不达触控标准）。
+  - 测试：`v0425` 套件加块 G（23 case，累计 75）；`npm run build` 成功；Playwright 截图人工核对。
+
+- 2026-07-19：完成 55fb3cc 对抗性审查报告（`tmp/` 外文件，用户上传）第一阶段修复：
+  - P0-01 UUID 冒名：host 分配 seat 时生成不可预测 `resumeToken`，仅经 connId 单播（WS/AndroidWs）或 seat 定向 SYNC（BC）下发本人，广播 SYNC 绝不含 token；重连必须 uuid+token——token 不符 + 原连接活跃 → `DUPLICATE_SESSION` 拒绝且 peers 不动；原连接已断 → 不顶替按新玩家分配（原 seat 保留）；被踢/心跳释放/close 清理 token；joiner 端 token 存 sessionStorage 按 roomId 恢复。配套协议修复：加入阶段（selfSeat=-1）放行定向 SYNC（否则 token SYNC 被自身过滤）；joiner seat 解析优先 host 权威 `seat` 字段且分配后不再重扫（否则同 uuid 双 entry 时广播 SYNC 把 seat 误扫回旧 entry）；`network.test.js` 块 13 适配新协议。
+  - P0-05 RoomView 角色以 network 为准：进入房间页有活跃 session 时 `isHost` 取 `net.isHost()`，路由 query 仅作首次初始化（迁移后的新 host 返回房间不再被降级关 server）。
+  - P0-07 `cachePeerHostAddress` 放行 seat 0（换座后 seat 0 也可成候选）。
+  - P0-08 `validateHands` 增加四手牌间 card id 全局唯一校验（同一实体牌不得在两家）。
+  - P1-01/02 两端退出迁移候选选举统一走 `net.selectNextHostCandidate([selfSeat])`（确定性 + canHost 优先），兜底座位优先级后无候选则不迁移（旧版 `?? 2` 会对不存在的 seat 2 发起迁移）。
+  - P1-15 横屏 safe-area 四值 shorthand 左右写反修复：GameViewMobile hud-top/hand-area/action-bar 右侧改 `inset-right`；HomeView 横屏底部改 `inset-bottom`。
+  - 测试：新增 `v0425-adversarial-fixes.test.js`（31 case：3 个真 WS 链路攻击场景 + 全部源码断言）并注册；`network-weaknet.test.js` 修隐性竞态（并发 JOIN 按到达顺序分座，kick 改用 joiner 实际 seat 而非硬编码 3）；`network-multitab.test.js` 块 2 模拟刷新时迁移 resumeToken（sessionStorage 保留语义），SYNC 已分配 seat 的自愈路径保留（entry 消失/易主才重试 JOIN）。
+  - 暂缓（报告第二阶段起）：P0-02/03 迁移 await/ACK 状态机、P0-04 host 崩溃选举重发牌、P0-06 finished 控制权迁移、P0-09 横屏牌列展开、P0-10 大厅 grid、P1-03~14 协议硬化、UX-01~15。
+
+- 2026-07-19：完成 v0.4.25 大小王牌面重做 + 出牌归属标签（用户反馈驱动）：
+  - 大小王：`CardPlay.vue` 弃用 kawaii 卡通小丑 PNG（与传统奶油白+金边牌面风格冲突），改经典扑克设计——奶油白底 + 对角竖排 JOKER + 自绘卡通小丑 SVG（三尖铃铛帽+笑脸+拉夫领，大王红帽金球 / 小王蓝灰帽银球）+ 横排「大王/小王」；sm 尺寸精简；PNG 资产保留给 `ui-preview` 旧演示页。
+  - 出牌感知：`useGameLogic.js` 新增 `lastPlayerName`/`lastPlayerEmoji` computed（`lastPlay.who` → name/avatar）并导出；`TableCenter.vue` 牌堆正上方加 `last-play-tag` 金边胶囊（头像+名字+「出的牌」，`last-pop` 弹入动画，key 随出牌人+牌数变化重播）；桌面/移动两端接线。
+  - 测试：新增 `v0425-joker-lastplay-ui.test.js`（32 case）并注册；`npm run build` 成功。
+  - 音频：`audio.js` `sfxBomb` 重做真爆炸音（次声冲击 70→24Hz + 白噪声低通扫频 2600→120Hz + 碎裂高频 5kHz，替换旧"电子嘟"）；语音播报从仅炸弹/王炸扩展为全部特殊牌型（顺子/连对/钢板/三带二/同花顺，`TYPE_SPEECH_TEXT` 映射，单张/对子/三张不播报防吵）；新播报 `speechSynthesis.cancel()` 顶掉旧播报防排队；`speakBomb` 重构为通用 `_speak`/`speakType`；`audio.test.js` 块 15 扩展（147 case）。
+  - 手牌收紧：`GameViewDesktop.vue` 列宽 78→64、gap 4→2、牌保持 60px 不缩（手牌总宽缩 ~20%）；移动端已有动态重叠（40px/列）不动；`v0425` 测试块 E 锁定（37 case）。
+  - 特殊牌型特效：`effects.js` `bombFxForType` 扩展顺子/连对/钢板/三带二（新增 `shake` 字段，仅炸弹级 true）；`EffectLayer.vue` 新增四色弹跳大字（顺子蓝/连对青/钢板橙/三带二紫，字号为炸弹 0.72，`combo-pop` 弹簧动画不震屏）；`useGameLogic.showBombFx` 震屏按 `fx.shake` 门控；`v0425` 测试块 F 锁定（52 case）。
+
 - 2026-07-17：完成 v0.4.24 四路并行对抗性审查修复 + UI/HCI 改进（细节见 git log `HEAD`）：
   - 3 个 P0：GameViewDesktop 补 `import * as haptics`（菜单/退出全灭）；host 主动退出迁移改 `game.getSnapshot()` + `net.close({broadcast,newHostSeat,newHostAddress})`（一退全房解散）；JoinView `parseHostAddress` 默认导出 + `{hostIp,hostPort}` 解构（真机加房全灭，network.js 迁移路径同源修复）。
   - P1 对局：`'play'` 数字 type 统一映射牌型名（炸弹特效/语音/音效复活）；`scheduleAI` 仅 host + 兜底 pass；AI 鬼牌不压 rank17；`dealTimeout` 导出 + 快照清理；超时自动行动 `findMinBeat`/`commitPass`；`_broadcastPerSeatDeal` 遍历 0..3 跳过自己；URL `firstSeat` 只消费一次；`getSnapshot()` 重算 `handCounts`。

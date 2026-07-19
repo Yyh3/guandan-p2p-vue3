@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
   aiDifficulty: 'medium', // 'medium' | 'hard'
   // v0.4.22:触控反馈开关
   hapticsEnabled: true,
+  // v0.4.25:简洁模式 — 隐藏牌桌/牌面装饰纹理,界面更干净(对局页 .page 加 simple-mode class)
+  simpleMode: false,
 }
 
 function getSettings() {

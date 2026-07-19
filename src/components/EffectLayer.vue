@@ -1,5 +1,5 @@
 <template>
-  <!-- 特效层:屏幕中央大字(炸弹/王炸) + 不出/过牌飘字 + 屏幕震动 -->
+  <!-- 特效层:屏幕中央大字(炸弹/王炸/顺子等特殊牌型) + 不出/过牌飘字 + 屏幕震动 -->
   <div class="effect-layer" :class="{ shake: shaking }">
     <!-- 中央大字特效 -->
     <transition name="bomb-fade">
@@ -100,6 +100,43 @@ function sparkStyle(i) {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   filter: drop-shadow(0 0 20px rgba(255, 87, 34, 0.8));
+}
+
+/* ============================================================
+ * v0.4.25:非炸弹特殊牌型(顺子/连对/钢板/三带二)
+ * - 字号为炸弹的 ~72%(层级区分,炸弹仍最炸)
+ * - combo-pop 轻快弹跳强调,不触发屏幕震动
+ * - 颜色区分牌型:顺子蓝 / 连对青 / 钢板橙 / 三带二紫
+ * ============================================================ */
+.kind-straight .bomb-text,
+.kind-pairseq .bomb-text,
+.kind-plate .bomb-text,
+.kind-triplepair .bomb-text {
+  font-size: calc(var(--fs-bomb) * 0.72);
+  animation: combo-pop 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.kind-straight .bomb-text {
+  color: #42a5f5;
+  text-shadow: 0 0 18px rgba(66, 165, 245, 0.9), 0 0 36px rgba(66, 165, 245, 0.5), 0 4px 8px rgba(0, 0, 0, 0.6);
+}
+.kind-pairseq .bomb-text {
+  color: #26c6da;
+  text-shadow: 0 0 18px rgba(38, 198, 218, 0.9), 0 0 36px rgba(38, 198, 218, 0.5), 0 4px 8px rgba(0, 0, 0, 0.6);
+}
+.kind-plate .bomb-text {
+  color: #ffa726;
+  text-shadow: 0 0 18px rgba(255, 167, 38, 0.9), 0 0 36px rgba(255, 167, 38, 0.5), 0 4px 8px rgba(0, 0, 0, 0.6);
+}
+.kind-triplepair .bomb-text {
+  color: #ab47bc;
+  text-shadow: 0 0 18px rgba(171, 71, 188, 0.9), 0 0 36px rgba(171, 71, 188, 0.5), 0 4px 8px rgba(0, 0, 0, 0.6);
+}
+@keyframes combo-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  25%  { transform: scale(1.15); opacity: 1; }
+  45%  { transform: scale(1); opacity: 1; }
+  75%  { transform: scale(1) translateY(0); opacity: 1; }
+  100% { transform: scale(1.05) translateY(-10px); opacity: 0; }
 }
 @keyframes bomb-explode {
   0%   { transform: scale(0.3) rotate(-5deg); opacity: 0; }

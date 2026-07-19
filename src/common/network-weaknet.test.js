@@ -92,6 +92,10 @@ console.log('\n=== 1. 先 0 丢包建联,再切到 15% 丢包 + 30ms 延迟 ==='
   // 0 丢包下等待 4 人齐
   const ok = await waitFor(() => host.getPeers().size === 4, 4000)
   assert('0 丢包下 4 人全部上线(host peers=4)', ok === true)
+  // ★ v0.4.25 修复:并发 JOIN 的 seat 按到达顺序分配(不一定是 1/2/3 顺序),
+  //   等所有 joiner 拿到 seat 再记录实际座位,后续 kick 用真实 seat 而不是硬编码
+  await waitFor(() => joiners.every(j => j.getSelfSeat() >= 1), 4000)
+  const joinerSeats = joiners.map(j => j.getSelfSeat())
 
   // 上调弱网参数
   joinerTransports.forEach(t => { t.setLossRate(0.15); t.setDelayMs(30) })
@@ -127,7 +131,9 @@ console.log('\n=== 1. 先 0 丢包建联,再切到 15% 丢包 + 30ms 延迟 ==='
   console.log('\n=== 4. 弱网下 kick 事件不崩溃 ===')
   let kicked = false
   joiners[2].on('self:kicked', () => { kicked = true })
-  host.kickPlayer(3)
+  // ★ v0.4.25 修复:kick joiners[2] 的**实际** seat(并发 JOIN 到达顺序不定,
+  //   joiners[2] 不一定是 seat 3;硬编码 3 会踢到别人,self:kicked 永不到达)
+  host.kickPlayer(joinerSeats[2])
   await sleep(600)
   assert('被踢 joiner 收到 self:kicked', kicked)
   assert('host 端 peers 变为 3 人', host.getPeers().size === 3)

@@ -4,6 +4,7 @@ import App from './App.vue'
 import './styles/tokens.css'
 import './styles/app-theme.css'
 import './styles/html.css'
+import './styles/simple-mode.css'
 
 import HomeView from './views/index/HomeView.vue'
 import RoomView from './views/room/RoomView.vue'

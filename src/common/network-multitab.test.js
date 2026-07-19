@@ -116,7 +116,11 @@ console.log('\n===2. joiner refresh tab same uuid reuses seat (Bug1) ===')
  await settle()
 
  // A2 re-joins with same sessionStorage uuid (refresh tab simulated)
+ // ★ v0.4.25 P0-01:真实刷新会保留 sessionStorage(uuid + resumeToken 都在),
+ //   这里把 JA 存下的 token 迁到 A2 的 mock,模拟同一台设备刷新
+ const savedResume = globalThis.sessionStorage.getItem('guandan_resume_multitab-r2')
  const { mod: JA2 } = await makeFakeInstance('ja2-r2', 'ja-uuid-r2')
+ if (savedResume) globalThis.sessionStorage.setItem('guandan_resume_multitab-r2', savedResume)
  JA2.joinRoom('multitab-r2', { nickname: 'A2', avatar: 'A2' })
  await settle()
  assert('A2 reconnected seat=1 (reused)', JA2.getSelfSeat() ===1)

@@ -580,7 +580,8 @@ function goGuide() { haptics.click(); router.push('/guide') }
     align-items: center;
     justify-content: center;
     gap: 32px;
-    padding: 16px 32px calc(16px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-left, 0px));
+    /* ★ v0.4.25 P1-15 修复:四值顺序 top right bottom left — bottom 应用 inset-bottom */
+    padding: 16px 32px calc(16px + env(safe-area-inset-bottom, 0px)) calc(32px + env(safe-area-inset-left, 0px));
   }
   .logo {
     margin: 0;

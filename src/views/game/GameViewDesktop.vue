@@ -1,5 +1,5 @@
 <template>
-  <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape }">
+  <div class="page" :class="{ dealing: isDealing, bomb: isShaking, 'is-landscape': isLandscape, 'simple-mode': simpleMode }">
     <!-- v3.x:背景 — 椭圆牌桌 --felt-base 渐变 + 木纹边 + 桌面外圈深绿径向渐变到 --bg-deep (spec §3.1) -->
     <div class="bg-felt"></div>
     <div class="bg-wood-edge" aria-hidden="true"></div>
@@ -31,6 +31,12 @@
         :table-cards="tableCards"
         :first-player-name="firstPlayerName"
         :first-player-emoji="firstPlayerEmoji"
+        :last-player-name="lastPlayerName"
+        :last-player-emoji="lastPlayerEmoji"
+        :last-player-pos="lastPlayerPos"
+        :team-levels="teamLevels"
+        :level-rank-num="levelRank"
+        :self-seat="selfSeat"
         :is-level="isLevel"
         :is-dealing="isDealing"
         :level-label="levelLabel"
@@ -57,6 +63,20 @@
 
     <!-- 玩家手牌(底部):按 rank 分组竖叠 -->
     <div class="hand-area" :class="{ disabled: !myTurn || isDealing, 'is-urgent': urgent }">
+      <!-- v0.4.25:选中牌型实时预览(识别 + 可压指示) -->
+      <transition name="preview-fade">
+        <div
+          v-if="selectedPreview"
+          class="selected-preview"
+          :class="{ invalid: !selectedPreview.ok, can: selectedPreview.beat === true, cant: selectedPreview.beat === false }"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="sp-text">{{ selectedPreview.text }}</span>
+          <span v-if="selectedPreview.beat === true" class="sp-verdict ok">✓ 可压</span>
+          <span v-else-if="selectedPreview.beat === false" class="sp-verdict no">✗ 压不过</span>
+        </div>
+      </transition>
       <div class="hand-inner">
         <div
           v-for="col in handColumns"
@@ -82,8 +102,10 @@
             :key="cardKey(c)"
             class="hand-card"
             :style="{ zIndex: i + 1, top: (i * -20) + 'px' }"
-            @click="toggleCardId(cardKey(c))"
+            @click="onHandCardClick(c)"
             @dblclick="toggleCol(col)"
+            @mousedown="onDragStart(c, $event)"
+            @mouseenter="onDragEnter(c)"
           >
             <CardPlay
               :card="c"
@@ -116,6 +138,8 @@
       @autoFind="onAutoFindBest"
       @chat="onChat"
     />
+    <!-- v0.4.25:记牌器(右缘悬浮,各点数剩余张数) -->
+    <CardCounter class="counter-fab" :rows="cardCounter" :level-rank="levelRank" />
     <!-- ★ v0.4.24 P2 修复:非己方回合/发牌时也保留聊天入口(对齐移动端常显);
          与 QuickActions 互斥(QuickActions 内含 💬),避免两个聊天按钮同屏 -->
     <button
@@ -268,6 +292,7 @@ import * as haptics from '@/common/haptics.js'
 
 import HudTop from '@/components/HudTop.vue'
 import TableCenter from '@/components/TableCenter.vue'
+import CardCounter from '@/components/CardCounter.vue'
 import EffectLayer from '@/components/EffectLayer.vue'
 import MainActions from '@/components/MainActions.vue'
 import QuickActions from '@/components/QuickActions.vue'
@@ -318,6 +343,8 @@ const updateLandscape = () => {
 const onEsc = (e) => {
   if (e.key === 'Escape') showMenu()
 }
+// v0.4.25:拖动连选 — mouseup 结束拖动(命名函数,卸载时精确移除)
+const onGlobalMouseUp = () => { dragEnd() }
 onMounted(() => {
   if (typeof window !== 'undefined' && window.matchMedia) {
     mqLandscape = window.matchMedia('(orientation: landscape) and (max-height: 500px)')
@@ -332,6 +359,8 @@ onMounted(() => {
   net.on('host:lost', onHostLost)
   // v0.4.24:Esc 快捷键
   window.addEventListener('keydown', onEsc)
+  // v0.4.25:拖动连选 mouseup
+  window.addEventListener('mouseup', onGlobalMouseUp)
 })
 
 // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 host:lost — host 崩溃/断电
@@ -374,6 +403,8 @@ const onHostLost = async () => {
 onUnmounted(() => {
   // v0.4.24:Esc 快捷键清理
   window.removeEventListener('keydown', onEsc)
+  // v0.4.25:拖动连选 mouseup 清理
+  window.removeEventListener('mouseup', onGlobalMouseUp)
   if (mqLandscape) {
     if (mqLandscape.removeEventListener) {
       mqLandscape.removeEventListener('change', updateLandscape)
@@ -390,7 +421,7 @@ onUnmounted(() => {
 
 const {
   // state
-  round, levelLabel, nextLevelLabel, levelUp, multiplier,
+  round, levelLabel, nextLevelLabel, levelUp, multiplier, levelRank, teamLevels,
   players, myHand, selectedColKeys, selectedCardIds, tableCards, lastPlay,
   phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder,
   isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, suitFilter, isShaking,
@@ -398,13 +429,14 @@ const {
   hostMigrationToast, hostMigrationBadge, urgent,
   isP2PMode, selfSeat, game, isNetworkHost,
   // computed
-  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
-  seatData, handColumns, selectedCount,
+  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+  seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
   playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+  dragStart, dragOver, dragEnd, consumeDragSuppress,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch, isRestartAfterA,  // ★ v0.4.9
   onIcon, initGame, retryDeal,
@@ -419,6 +451,24 @@ const {
   initialLevelRank: props.initialLevelRank,
   firstSeat: props.firstSeat,
 })
+
+// ★ v0.4.25:拖动连选(mouse)— mousedown 起拖,mouseenter 连选,mouseup 收尾;
+//   原地点击(未拖动)走原 toggleCardId,拖动后的合成 click 由 consumeDragSuppress 吞掉
+function onHandCardClick(c) {
+  if (consumeDragSuppress()) return
+  toggleCardId(cardKey(c))
+}
+function onDragStart(c, e) {
+  if (!myTurn.value || isDealing.value) return
+  e.preventDefault()
+  dragStart(c)
+}
+function onDragEnter(c) {
+  dragOver(c)
+}
+
+// v0.4.25:简洁模式(设置页「外观」开关)— 隐藏装饰纹理/光效,进对局时读取一次
+const simpleMode = ref(storage.getSettings().simpleMode === true)
 
 // ★ v0.4.24 P1 修复:桌面端座位不渲染假金币/等级(2026-06-28 已确认删除用户金币数)。
 //   players 默认值 coins:8888/level:7 经 seatData 透传到 PlayerSeat 显示 💰8888/LVx;
@@ -492,18 +542,24 @@ function showMenu() {
       if (isP2PMode.value && isNetworkHost.value && game.value) {
         const snapshot = game.value.getSnapshot()
         if (snapshot.phase === 'playing' || snapshot.phase === 'dealing' || snapshot.phase === 'trick_end') {
-          // Phase 1:座位稳定选新 host — 优先队友,其次其它在线 peer
+          // ★ v0.4.25 P1-01/02 修复:候选选举统一走 network.selectNextHostCandidate
+          //   (确定性 + canHost 优先 + seat 0..3 覆盖,UI 不再自行选举);
+          //   无候选时不迁移(旧版 ?? 2 会对不存在的 seat 2 发起迁移)
           const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
           const peers = net.getPeers ? net.getPeers() : new Map()
-          const candidates = [
-            (selfSeat + 2) % 4,
-            (selfSeat + 1) % 4,
-            (selfSeat + 3) % 4,
-          ]
-          const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
-          const newHostAddress = peers.get(newHostSeat)?.hostAddress
-          try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
-          migration = { newHostSeat, newHostAddress }
+          let newHostSeat = (typeof net.selectNextHostCandidate === 'function')
+            ? net.selectNextHostCandidate([selfSeat])
+            : null
+          if (newHostSeat == null) {
+            // 兜底:peers 缺 uuid 等导致选举为空时,退回座位优先级;仍无 → 无人可接管不迁移
+            newHostSeat = [(selfSeat + 2) % 4, (selfSeat + 1) % 4, (selfSeat + 3) % 4]
+              .find(s => s !== selfSeat && peers.has(s)) ?? null
+          }
+          if (newHostSeat != null) {
+            const newHostAddress = peers.get(newHostSeat)?.hostAddress
+            try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+            migration = { newHostSeat, newHostAddress }
+          }
         }
       }
       exitGame(migration)
@@ -738,6 +794,44 @@ function onNickEditorConfirmed(p) {
   50%  { box-shadow: inset 0 4px 36px rgba(229, 57, 53, 0.75), inset 0 0 8px rgba(255, 100, 100, 0.5); }
   100% { box-shadow: inset 0 4px 24px rgba(229, 57, 53, 0.25); }
 }
+/* v0.4.25:选中牌型实时预览 — 浮在手牌区上方居中 */
+.selected-preview {
+  position: absolute;
+  top: -46px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1.5px solid rgba(255, 215, 0, 0.55);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  z-index: 60;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.selected-preview .sp-text { font-size: 12px; font-weight: 800; color: #ffd76a; letter-spacing: 0.5px; }
+.selected-preview .sp-verdict { font-size: 11px; font-weight: 800; }
+.selected-preview .sp-verdict.ok { color: #66bb6a; }
+.selected-preview .sp-verdict.no { color: #ef5350; }
+.selected-preview.invalid { border-color: rgba(239, 83, 80, 0.6); }
+.selected-preview.invalid .sp-text { color: #ef9a9a; }
+.selected-preview.can { border-color: rgba(102, 187, 106, 0.7); box-shadow: 0 0 10px rgba(102, 187, 106, 0.35); }
+.selected-preview.cant { border-color: rgba(239, 83, 80, 0.7); }
+.preview-fade-enter-active, .preview-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.preview-fade-enter-from, .preview-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(4px); }
+
+/* v0.4.25:记牌器悬浮位(右缘垂直居中) */
+.counter-fab {
+  position: fixed;
+  right: 12px;
+  top: 46%;
+  z-index: 70;
+}
+
 .hand-inner {
   display: flex;
   flex-direction: row;
@@ -746,7 +840,7 @@ function onNickEditorConfirmed(p) {
   flex-wrap: nowrap;
   min-height: 120px;
   padding: 8px 12px 22px;  /* 底部留空间给列数标签 */
-  gap: 4px;                 /* v3-3:列与列之间固定 4px 间隙 */
+  gap: 2px;                 /* v0.4.25:4 → 2,列间更紧凑(用户反馈手牌占宽过大) */
   /* v3.8 bug fix: 不要用 `overflow: auto visible`,CSS spec 会强制把
      overflow-y 也算成 auto,把竖叠牌的顶端裁掉。
      1280px 固定画布下根本不需要横向滚动,直接全部 visible。 */
@@ -756,7 +850,7 @@ function onNickEditorConfirmed(p) {
 /* v3-3:手牌列 — 浅底 + 描边 + 列间竖线,让"一列一列"清晰可见 */
 .hand-column {
   position: relative;
-  width: 78px;                                  /* 60 → 78,留白更明显 */
+  width: 64px;                                  /* v0.4.25:78 → 64,布局更紧凑(用户反馈占宽过大);牌仍 60px 不缩 */
   min-height: 98px;
   flex-shrink: 0;
   margin: 0;
@@ -842,7 +936,7 @@ function onNickEditorConfirmed(p) {
 }
 .hand-card {
   position: absolute;
-  left: 9px;       /* (78 - 60) / 2 = 9 居中 */
+  left: 2px;       /* (64 - 60) / 2 = 2 居中(v0.4.25 列宽 78 → 64 同步) */
   width: 60px;
   height: 84px;
   transition: transform var(--t-fast) var(--ease-out);

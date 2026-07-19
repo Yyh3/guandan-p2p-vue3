@@ -6,6 +6,7 @@
    *   - 顶部 3 颗 pill 信息条(打 X / 第 N 轮 / ×N 倍)
    *   - 中央出牌堆(扇形错位 32px + ±6° 旋转)
    *   - 底部首家提示胶囊(头像 + 名字 + 出牌中 ▶)
+   *   - v0.4.25:出牌归属标签(牌堆上方标注刚出牌玩家头像 + 名字)
    * 桌面中央改为几何装饰花纹,不再有大字水印。
    -->
   <div class="table-center-wrap" :class="{ 'is-dealing': isDealing }">
@@ -57,12 +58,33 @@
 
     <!-- v3.9: 首家出牌人胶囊已挪进 .ellipse-table 内部(见上),这里不再单独渲染 -->
 
+    <!-- v0.4.25:级牌进度轨(2→A 双方队伍位置,信息条下方) -->
+    <LevelTrack
+      v-if="!isDealing"
+      class="table-level-track"
+      :team-levels="teamLevels"
+      :level-rank="levelRankNum"
+      :self-seat="selfSeat"
+    />
+
     <!-- 桌面牌堆 -->
     <div class="card-stack-area">
+      <!-- v0.4.25:出牌归属标签 — 牌堆上方标注"谁出的牌"(头像 + 名字),解决出牌者难感知 -->
+      <transition name="last-pop">
+        <div
+          v-if="tableCards.length > 0 && lastPlayerName"
+          :key="lastPlayerName + '-' + tableCards.length"
+          class="last-play-tag"
+        >
+          <span class="lp-emoji" aria-hidden="true">{{ lastPlayerEmoji || '🙂' }}</span>
+          <span class="lp-name">{{ lastPlayerName }}</span>
+          <span class="lp-act">出的牌</span>
+        </div>
+      </transition>
       <div v-if="tableCards.length === 0 && !isDealing" class="stack-empty">
         <span class="empty-text">{{ firstPlayerName }} 先出</span>
       </div>
-      <transition-group v-else-if="!isDealing" name="card-fly" tag="div" class="card-stack" :class="`stack-size-${Math.min(tableCards.length, 8)}`">
+      <transition-group v-else-if="!isDealing" name="card-fly" tag="div" class="card-stack" :class="[`stack-size-${Math.min(tableCards.length, 8)}`, `fly-from-${lastPlayerPos}`]">
         <div
           v-for="(c, i) in tableCards"
           :key="'c' + c.suit + '-' + c.rank + '-' + i"
@@ -90,6 +112,7 @@
 
 <script setup>
 import CardPlay from './CardPlay.vue'
+import LevelTrack from './LevelTrack.vue'
 
 const props = defineProps({
   // 桌面牌(刚出的牌)
@@ -98,6 +121,11 @@ const props = defineProps({
   firstPlayerName: { type: String, default: '' },
   // 首家 emoji 头像
   firstPlayerEmoji: { type: String, default: '' },
+  // ★ v0.4.25:刚出牌玩家归属(lastPlay.who → name/avatar),标注在牌堆上方
+  lastPlayerName: { type: String, default: '' },
+  lastPlayerEmoji: { type: String, default: '' },
+  // ★ v0.4.25:出牌者屏幕方位(bottom/top/left/right),飞牌轨迹起点
+  lastPlayerPos: { type: String, default: 'bottom' },
   // 是否级牌判定函数
   isLevel: { type: Function, required: true },
   // 是否发牌中
@@ -110,6 +138,10 @@ const props = defineProps({
   multiplier: { type: Number, default: 1 },
   // ★ P1-10 修复:AI 对局不显示 PVP,显示"AI 对局"或"好友对局"
   modeLabel: { type: String, default: 'PVP' },
+  // ★ v0.4.25:级牌进度轨数据(双方队伍等级 / 本局级牌 / 自己座位)
+  teamLevels: { type: Array, default: () => [15, 15] },
+  levelRankNum: { type: Number, default: 15 },
+  selfSeat: { type: Number, default: 0 },
 })
 
 /**
@@ -312,6 +344,17 @@ function stackStyle(i) {
 /* v2.5:旧 .first-tip-inline 类名保留(空规则),以防 v3.7 旧引用样式破裂 */
 .first-tip-inline { /* 已被 .first-tip-bottom 替代 */ }
 
+/* v0.4.25:级牌进度轨 — 信息条下方、椭圆桌面上沿内侧居中
+ *   (top 6px 会被顶部座位卡片遮住,下移到 34px 避开) */
+.table-level-track {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: none;
+}
+
 /* ============================================================
  * 桌面牌堆(已出牌)
  * ============================================================ */
@@ -329,7 +372,44 @@ function stackStyle(i) {
   position: relative;
   width: 380px;
   height: 160px;
+  /* v0.4.25:飞牌起点(按出牌者方位覆盖) */
+  --fly-x: 0px;
+  --fly-y: 200px;
 }
+/* v0.4.25:飞牌轨迹 — 牌从出牌玩家的座位方向飞入桌面中央 */
+.card-stack.fly-from-top   { --fly-x: 0px;    --fly-y: -160px; }
+.card-stack.fly-from-left  { --fly-x: -240px; --fly-y: 40px; }
+.card-stack.fly-from-right { --fly-x: 240px;  --fly-y: 40px; }
+.card-stack.fly-from-bottom{ --fly-x: 0px;    --fly-y: 200px; }
+
+/* ============================================================
+ * v0.4.25 出牌归属标签(谁出的牌)— 浮在牌堆正上方,金边玻璃胶囊
+ * ============================================================ */
+.last-play-tag {
+  position: absolute;
+  top: calc(50% - 112px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.68);
+  border: 1.5px solid var(--gold, #FFD700);
+  border-radius: 14px;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.5);
+  z-index: 8;
+  pointer-events: none;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+}
+.last-play-tag .lp-emoji { font-size: 13px; line-height: 1; }
+.last-play-tag .lp-name  { font-size: 12px; font-weight: 800; color: #fff; }
+.last-play-tag .lp-act   { font-size: 11px; font-weight: 700; color: var(--gold, #FFD700); }
+.last-pop-enter-active { transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.last-pop-leave-active { transition: opacity 0.15s ease-in; }
+.last-pop-enter-from { opacity: 0; transform: translateX(-50%) scale(0.5); }
+.last-pop-leave-to   { opacity: 0; }
 .stack-card {
   pointer-events: auto;
   animation: card-to-table 300ms cubic-bezier(0.4, 0, 0.2, 1) backwards;
@@ -337,7 +417,8 @@ function stackStyle(i) {
 @keyframes card-to-table {
   0% {
     opacity: 0;
-    transform: translate(calc(-50% + 0px), calc(-50% + 200px)) scale(0.6) rotate(0deg);
+    /* v0.4.25:从出牌者方位(var(--fly-x/y))飞入,替代固定底部冒牌 */
+    transform: translate(calc(-50% + var(--fly-x, 0px)), calc(-50% + var(--fly-y, 200px))) scale(0.6) rotate(0deg);
   }
   60% {
     opacity: 1;

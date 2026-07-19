@@ -2,7 +2,7 @@
   <!--
     v3.x 单张扑克牌:奶油白底 + 金边 + 传统卷草纹
     - 桌面 60×84(默认 md / lg)/ 移动 48×68(由父组件 --hand-card-w/h 控制)
-    - 大小王:v0.4.3 起金/银金属渐变 + 卡通小丑 PNG(红/紫,kawaii 风格,无字,占满牌面 ~90%)
+    - 大小王:v0.4.25 起经典扑克设计(奶油白底 + 对角竖排 JOKER + 卡通小丑 SVG + 「大王/小王」,红/蓝双色)
     - 牌背:深红渐变 + 金色传统纹 + 中央"掼"字徽章
     - 选中态 / 可打出态 / 不可打出态按 spec §5.5 实现
   -->
@@ -42,22 +42,40 @@
       </template>
 
       <!-- 中央装饰 -->
-      <div class="center-area">
+      <div
+        class="center-area"
+        :class="{ 'joker-face': isJoker }"
+        :role="isJoker ? 'img' : undefined"
+        :aria-label="isJoker ? jokerLabel : undefined"
+      >
         <template v-if="isJoker">
-          <!-- v0.4.3:卡通小丑 PNG,占满牌面 ~90%
-               新增大王/小王文字角标,解决小尺寸牌面难以区分问题 -->
-          <div class="joker-content">
-            <img
-              class="joker-face"
-              :src="isBigJoker ? bigJokerImg : smallJokerImg"
-              :alt="jokerLabel"
-              draggable="false"
-            />
-          </div>
-          <div class="joker-labels" aria-hidden="true">
-            <span class="joker-rank joker-rank-tl">{{ jokerLabel }}</span>
-            <span class="joker-rank joker-rank-br">{{ jokerLabel }}</span>
-          </div>
+          <!-- v0.4.25:经典扑克大小王 — 对角竖排 JOKER + 卡通小丑 SVG + 「大王/小王」
+               (替代卡通小丑 PNG;SVG 自绘铃铛帽 + 笑脸 + 拉夫领,与奶油白 + 金边牌面风格统一;
+                大王红帽金球,小王蓝灰帽银球) -->
+          <span class="joker-word joker-word-tl" aria-hidden="true"><i v-for="ch in 'JOKER'" :key="ch">{{ ch }}</i></span>
+          <svg class="joker-jester" viewBox="0 0 100 102" aria-hidden="true">
+            <!-- 三尖铃铛帽(圆头粗线帽角 + 端部圆球) -->
+            <path class="jst-horn" d="M34 40 C24 36 15 28 13 15" />
+            <path class="jst-horn" d="M66 40 C76 36 85 28 87 15" />
+            <path class="jst-horn" d="M50 34 C46 26 47 15 52 9" />
+            <circle class="jst-ball" cx="13" cy="13" r="4.6" />
+            <circle class="jst-ball" cx="87" cy="13" r="4.6" />
+            <circle class="jst-ball" cx="52" cy="8" r="4.6" />
+            <!-- 帽檐 -->
+            <path class="jst-hat" d="M29 46 Q50 30 71 46 L68 38 Q50 26 32 38 Z" />
+            <!-- 圆脸 + 弯月笑眼 + 腮红 + 圆鼻 + 微笑 -->
+            <circle class="jst-face" cx="50" cy="61" r="20" />
+            <path class="jst-eye" d="M40 58 Q43.5 55 47 58" />
+            <path class="jst-eye" d="M53 58 Q56.5 55 60 58" />
+            <ellipse class="jst-blush" cx="38" cy="66" rx="2.8" ry="1.7" />
+            <ellipse class="jst-blush" cx="62" cy="66" rx="2.8" ry="1.7" />
+            <circle class="jst-nose" cx="50" cy="63" r="3.1" />
+            <path class="jst-mouth" d="M42 70 Q50 77 58 70" />
+            <!-- 拉夫领(波浪粗线) -->
+            <path class="jst-ruff" d="M31 77 Q35 85 39 78 Q43 87 47 79 Q50 89 53 79 Q57 87 61 78 Q65 85 69 77" />
+          </svg>
+          <span class="joker-cn" aria-hidden="true"><i>{{ jokerLabel[0] }}</i><i>{{ jokerLabel[1] }}</i></span>
+          <span class="joker-word joker-word-br" aria-hidden="true"><i v-for="ch in 'JOKER'" :key="ch">{{ ch }}</i></span>
         </template>
         <template v-else>
           <div class="center-suit">{{ suitSymbol }}</div>
@@ -86,9 +104,6 @@
 
 <script setup>
 import { computed } from 'vue'
-// v0.4.2 大小王卡通小丑 PNG(256x256,透明背景)— 替代王冠 + 王字 SVG
-import bigJokerImg from '@/assets/cards/big-joker.png'
-import smallJokerImg from '@/assets/cards/small-joker.png'
 
 const props = defineProps({
   // 卡牌数据 {suit, rank} 或 null
@@ -130,7 +145,7 @@ const sizeClass = computed(() => `size-${props.size}`)
  * v3.x 卡牌视觉系统(UI-REDESIGN-V3-SPEC.md §5)
  * 牌面:奶油白 + 1.5px 金边 + 8px 圆角 + 传统卷草纹
  * 牌背:深红渐变 + 金色传统纹 + "掼"字徽章
- * 大小王:金/银金属渐变 + 王冠 + 王字
+ * 大小王:经典扑克设计(v0.4.25)— 竖排 JOKER + 卡通小丑 SVG + 王字,红/蓝双色
  * ============================================================ */
 
 .card-play {
@@ -249,94 +264,86 @@ const sizeClass = computed(() => `size-${props.size}`)
   z-index: 2;
 }
 
-/* ----- 大王:金色金属渐变(spec §5.4)----- */
-.is-big-joker {
-  background-color: transparent;
-  background-image: var(--big-joker-bg), var(--card-pattern-svg);
-  background-repeat: no-repeat, repeat;
-  background-size: 100% 100%, 80px 110px;
-  border-color: #a8862a;
-  color: #1a1a1a;
-  box-shadow:
-    0 4px 12px rgba(212, 175, 55, 0.4),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6),
-    0 0 12px rgba(255, 215, 0, 0.3);
-}
-.is-big-joker .card-pattern { opacity: 0.15; }
-.is-big-joker .joker-content { color: #1a1a1a; }
+/* ----- 大小王:经典扑克设计(v0.4.25)-----
+ * 奶油白底(与普通牌一致)+ 对角竖排 JOKER + 皇冠 SVG + 竖排「大王/小王」
+ * 大王 = 经典红字 + 金冠;小王 = 墨黑字 + 银冠(沿用真实扑克配色约定) */
+.is-big-joker   { color: #c62f2f; }
+.is-small-joker { color: #2f2f3a; }
 
-/* ----- 小王:银灰色金属渐变(spec §5.4)----- */
-.is-small-joker {
-  background-color: transparent;
-  background-image: var(--small-joker-bg), var(--card-pattern-svg);
-  background-repeat: no-repeat, repeat;
-  background-size: 100% 100%, 80px 110px;
-  border-color: #888;
-  color: #1a1a1a;
-  box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.25),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6),
-    0 0 8px rgba(192, 192, 192, 0.4);
-}
-.is-small-joker .card-pattern { opacity: 0.12; }
-.is-small-joker .joker-content { color: #1a1a1a; }
+/* 王牌中央区铺满整牌(普通牌 center-area 居中自适应即可) */
+.center-area.joker-face { inset: 0; left: 0; top: 0; transform: none; }
 
-/* ----- 大小王中央内容(v0.4.3 卡通小丑 PNG 占满牌面 ~90%,带文字角标)----- */
-.joker-content {
+/* 对角竖排 JOKER 字母(左上 + 右下旋转 180°,与真实扑克一致) */
+.joker-word {
+  position: absolute;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-}
-/* 增加一层柔光晕,让 PNG 从金属渐变背景里浮出来 */
-.joker-content::before {
-  content: '';
-  position: absolute;
-  left: 50%; top: 55%;
-  transform: translate(-50%, -50%);
-  width: 70%; height: 70%;
-  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), transparent 70%);
-  border-radius: 50%;
-  z-index: 0;
-  pointer-events: none;
-}
-.joker-face {
-  width: 92%;
-  height: 88%;
-  object-fit: contain;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
-  user-select: none;
-  -webkit-user-drag: none;
-  pointer-events: none;
-  position: relative;
-  z-index: 1;
-}
-/* 大小王文字角标 */
-.joker-labels {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.joker-rank {
-  position: absolute;
-  font-size: 0.78em;
+  font-size: 0.52em;
   font-weight: 900;
-  line-height: 1;
-  color: #1a1a1a;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.45);
-  letter-spacing: 0.5px;
+  line-height: 1.3;
+  font-family: Georgia, "Times New Roman", serif;
+  z-index: 1;
 }
-.joker-rank-tl { top: 4px; left: 4px; }
-.joker-rank-br { bottom: 4px; right: 4px; transform: rotate(180deg); }
-/* 小尺寸牌面(sm/移动)缩小角标,避免拥挤 */
-.size-sm .joker-rank { font-size: 0.55em; top: 2px; left: 2px; }
-.size-sm .joker-rank-br { display: none; }
-.size-md .joker-rank { font-size: 0.72em; }
-.size-lg .joker-rank { font-size: 0.85em; }
+.joker-word i { font-style: normal; }
+.joker-word-tl { top: 4%;    left: 6.5%; }
+.joker-word-br { bottom: 4%; right: 6.5%; transform: rotate(180deg); }
+
+/* 卡通小丑 SVG(上中部,大王红帽金球 / 小王蓝灰帽银球) */
+.joker-jester {
+  position: absolute;
+  left: 50%;
+  top: 7%;
+  transform: translateX(-50%);
+  width: 64%;
+  z-index: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+}
+/* 结构件共用描边/填充 */
+.jst-horn  { fill: none; stroke-width: 7; stroke-linecap: round; }
+.jst-eye   { fill: none; stroke: #3a3a3a; stroke-width: 1.7; stroke-linecap: round; }
+.jst-mouth { fill: none; stroke: #3a3a3a; stroke-width: 1.8; stroke-linecap: round; }
+.jst-face  { fill: #fff; stroke-width: 1.5; }
+.jst-blush { fill: #ff9d9d; opacity: 0.55; }
+.jst-ruff  { fill: none; stroke-width: 4.5; stroke-linecap: round; }
+/* 大王:红帽 + 金球 + 红鼻 */
+.is-big-joker .jst-horn { stroke: #e05545; }
+.is-big-joker .jst-hat  { fill: #e05545; stroke: #a83a2c; stroke-width: 1.2; }
+.is-big-joker .jst-ball { fill: #ffd54f; stroke: #b8860b; stroke-width: 1; }
+.is-big-joker .jst-face { stroke: #a83a2c; }
+.is-big-joker .jst-nose { fill: #d43a2a; }
+.is-big-joker .jst-ruff { stroke: #e05545; }
+/* 小王:蓝灰帽 + 银球 + 深蓝鼻 */
+.is-small-joker .jst-horn { stroke: #8d94c9; }
+.is-small-joker .jst-hat  { fill: #8d94c9; stroke: #565b85; stroke-width: 1.2; }
+.is-small-joker .jst-ball { fill: #ececf2; stroke: #9a9ab0; stroke-width: 1; }
+.is-small-joker .jst-face { stroke: #565b85; }
+.is-small-joker .jst-nose { fill: #565b85; }
+.is-small-joker .jst-ruff { stroke: #8d94c9; }
+
+/* 「大王 / 小王」横排(小丑图下方,衬线粗体) */
+.joker-cn {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  font-size: 1em;
+  font-weight: 900;
+  line-height: 1.25;
+  font-family: "Songti SC", "STSong", "KaiTi", serif;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  z-index: 1;
+  white-space: nowrap;
+}
+.joker-cn i { font-style: normal; }
+
+/* 小尺寸(sm)精简:隐藏 JOKER 字母,小丑放大,王字贴底 */
+.size-sm .joker-word { display: none; }
+.size-sm .joker-jester { top: 5%; width: 82%; }
+.size-sm .joker-cn { font-size: 0.62em; top: auto; bottom: 4%; }
 
 /* ----- 选中态(桌面端)spec §5.5 ----- */
 .card-play.selected {

@@ -385,13 +385,15 @@ console.log('\n=== 12. joiner selfInfo 含 uuid ===')
   Joiner.close()
 }
 
-console.log('\n=== 13. host 收 JOIN 复用同 uuid seat (重连) ===')
+console.log('\n=== 13. host 收 JOIN 复用同 uuid seat (重连,需 resumeToken) ===')
 {
   const { mod: Host, port } = await makeHost('h13')
 
-  // joiner A 进来,seat=1
+  // ★ v0.4.25 P0-01:重连复用 seat 需要 uuid + resumeToken。
+  //   共享 sessionStorage store 模拟同一台设备(token 由 JA 存入,JA2 读取)。
+  const sharedStore = { 'guandan_session_uuid': 'reconnect-uuid-001' }
   globalThis.sessionStorage = {
-    _store: { 'guandan_session_uuid': 'reconnect-uuid-001' },
+    _store: sharedStore,
     getItem(k) { return this._store[k] || null },
     setItem(k, v) { this._store[k] = v },
   }
@@ -401,8 +403,9 @@ console.log('\n=== 13. host 收 JOIN 复用同 uuid seat (重连) ===')
   JA.close()
   await settle(50)
 
-  // 同 uuid 重连
-  const { mod: JA2 } = await makeJoiner('j13b', port, 'reconnect-uuid-001', 'A2', 'A2')
+  // 同 uuid + token 重连(同一房间 tag 'j13a' → 同一 roomId,共享 store 带 token)
+  //   makeJoiner 不传 fixedUuid → 不重建 sessionStorage,保留 JA 存下的 token
+  const { mod: JA2 } = await makeJoiner('j13a', port, undefined, 'A2', 'A2')
   await settle(150)  // 等 host 处理 JOIN + 广播 SYNC 完成
   assert('A2 重连后 seat 仍是 1', JA2.getSelfSeat() === 1)
   assert('host peers.size 不增长 (复用)', Host.getPeers().size === sizeBefore)

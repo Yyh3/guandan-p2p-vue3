@@ -105,6 +105,8 @@ export function useGameLogic(opts = {}) {
   // ===== 顶层 state =====
   const round = ref(1)
   const levelRank = ref(15)
+  // ★ v0.4.25:双方队伍等级(team 0 = seat 0/2,team 1 = seat 1/3),级牌进度轨用
+  const teamLevels = ref([15, 15])
   const levelLabel = ref('2')
   const nextLevelLabel = ref('2')
   const levelUp = ref(0)
@@ -255,6 +257,10 @@ export function useGameLogic(opts = {}) {
     phase.value = st.phase
     levelRank.value = st.levelRank
     levelUp.value = st.levelUp || 0
+    // ★ v0.4.25:同步双方等级(级牌进度轨用),缺省回落到当前级牌
+    teamLevels.value = Array.isArray(st.teamLevels) && st.teamLevels.length === 2
+      ? st.teamLevels.slice()
+      : [st.levelRank, st.levelRank]
     // ★ v0.4.9:同步 difficulty(从 snapshot 接收时也更新)
     if (st.difficulty === 'medium' || st.difficulty === 'hard') {
       gameDifficulty.value = st.difficulty
@@ -411,6 +417,25 @@ export function useGameLogic(opts = {}) {
   const firstPlayerEmoji = computed(() =>
     players.value[firstPlayer.value]?.avatar || '🤖'
   )
+  // ★ v0.4.25:刚出牌玩家归属(lastPlay.who → name/avatar),桌面牌堆旁标注"谁出的牌"
+  const lastPlayerName = computed(() =>
+    lastPlay.value ? (players.value[lastPlay.value.who]?.name || `玩家${lastPlay.value.who}`) : ''
+  )
+  const lastPlayerEmoji = computed(() =>
+    lastPlay.value ? (players.value[lastPlay.value.who]?.avatar || '🤖') : ''
+  )
+  // ★ v0.4.25:刚出牌玩家的屏幕方位(bottom/top/left/right),出牌飞牌轨迹起点
+  const lastPlayerPos = computed(() => {
+    if (!lastPlay.value) return 'bottom'
+    const self = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
+    const who = lastPlay.value.who
+    if (who === self) return 'bottom'
+    const r = rotateSeats(self)
+    if (who === r.top) return 'top'
+    if (who === r.left) return 'left'
+    if (who === r.right) return 'right'
+    return 'bottom'
+  })
   const tipText = computed(() => {
     if (phase.value === 'finished') return '本局结束'
     if (isDealing.value) return '发牌中...'
@@ -710,14 +735,17 @@ export function useGameLogic(opts = {}) {
     }, 1200)
   }
 
-  // ===== 炸弹/王炸特效 =====
+  // ===== 炸弹/特殊牌型特效 =====
   function showBombFx(type) {
     const fx = bombFxForType(type)
     if (!fx) return
     bombFx.value = fx
-    isShaking.value = true
+    // ★ v0.4.25:仅炸弹级(炸弹/王炸/超级/同花顺)震屏;顺子/连对/钢板/三带二轻量强调不震
+    if (fx.shake) {
+      isShaking.value = true
+      addTimer(() => { isShaking.value = false }, 800)
+    }
     addTimer(() => { bombFx.value = null }, 1500)
-    addTimer(() => { isShaking.value = false }, 800)
   }
 
   // ===== 游戏初始化 =====
@@ -955,6 +983,58 @@ export function useGameLogic(opts = {}) {
     selected.value = new Array(myHand.value.length).fill(false)
   }
 
+  // ===== v0.4.25:拖动连选(桌面 mouse / 移动 touch 共用状态机)=====
+  // 手指/鼠标扫过多张牌连续选中或取消,主流卡牌手游的核心手感。
+  // 视图层接线:
+  //   桌面:@mousedown="dragStart(c)" @mouseenter="dragOver(c)" + window mouseup → dragEnd()
+  //   移动:@touchstart="dragStart(c)" @touchmove 命中检测 → dragOver(c) + touchend → dragEnd()
+  //   click 处理器先查 consumeDragSuppress(),为 true 则忽略本次合成 click(防双切换)
+  const _drag = { active: false, moved: false, toSelect: true, startKey: null, visited: new Set() }
+  let _dragSuppressClick = false
+
+  function setCardSelected(c, on) {
+    if (isDealing.value) return
+    const k = cardKey(c)
+    const has = selectedCardIds.value.has(k)
+    if (has === !!on) return
+    const next = new Set(selectedCardIds.value)
+    if (on) next.add(k); else next.delete(k)
+    selectedCardIds.value = next
+  }
+
+  function dragStart(c) {
+    if (isDealing.value || !c) return
+    haptics.select()
+    _drag.active = true
+    _drag.moved = false
+    _drag.toSelect = !isCardSelected(c)
+    _drag.startKey = cardKey(c)
+    _drag.visited = new Set([_drag.startKey])
+  }
+  function dragOver(c) {
+    if (!_drag.active || !c) return
+    const k = cardKey(c)
+    if (_drag.visited.has(k)) return
+    _drag.visited.add(k)
+    _drag.moved = true
+    setCardSelected(c, _drag.toSelect)
+  }
+  function dragEnd() {
+    if (!_drag.active) return
+    if (_drag.moved) {
+      // 起点牌也按拖动方向归一,并吞掉随之而来的合成 click
+      setCardSelected(_drag.startKey, _drag.toSelect)
+      _dragSuppressClick = true
+    }
+    _drag.active = false
+  }
+  function dragIsActive() { return _drag.active }
+  function consumeDragSuppress() {
+    const s = _dragSuppressClick
+    _dragSuppressClick = false
+    return s
+  }
+
   function selectedCardsFromIds() {
     return myHand.value.filter(c => selectedCardIds.value.has(cardKey(c)))
   }
@@ -962,6 +1042,54 @@ export function useGameLogic(opts = {}) {
   function selectedCardsFromColumns() {
     return selectedCardsFromIds()
   }
+
+  // ===== v0.4.25:选中牌型实时预览 =====
+  // 选牌过程中实时识别牌型 + 判断能否压上家,在手牌区上方显示,
+  // 避免"选完点出牌才知道不合法"的挫败感(主流掼蛋手游标配)
+  const PREVIEW_TYPE_CN = {
+    1: '单张', 2: '对子', 3: '三张', 4: '三带二',
+    5: '顺子', 6: '连对', 7: '钢板',
+    8: '炸弹', 9: '炸弹', 10: '炸弹', 11: '炸弹', 12: '炸弹',
+    13: '同花顺', 14: '王炸',
+  }
+  const selectedPreview = computed(() => {
+    const cards = selectedCardsFromIds()
+    if (!cards || cards.length === 0) return null
+    let rec = null
+    try { rec = E.recognize(cards) } catch { rec = null }
+    if (!rec || !rec.type) {
+      return { ok: false, text: `${cards.length} 张 · 无效牌型`, beat: null }
+    }
+    const name = PREVIEW_TYPE_CN[rec.type] || '未知牌型'
+    // beat:能否压上家(null = 首家无约束 / 判定失败)
+    let beat = null
+    if (lastPlay.value) {
+      try { beat = E.canBeat(rec, lastPlay.value) === true } catch { beat = null }
+    }
+    return { ok: true, text: `${name} · ${cards.length} 张`, beat }
+  })
+
+  // ===== v0.4.25:记牌器(各点数已出/剩余统计,掼蛋玩家刚需)=====
+  // 两副牌:点数 3~15 各 8 张,小王/大王各 2 张;剩余 = 总数 - 已出 - 自己手牌
+  const COUNTER_RANK_LABEL = { 3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',15:'2',16:'小王',17:'大王' }
+  const cardCounter = computed(() => {
+    const played = {}
+    for (const c of playedHistory.value) played[c.rank] = (played[c.rank] || 0) + 1
+    const mine = {}
+    for (const c of myHand.value) mine[c.rank] = (mine[c.rank] || 0) + 1
+    const rows = []
+    for (let r = 15; r >= 3; r--) {
+      const out = played[r] || 0
+      const left = 8 - out - (mine[r] || 0)
+      rows.push({ rank: r, label: COUNTER_RANK_LABEL[r], total: 8, out, left: Math.max(0, left) })
+    }
+    for (const r of [17, 16]) {
+      const out = played[r] || 0
+      const left = 2 - out - (mine[r] || 0)
+      rows.push({ rank: r, label: COUNTER_RANK_LABEL[r], total: 2, out, left: Math.max(0, left) })
+    }
+    return rows
+  })
 
   function onSortHand() {
     if (isDealing.value) return
@@ -1943,7 +2071,7 @@ function commitPass(seat, source = 'manual') {
   // ===== 导出(组件层需要的全部 reactive / computed / methods) =====
   return {
     // state
-    round, levelRank, levelLabel, nextLevelLabel, levelUp, multiplier,
+    round, levelRank, levelLabel, nextLevelLabel, levelUp, multiplier, teamLevels,
     players, myHand, selected, selectedCardIds, selectedColKeys, tableCards, lastPlay,
     phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder, game,
     isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, playedHistory,
@@ -1952,8 +2080,8 @@ function commitPass(seat, source = 'manual') {
     isRestartAfterA,  // ★ v0.4.9:过 A 标志
     isP2PMode, selfSeat, isNetworkHost,
     // computed
-    myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, tipText,
-    seatData, handColumns, selectedCount,
+    myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+    seatData, handColumns, selectedCount, selectedPreview, cardCounter,
     // methods
     showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
     retryDeal,
@@ -1961,6 +2089,7 @@ function commitPass(seat, source = 'manual') {
     isWinningSeat,
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, toggleCardId, isCardSelected, onClear,
     selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
+    setCardSelected, dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
