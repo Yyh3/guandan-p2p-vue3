@@ -410,34 +410,53 @@ console.log('\n=== 23. Hard 难度:API 存在性 + 默认行为 ===')
   assert('★ medium 首家:有出牌结果', r2.type === 'play')
 }
 
-console.log('\n=== 24. Hard 难度:炸弹保留(手牌 ≤ 6 张且有炸弹) ===')
+console.log('\n=== 24. Hard 难度:残局(≤6 张)领出炸弹抢牌权(v0.4.25) ===')
 {
   const AI = await import('./guandan-ai.js')
   // 6 张手牌:含 4 张 3 (4 炸) + 2 张单牌 5/7
-  // hard 难度:不出 4 张炸(留作关键时刻),改出对子 5/7?没有对子 → 出单张
+  // v0.4.25:残局时领出最小炸弹抢牌权走关键牌
   const hand = [
     { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
     { suit: 0, rank: 5 }, { suit: 1, rank: 7 },
   ]
   const rHard = AI.chooseLeadHard(hand, 2)
-  // hard 不出 4 张炸(preserveBomb 触发),应出 1 张单牌
-  assert('★ hard 手牌 6 张含 4 炸:不出 4 张炸', rHard.cards.length < 4)
+  assert('★ hard 残局 6 张含 4 炸:领出 4 张炸', rHard.cards.length === 4)
+  assert('★ hard 残局领的是最小炸(rank 3)', rHard.cards.every(c => c.rank === 3))
 }
 
-console.log('\n=== 25. Hard 难度:手牌 > 6 张时主动出炸弹 ===')
+console.log('\n=== 25. Hard 难度:开局/中局(>6 张)保留炸弹不主动扔(v0.4.25) ===')
 {
   const AI = await import('./guandan-ai.js')
   // 10 张手牌:含 4 张 3 (4 炸) + 6 张单牌
+  // v0.4.25:手牌 > 6 张时保留炸弹(不主动扔),走小牌
   const hand = [
     { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
     { suit: 0, rank: 5 }, { suit: 1, rank: 6 }, { suit: 2, rank: 7 },
     { suit: 3, rank: 8 }, { suit: 0, rank: 9 }, { suit: 1, rank: 10 },
   ]
   const rHard = AI.chooseLeadHard(hand, 2)
-  console.log('  [debug 25] rHard.cards =', rHard.cards.map(c => `${c.suit}-${c.rank}`))
-  // hard 手牌 > 6 张:可以出 4 张炸
-  assert('★ hard 手牌 10 张含 4 炸:出 4 张炸(不 preserve)', rHard.cards.length === 4)
-  assert('★ hard 出的 4 张炸是 rank 最小(3)', rHard.cards.every(c => c.rank === 3))
+  assert('★ hard 手牌 10 张含 4 炸:不出 4 张炸(preserve)', rHard.cards.length < 4)
+  assert('★ hard 出的不是炸弹(小牌优先)', !rHard.cards.every(c => c.rank === 3))
+}
+
+console.log('\n=== 25b. Medium:chooseLead 开局不主动扔炸弹,残局才领(v0.4.25) ===')
+{
+  const AI = await import('./guandan-ai.js')
+  // 10 张:4 张 3(炸) + 5 对子 + 单牌
+  const hand = [
+    { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
+    { suit: 0, rank: 5 }, { suit: 1, rank: 5 },
+    { suit: 2, rank: 8 }, { suit: 3, rank: 9 }, { suit: 0, rank: 11 }, { suit: 1, rank: 12 },
+  ]
+  const r = AI.chooseLead(hand, 2)
+  assert('★ medium 开局不领炸弹(先走最小对子)', r.cards.length === 2 && r.cards.every(c => c.rank === 5))
+  // 残局(≤6 张)领炸弹抢牌权
+  const hand2 = [
+    { suit: 0, rank: 3 }, { suit: 1, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 3 },
+    { suit: 0, rank: 5 }, { suit: 1, rank: 7 },
+  ]
+  const r2 = AI.chooseLead(hand2, 2)
+  assert('★ medium 残局(≤6 张)领炸弹', r2.cards.length === 4 && r2.cards.every(c => c.rank === 3))
 }
 
 console.log('\n=== 26. Hard 难度:优先出小成组(对子/三张 rank <= 10) ===')

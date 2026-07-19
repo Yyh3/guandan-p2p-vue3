@@ -141,6 +141,7 @@
         :last-player-name="lastPlayerName"
         :last-player-emoji="lastPlayerEmoji"
         :last-player-pos="lastPlayerPos"
+        :last-play-type="lastPlayTypeName"
         :team-levels="teamLevels"
         :level-rank-num="levelRank"
         :self-seat="selfSeat"
@@ -265,13 +266,13 @@
           ]"
           :style="{ minHeight: colMinHeight(col) + 'px' }"
         >
-          <!-- v0.4.3:大小王列隐藏 col-rank 标签(卡通小丑已自带视觉标识) -->
+          <!-- ★ v0.4.25:绿色点数角标全部去掉,仅保留牌型名列标(顺子/同花顺/炸弹/鬼) -->
           <div
-            v-if="!col.isJoker"
+            v-if="!col.isJoker && col.label"
             class="col-rank"
             :class="{ 'is-level-rank': isLevel({ suit: 0, rank: col.rank }) }"
           >{{ colRankLabel(col) }}</div>
-          <div class="col-count">×{{ col.cards.length }}</div>
+          <div v-if="col.cards.length > 1" class="col-count">×{{ col.cards.length }}</div>
           <div
             v-for="(c, i) in col.cards"
             :key="cardKey(c)"
@@ -455,7 +456,7 @@ const {
   hostMigrationToast, hostMigrationBadge, urgent,
   isRestartAfterA, isNetworkHost, game,
   // computed
-  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, lastPlayTypeName, tipText,
   seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
@@ -463,6 +464,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,
+  isCustomSort, reorderStart, reorderOver, reorderEnd,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch,
   onIcon, retryDeal,
@@ -497,6 +499,8 @@ function onCardTouchStart(e, col, c) {
     longPressFired.value = true
     toggleCol(col)
   }, LONG_PRESS_MS)
+  // ★ v0.4.25:自定义理牌模式下触摸起拖 = 换位排序(不再走拖动连选)
+  if (c && reorderStart(c)) return
   // ★ v0.4.25:拖动连选 — touchstart 起拖(与长按计时共存,移动会取消长按)
   if (c) dragStart(c)
 }
@@ -505,12 +509,26 @@ function onCardTouchEnd() {
     clearTimeout(longPressTimer.value)
     longPressTimer.value = null
   }
-  // ★ v0.4.25:拖动连选收尾(touchend 总会派发到 touchstart 元素,不怕滑出)
+  // ★ v0.4.25:拖动连选/自定义换位收尾(touchend 总会派发到 touchstart 元素,不怕滑出)
   dragEnd()
+  reorderEnd()
 }
 // ★ v0.4.25:拖动连选 — 手指滑动时命中检测经过的牌(移动即取消长按计时)
 function onHandTouchMove(e) {
   onCardTouchEnd()
+  // ★ v0.4.25:自定义理牌模式 → 拖动换位排序
+  if (isCustomSort.value) {
+    e.preventDefault()
+    const t = e.touches && e.touches[0]
+    if (!t) return
+    const el = document.elementFromPoint(t.clientX, t.clientY)
+    const cardEl = el && el.closest ? el.closest('.hand-card') : null
+    const k = cardEl && cardEl.dataset ? cardEl.dataset.cardKey : null
+    if (!k) return
+    const c = myHand.value.find(x => cardKey(x) === k)
+    if (c) reorderOver(c)
+    return
+  }
   if (!dragIsActive()) return
   e.preventDefault()
   const t = e.touches && e.touches[0]

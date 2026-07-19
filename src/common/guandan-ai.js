@@ -433,27 +433,20 @@ function chooseLead(cards, levelRank) {
   if (cards.length === 0) return { type: 'pass' }
   const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
   const cnt = E.countByRank(concrete)
+  const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 4 && r <= 15).sort((a, b) => a - b)
 
-  // 1. 最小炸弹 — 主动出时选最小炸弹(4 张炸,留大炸弹防守)
-  //    同张数取 rank 最小(避免扔大王炸出 8 炸)
-  // ★ P1-04 修复:炸弹识别应包含 5~8 张同 rank,不能只认恰好 4 张。
-  //   主动出牌时优先出最小 rank 的炸弹;若该 rank 超过 4 张,先出 4 张炸(可拆)。
-  if (concrete.length >= 4) {
-    const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 4 && r <= 15).sort((a, b) => a - b)
-    if (bombRanks.length > 0) {
-      const r = bombRanks[0]
-      return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
-    }
-  }
+  // ★ v0.4.25:不再开局/中局主动扔炸弹(旧版第一步就炸,浪费且体验差) —
+  //   先走小成组/小顺子/小单张;炸弹只在残局(≤6 张)领出抢牌权,
+  //   或实在没有别的出法时兜底
 
-  // 2. 最小对子(cnt===2 的 rank,优先出 rank 小的)
+  // 1. 最小对子(cnt===2 的 rank,优先出 rank 小的)
   const pairRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 2 && r <= 14).sort((a, b) => a - b)
   if (pairRanks.length > 0) {
     const r = pairRanks[0]
     return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 2) }
   }
 
-  // 3. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
+  // 2. 最小三张(cnt===3 的 rank,带任意配牌凑三带二;或纯三张)
   const tripleRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] === 3 && r <= 14).sort((a, b) => a - b)
   if (tripleRanks.length > 0) {
     const r = tripleRanks[0]
@@ -467,7 +460,7 @@ function chooseLead(cards, levelRank) {
     return { type: 'play', cards: tripleCards }
   }
 
-  // 4. 最小顺子(5 张) — 找连续的 5 张
+  // 3. 最小顺子(5 张) — 找连续的 5 张
   if (concrete.length + ghosts.length >= 5) {
     const straight = findMinStraight(concrete, ghosts, 5, 0, levelRank)
     if (straight && straight.length === 5) {
@@ -475,16 +468,29 @@ function chooseLead(cards, levelRank) {
     }
   }
 
-  // 5. 最小单张(走小牌)
+  // 4. 残局炸弹(手牌 ≤ 6 张):领出最小炸弹抢牌权走关键牌
+  if (bombRanks.length > 0 && cards.length <= 6) {
+    const r = bombRanks[0]
+    return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
+  }
+
+  // 5. 最小单张(走小牌;★ v0.4.25:优先不拆炸弹 rank — 保留炸弹就不能出它的牌)
   if (concrete.length > 0) {
-    const sortedConcrete = E.sortHand(concrete)
-    const smallest = sortedConcrete[sortedConcrete.length - 1]
-    return { type: 'play', cards: [smallest] }
+    const nonBomb = concrete.filter(c => !(cnt[c.rank] >= 4 && c.rank <= 15))
+    const pool = nonBomb.length > 0 ? nonBomb : concrete
+    const sortedPool = E.sortHand(pool)
+    return { type: 'play', cards: [sortedPool[sortedPool.length - 1]] }
   }
 
   // 全是鬼牌
   if (ghosts.length > 0) {
     return { type: 'play', cards: [ghosts[0]] }
+  }
+
+  // 6. 兜底:实在没有别的出法才领炸弹
+  if (bombRanks.length > 0) {
+    const r = bombRanks[0]
+    return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
   }
 
   return { type: 'play', cards: [cards[0]] }
@@ -496,7 +502,7 @@ function chooseLead(cards, levelRank) {
  * 设计目标:防守意识 + 炸弹保留 + 不浪费大牌
  * 与 medium 区别:
  *   - 优先出"小成组牌型"(rank<=10 的对子/三张),不出大对子/大三张
- *   - 炸弹保留:手牌 ≤ 6 张时不出炸弹(关键时刻才打)
+ *   - 炸弹保留:手牌 > 6 张(开局/中局)不出炸弹,残局(≤6 张)才领炸抢牌权(v0.4.25 修正)
  *   - 鬼牌保留:有 2+ 张鬼牌时不出鬼牌(留作凑牌)
  *   - 跟牌更倾向于 PASS(见 decideHard)
  *
@@ -509,17 +515,16 @@ function chooseLeadHard(cards, levelRank) {
   const { concrete, ghosts } = E.splitGhosts(cards, levelRank)
   const cnt = E.countByRank(concrete)
 
-  // 炸弹保留:手牌 ≤ 6 张且有炸弹 → 不主动出炸弹(留作关键时刻)
-  // ★ P1-04 修复:炸弹识别应包含 5~8 张同 rank。
+  // ★ v0.4.25:炸弹保留阈值修正 — 旧版 ≤6 张才保留、>6 张主动扔(开局就炸,体验差);
+  //   新版反过来:手牌 > 6 张(开局/中局)保留炸弹,残局(≤6 张)才领出抢牌权
   const bombRanks = Object.keys(cnt).map(Number).filter(r => cnt[r] >= 4 && r <= 15)
-  const preserveBomb = bombRanks.length > 0 && cards.length <= 6
+  const preserveBomb = bombRanks.length > 0 && cards.length > 6
 
   // 鬼牌保留:有 2+ 张鬼牌 → 不出鬼牌(留作凑牌)
   const preserveGhosts = ghosts.length >= 2
 
-  // 0. 手牌 > 6 张 + 有炸弹 + 不 preserve → 主动出 4 张炸(清牌 + 对手压不住)
-  //    这一步优先于"小成组对子",因为 4 张炸能把对手直接炸死,是关键牌
-  if (!preserveBomb && bombRanks.length > 0 && cards.length > 6) {
+  // 0. 残局(≤6 张)+ 有炸弹 → 领出最小 4 张炸(抢牌权走关键牌)
+  if (!preserveBomb && bombRanks.length > 0 && cards.length <= 6) {
     const r = bombRanks.sort((a, b) => a - b)[0]
     return { type: 'play', cards: concrete.filter(c => c.rank === r).slice(0, 4) }
   }
@@ -549,11 +554,12 @@ function chooseLeadHard(cards, levelRank) {
     }
   }
 
-  // 2. 小单张(有 concrete 时)
+  // 2. 小单张(有 concrete 时;★ v0.4.25:优先不拆炸弹 rank — 保留炸弹就不能出它的牌)
   if (concrete.length > 0) {
-    const sortedConcrete = E.sortHand(concrete)
-    // 倒数第二小(倒数最小可能太憋手,留 1 张凑牌)
-    return { type: 'play', cards: [sortedConcrete[sortedConcrete.length - 1]] }
+    const nonBomb = concrete.filter(c => !(cnt[c.rank] >= 4 && c.rank <= 15))
+    const pool = nonBomb.length > 0 ? nonBomb : concrete
+    const sortedPool = E.sortHand(pool)
+    return { type: 'play', cards: [sortedPool[sortedPool.length - 1]] }
   }
 
   // 3. 鬼牌(只有 1 张时才出)

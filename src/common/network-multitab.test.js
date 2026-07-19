@@ -64,7 +64,9 @@ function resetSessionStorage() {
  }
 }
 
-async function settle(ms =50) {
+async function settle(ms =100) {
+ // ★ v0.4.25:settle 默认 50 → 100ms — 全量回归高负载(61 套件并行 + dev server)
+ // 下 BC 消息投递偶发超过 50ms,块 1/块 2 曾出现非确定性 FAIL;100ms 几乎不增加总耗时
  await new Promise(r => setTimeout(r, ms))
 }
 

@@ -707,6 +707,166 @@ function tributeInfo(ranks, teams, levelUp, levelRank) {
   }
 }
 
+// ============ v0.4.25:牌型优先分组(一键理牌·顺子/同花顺) ============
+/**
+ * groupHandCombo(hand, levelRank) — 牌型优先的手牌分组(区别于 groupHandByRank 的纯点数分组)
+ *
+ * 分组顺序:王列 → 鬼牌列(逢人配) → 炸弹 → 同花顺 → 顺子 → 连对 → 钢板 → 三张 → 对子 → 单张
+ * 每列 { rank, cards, isJoker, label? };combo 列带中文 label(炸弹/同花顺/顺子/连对/钢板/鬼)
+ * rank 列内按花色 ♠♥♣♦ 排序;combo 按主 rank 升序。
+ *
+ * 说明:鬼牌(红桃级牌)不参与凑型,单独成列 — 可视化简单直接,不误导用户。
+ *
+ * @param {Array} hand 完整手牌
+ * @param {Number} levelRank 当前级牌 rank
+ * @returns {Array<{rank:number, cards:Array, isJoker:boolean, label?:string}>}
+ */
+function groupHandCombo(hand, levelRank) {
+  if (!hand || hand.length === 0) return []
+  const { concrete, ghosts } = splitGhosts(hand, levelRank)
+
+  // 牌池:rank → cards(按花色排序),提取时从池里删
+  const pool = new Map()
+  for (const c of concrete) {
+    if (c.suit === -1) continue  // 王单独处理
+    if (!pool.has(c.rank)) pool.set(c.rank, [])
+    pool.get(c.rank).push(c)
+  }
+  for (const arr of pool.values()) arr.sort((a, b) => a.suit - b.suit)
+  const cntOf = (r) => (pool.get(r) || []).length
+  // 从池里取 n 张某 rank 的牌(可选限定花色),取出来即从池里删除
+  const take = (r, n, suit = -1) => {
+    const arr = pool.get(r) || []
+    const out = []
+    if (suit >= 0) {
+      for (let i = arr.length - 1; i >= 0 && out.length < n; i--) {
+        if (arr[i].suit === suit) out.unshift(arr.splice(i, 1)[0])
+      }
+    }
+    while (out.length < n && arr.length > 0) out.push(arr.shift())
+    out.sort((a, b) => a.suit - b.suit)
+    return out
+  }
+
+  const cols = []
+
+  // 1. 王列(大王在前)
+  const jokers = concrete.filter(c => c.suit === -1).sort((a, b) => b.rank - a.rank)
+  if (jokers.length > 0) cols.push({ rank: 17, cards: jokers, isJoker: true })
+  // 2. 鬼牌列(逢人配)
+  if (ghosts.length > 0) cols.push({ rank: levelRank, cards: ghosts.slice(), isJoker: false, label: '鬼' })
+
+  // 3. 炸弹(4+ 张同 rank,rank 升序)
+  for (let r = 3; r <= 15; r++) {
+    if (cntOf(r) >= 4) cols.push({ rank: r, cards: take(r, cntOf(r)), isJoker: false, label: '炸弹' })
+  }
+
+  // 4. 同花顺(同花色连续 5+ 张,按花色扫描)
+  for (let suit = 0; suit <= 3; suit++) {
+    const ranks = []
+    for (let r = 3; r <= 14; r++) {
+      if ((pool.get(r) || []).some(c => c.suit === suit)) ranks.push(r)
+    }
+    const runs = []
+    let run = []
+    for (const r of ranks) {
+      if (run.length === 0 || r === run[run.length - 1] + 1) run.push(r)
+      else { runs.push(run); run = [r] }
+    }
+    if (run.length) runs.push(run)
+    for (const fr of runs.filter(x => x.length >= 5)) {
+      // ★ v0.4.25:长顺按 5 张一列切分(12 连张放一列竖叠 300px 会冲出屏幕)
+      for (let i = 0; i + 5 <= fr.length; i += 5) {
+        const chunk = fr.slice(i, i + 5)
+        const cards = []
+        for (const r of chunk) cards.push(...take(r, 1, suit))
+        cols.push({ rank: chunk[chunk.length - 1], cards, isJoker: false, label: '同花顺' })
+      }
+    }
+  }
+
+  // 5. 顺子(跨花色连续 5+ 张,从剩余 rank 扫)
+  {
+    const ranks = []
+    for (let r = 3; r <= 14; r++) if (cntOf(r) > 0) ranks.push(r)
+    const runs = []
+    let run = []
+    for (const r of ranks) {
+      if (run.length === 0 || r === run[run.length - 1] + 1) run.push(r)
+      else { runs.push(run); run = [r] }
+    }
+    if (run.length) runs.push(run)
+    for (const sr of runs.filter(x => x.length >= 5)) {
+      // ★ v0.4.25:长顺按 5 张一列切分(12 连张放一列竖叠会冲出屏幕)
+      for (let i = 0; i + 5 <= sr.length; i += 5) {
+        const chunk = sr.slice(i, i + 5)
+        const cards = []
+        for (const r of chunk) cards.push(...take(r, 1))
+        cols.push({ rank: chunk[chunk.length - 1], cards, isJoker: false, label: '顺子' })
+      }
+    }
+  }
+
+  // 6. 连对(连续 3+ 对)
+  {
+    const ranks = []
+    for (let r = 3; r <= 14; r++) if (cntOf(r) >= 2) ranks.push(r)
+    const runs = []
+    let run = []
+    for (const r of ranks) {
+      if (run.length === 0 || r === run[run.length - 1] + 1) run.push(r)
+      else { runs.push(run); run = [r] }
+    }
+    if (run.length) runs.push(run)
+    for (const pr of runs.filter(x => x.length >= 3)) {
+      // ★ v0.4.25:连对按 3 对(6 张)一列切分,防竖叠过高
+      for (let i = 0; i + 3 <= pr.length; i += 3) {
+        const chunk = pr.slice(i, i + 3)
+        const cards = []
+        for (const r of chunk) cards.push(...take(r, 2))
+        cols.push({ rank: chunk[chunk.length - 1], cards, isJoker: false, label: '连对' })
+      }
+    }
+  }
+
+  // 7. 钢板(连续 2+ 组三张)
+  {
+    const ranks = []
+    for (let r = 3; r <= 14; r++) if (cntOf(r) >= 3) ranks.push(r)
+    const runs = []
+    let run = []
+    for (const r of ranks) {
+      if (run.length === 0 || r === run[run.length - 1] + 1) run.push(r)
+      else { runs.push(run); run = [r] }
+    }
+    if (run.length) runs.push(run)
+    for (const pr of runs.filter(x => x.length >= 2)) {
+      // ★ v0.4.25:钢板按 2 组三张(6 张)一列切分,防竖叠过高
+      for (let i = 0; i + 2 <= pr.length; i += 2) {
+        const chunk = pr.slice(i, i + 2)
+        const cards = []
+        for (const r of chunk) cards.push(...take(r, 3))
+        cols.push({ rank: chunk[chunk.length - 1], cards, isJoker: false, label: '钢板' })
+      }
+    }
+  }
+
+  // 8. 三张(剩余 cnt===3,与 groupHandByRank 同序 A→2)
+  for (const r of [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 15]) {
+    if (cntOf(r) === 3) cols.push({ rank: r, cards: take(r, 3), isJoker: false })
+  }
+  // 9. 对子(剩余 cnt===2)
+  for (const r of [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 15]) {
+    if (cntOf(r) === 2) cols.push({ rank: r, cards: take(r, 2), isJoker: false })
+  }
+  // 10. 单张(剩余)
+  for (const r of [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 15]) {
+    while (cntOf(r) > 0) cols.push({ rank: r, cards: take(r, 1), isJoker: false })
+  }
+
+  return cols
+}
+
 // ============ 导出 ============
 export {
   // 常量
@@ -720,7 +880,7 @@ export {
   // 识别
   recognize, canBeat, splitGhosts, canFormWithGhosts, materializeGhosts,
   // 展示层
-  groupHandByRank,
+  groupHandByRank, groupHandCombo,
   // 升级
   calcLevelUp, getLevelRank, tributeInfo,
 }

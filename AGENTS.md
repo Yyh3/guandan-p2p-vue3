@@ -6,6 +6,14 @@
 
 ## 当前任务记录
 
+- 2026-07-19：完成四项体验修复（用户反馈）：
+  - 桌面出牌分不清几张 3：归属胶囊加牌型名（`lastPlayTypeName`，数字/字符串 type 双映射），TableCenter `lp-type` 高亮显示（"AI-西 · 顺子"）。
+  - AI 开局就扔炸弹：`chooseLead` 重排（对子→三张→顺子→残局炸弹（≤6 张）→单张→兜底炸），`chooseLeadHard` 保留阈值反转（>6 张保留、≤6 张才领炸）；单张选择不拆炸弹 rank（`nonBomb` 池优先）；`guandan-ai.test.js` 块 24/25 反转 + 25b 新增（80 case）。
+  - 一键理牌理顺子/同花顺：引擎新增 `groupHandCombo`（王→鬼→炸弹→同花顺→顺子→连对→钢板→三张→对子→单张，combo 列带中文 label）；`sortMode` 三模式循环（rank→combo→custom），理牌按钮循环 + toast；`guandan-engine.test.js` 块 13b（14 case）。
+  - 自定义理牌：`customOrder` 卡牌顺序 + `moveCustomCard` 换位；拖动=换位（桌面 mouse/移动 touch 命中检测）与拖动连选按模式分流；新牌兜底附加；单列隐藏 ×1 角标。
+  - 测试：`v0425` 套件加块 J（14 case，累计 97）；`npm run build` 成功；Playwright 截图核对三模式切换。
+  - 手牌布局三调（用户截图反馈）：绿色点数角标全删（仅保留牌型名列标）；`sortMode` 默认改 `combo`（炸弹/同花顺统一靠左）；桌面列负 margin -18px 横向重叠收紧、列底/分隔线去除、选中列 z-index 20；`groupHandCombo` 长顺/长连对/长钢板按 5 张/3 对/2 组切列（防 12 连张单列竖叠冲出屏幕）；`guandan-engine.test.js` 补切分用例（158 case）。
+
 - 2026-07-19：完成主流掼蛋手游对标 UX 六件套 + P1-16（用户调研驱动）：
   - 选中牌型实时预览：`useGameLogic.selectedPreview`（`E.recognize` 识别 + `E.canBeat` 判可压），两端手牌区上方胶囊「顺子·5 张 ✓可压 / ✗压不过 / 无效牌型」。
   - 拖动连选：`useGameLogic` 拖动状态机（`dragStart/dragOver/dragEnd/dragIsActive/consumeDragSuppress` + `setCardSelected`）；桌面 mousedown/mouseenter/mouseup，移动 touchstart/touchmove 命中检测（`data-card-key`）/touchend，与长按选列共存，拖动后合成 click 吞掉。
@@ -14,6 +22,9 @@
   - 简洁模式：storage `simpleMode` + SettingsView 外观区开关 + 全局 `simple-mode.css`（隐藏牌桌花纹/光效/牌面纹理，收敛阴影），两端 `.page` 挂 class。
   - 级牌进度轨：新组件 `LevelTrack.vue`（2→A 节点 + 双方队伍圆点），挂进 TableCenter 信息条下方（top:34px 避开座位遮挡）；`teamLevels` ref 在 refreshUiFromGameState 同步。
   - P1-16：横屏 `.hand-card::before` 透明 hit area 扩到 44px（36px 牌不达触控标准）。
+  - 发牌音效时序修复（用户反馈"发牌动画没过完就有炸弹声"）：`useGameLogic._afterDeal`（`watch(isDealing)`，动画结束再执行）；'play' 事件的音效/特效/语音/报数全部经 `_afterDeal` 延迟；顺带修正特效触发窄条件（旧版只限炸弹系，顺子/连对/钢板/三带二的弹跳大字实际从未触发），统一交 `showBombFx` 按 `bombFxForType` 判定；`v0425` 测试块 H 锁定（80 case）。
+  - 橙色倍数卡解读：`HudTop` mult-card = ×N 倍数 + 房间号；AI 单机无房间概念，随机房号误导用户 → 新增 `showRoomCode` prop，桌面端按 `isP2PMode` 传入（AI 模式隐藏）；`v0425` 测试块 I 锁定（83 case）。
+  - 困难模式"不能自动发牌"排查结论：桌面（用户首家/AI 首家）+ 移动竖屏真实动画路径复现均正常发牌并推进，未能复现；疑似热更新期偶发 dealTimeout，如再出现需记录复现步骤。
   - 测试：`v0425` 套件加块 G（23 case，累计 75）；`npm run build` 成功；Playwright 截图人工核对。
 
 - 2026-07-19：完成 55fb3cc 对抗性审查报告（`tmp/` 外文件，用户上传）第一阶段修复：

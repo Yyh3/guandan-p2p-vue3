@@ -299,6 +299,78 @@ console.log('\n=== 13. groupHandByRank: 完整 27 张手牌分组 ===')
   }
 }
 
+console.log('\n=== 13b. groupHandCombo: 牌型优先分组(v0.4.25) ===')
+{
+  const c = (rank, suit) => ({ rank, suit })
+  // 同花顺
+  {
+    const groups = E.groupHandCombo([c(3,0), c(4,0), c(5,0), c(6,0), c(7,0), c(9,1), c(9,2)], 15)
+    const flush = groups.find(g => g.label === '同花顺')
+    assert('同花顺列存在', !!flush && flush.cards.length === 5)
+    assert('同花顺 5 张同花色连续', flush && flush.cards.every(x => x.suit === 0))
+    assert('9 对子列保留', groups.some(g => !g.label && g.rank === 9 && g.cards.length === 2))
+  }
+  // 跨花色顺子
+  {
+    const groups = E.groupHandCombo([c(3,0), c(4,1), c(5,2), c(6,3), c(7,0), c(9,0)], 15)
+    const st = groups.find(g => g.label === '顺子')
+    assert('顺子列存在', !!st && st.cards.length === 5)
+    assert('顺子 3-7', st && st.cards.map(x => x.rank).join(',') === '3,4,5,6,7')
+  }
+  // 连对
+  {
+    const groups = E.groupHandCombo([c(3,0), c(3,1), c(4,0), c(4,2), c(5,1), c(5,3), c(9,0)], 15)
+    const ps = groups.find(g => g.label === '连对')
+    assert('连对列存在(3 对连续)', !!ps && ps.cards.length === 6)
+  }
+  // 钢板
+  {
+    const groups = E.groupHandCombo([c(3,0), c(3,1), c(3,2), c(4,0), c(4,2), c(4,3), c(9,0)], 15)
+    const pl = groups.find(g => g.label === '钢板')
+    assert('钢板列存在(2 组三张连续)', !!pl && pl.cards.length === 6)
+  }
+  // 炸弹 + 鬼 + 王列
+  {
+    const groups = E.groupHandCombo([c(13,0), c(13,1), c(13,2), c(13,3), c(15,1), c(16,-1)], 15)
+    assert('炸弹列带 label', groups.some(g => g.label === '炸弹' && g.cards.length === 4))
+    assert('鬼牌列带 label 鬼', groups.some(g => g.label === '鬼' && g.cards.length === 1))
+    assert('王列在最前', groups[0].isJoker === true)
+  }
+  // rank 15(2)不进顺子
+  {
+    const groups = E.groupHandCombo([c(15,0), c(3,0), c(4,1), c(5,2), c(6,3), c(7,0)], 15)
+    const st = groups.find(g => g.label === '顺子')
+    assert('顺子不含 rank 15', !!st && st.cards.every(x => x.rank !== 15))
+    assert('2 单独成列', groups.some(g => g.rank === 15 && g.cards.length === 1))
+  }
+  // 完整 27 张守恒
+  {
+    const dealt = E.deal()
+    const groups = E.groupHandCombo(dealt.hands[0], 15)
+    const total = groups.reduce((s, g) => s + g.cards.length, 0)
+    eq('groupHandCombo 27 张守恒', total, 27)
+  }
+  // ★ v0.4.25:长顺按 5 张切列(12 连张不一列竖叠)
+  {
+    const longRun = []
+    for (let r = 3; r <= 14; r++) longRun.push({ rank: r, suit: r % 4 })
+    const groups = E.groupHandCombo(longRun, 15)
+    const straights = groups.filter(g => g.label === '顺子')
+    assert('12 连张切成 2 列顺子', straights.length === 2 && straights.every(g => g.cards.length === 5))
+    assert('切分后剩 2 张回落单张列', groups.filter(g => !g.label).length === 2)
+  }
+  // 连对 4 对切 3+1
+  {
+    const hand = [c(3,0), c(3,1), c(4,0), c(4,2), c(5,1), c(5,3), c(6,0), c(6,2)]
+    const groups = E.groupHandCombo(hand, 15)
+    const ps = groups.filter(g => g.label === '连对')
+    assert('4 对连对只切 1 列(3 对)', ps.length === 1 && ps[0].cards.length === 6)
+    assert('剩余 1 对回落对子列', groups.some(g => !g.label && g.cards.length === 2))
+  }
+  // 边界
+  eq('groupHandCombo 空手牌 = []', E.groupHandCombo([], 15).length, 0)
+}
+
 console.log('\n=== 14. P0-1:canFormWithGhosts 不再崩,返回正确结果 ===')
 {
   // v3.x 修复:原 generateGhostAssignments 返回扁平数字数组,导致 assignment.map 抛 TypeError

@@ -78,7 +78,9 @@
         >
           <span class="lp-emoji" aria-hidden="true">{{ lastPlayerEmoji || '🙂' }}</span>
           <span class="lp-name">{{ lastPlayerName }}</span>
-          <span class="lp-act">出的牌</span>
+          <!-- v0.4.25:牌型名(对子/三张/顺子…),桌面叠牌分不清几张时的关键信息 -->
+          <span v-if="lastPlayType" class="lp-type">{{ lastPlayType }}</span>
+          <span v-else class="lp-act">出的牌</span>
         </div>
       </transition>
       <div v-if="tableCards.length === 0 && !isDealing" class="stack-empty">
@@ -126,6 +128,8 @@ const props = defineProps({
   lastPlayerEmoji: { type: String, default: '' },
   // ★ v0.4.25:出牌者屏幕方位(bottom/top/left/right),飞牌轨迹起点
   lastPlayerPos: { type: String, default: 'bottom' },
+  // ★ v0.4.25:刚出牌的牌型名(对子/三张/顺子…),归属胶囊展示
+  lastPlayType: { type: String, default: '' },
   // 是否级牌判定函数
   isLevel: { type: Function, required: true },
   // 是否发牌中
@@ -406,6 +410,8 @@ function stackStyle(i) {
 .last-play-tag .lp-emoji { font-size: 13px; line-height: 1; }
 .last-play-tag .lp-name  { font-size: 12px; font-weight: 800; color: #fff; }
 .last-play-tag .lp-act   { font-size: 11px; font-weight: 700; color: var(--gold, #FFD700); }
+/* v0.4.25:牌型名高亮(胶囊核心信息) */
+.last-play-tag .lp-type  { font-size: 12px; font-weight: 900; color: var(--gold, #FFD700); letter-spacing: 1px; }
 .last-pop-enter-active { transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .last-pop-leave-active { transition: opacity 0.15s ease-in; }
 .last-pop-enter-from { opacity: 0; transform: translateX(-50%) scale(0.5); }

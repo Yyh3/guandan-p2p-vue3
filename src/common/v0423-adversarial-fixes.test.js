@@ -78,9 +78,9 @@ console.log('\n=== 2. P0-03:finished snapshot 可恢复 ===')
 }
 
 // ============== P1-04:AI 识别 5~8 张炸弹 ==============
-console.log('\n=== 3. P1-04:AI 识别 5~8 张炸弹 ===')
+console.log('\n=== 3. P1-04:AI 识别 5~8 张炸弹(v0.4.25:残局才领炸) ===')
 {
-  // 构造 6 张同 rank + 两张杂牌的手牌(炸弹 rank 比对子小,应优先出炸弹)
+  // 构造 6 张同 rank + 两张杂牌的手牌
   const cards = []
   for (let suit = 0; suit < 4; suit++) cards.push({ suit, rank: 6 })
   cards.push({ suit: 0, rank: 6 }) // 第 5 张 6
@@ -88,9 +88,14 @@ console.log('\n=== 3. P1-04:AI 识别 5~8 张炸弹 ===')
   cards.push({ suit: 0, rank: 9 })
   cards.push({ suit: 1, rank: 10 })
   const sorted = E.sortHand(cards)
+  // ★ v0.4.25:8 张手牌(>6)开局/中局保留炸弹不主动扔;
+  //   P1-04 的 5~8 张炸识别不变(bombRanks 仍 cnt>=4),只是领出时机改到残局
   const lead = AI.chooseLead(sorted, 15)
-  assert('6 张同 rank 时 AI 选择出炸弹', lead.type === 'play' && lead.cards.length === 4)
-  assert('出的炸弹 rank=6', lead.cards.every(c => c.rank === 6))
+  assert('8 张手牌(>6)不主动领炸弹', !(lead.cards.length >= 4 && lead.cards.every(c => c.rank === 6)))
+  // 残局(≤6 张):领出最小炸弹抢牌权
+  const lead2 = AI.chooseLead(E.sortHand(cards.slice(0, 6)), 15)
+  assert('残局(≤6)领 4 张炸(5~8 张炸识别保留)', lead2.type === 'play' && lead2.cards.length === 4)
+  assert('残局领的炸弹 rank=6', lead2.cards.every(c => c.rank === 6))
 }
 
 // ============== P1-10:TableCenter modeLabel 渲染 ==============

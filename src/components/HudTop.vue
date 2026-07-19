@@ -156,6 +156,8 @@ const props = defineProps({
   // 当前级牌 rank 转 label
   levelLabel: { type: String, default: '2' },
   multiplier: { type: Number, default: 1 },
+  // ★ v0.4.25:是否显示房间号(AI 单机无房间概念,显示随机房号会让用户困惑)
+  showRoomCode: { type: Boolean, default: true },
   // 4 玩家座位(2=上=队友, 1=左, 3=右)
   seats: {
     type: Object,
@@ -190,7 +192,9 @@ const clockText = computed(() => {
 
 // v3.x:房间号(A3K7 格式)从 net 单例直接读
 // net.getRoomId() 返回 "A3K7" 格式字符串,失败时返回空串
+// ★ v0.4.25:AI 单机模式不显示(无房间概念,随机房号只会误导)
 const roomCode = computed(() => {
+  if (!props.showRoomCode) return ''
   try {
     if (net && typeof net.getRoomId === 'function') {
       const id = net.getRoomId()

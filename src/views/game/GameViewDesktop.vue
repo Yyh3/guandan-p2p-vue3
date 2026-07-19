@@ -8,6 +8,7 @@
     <HudTop
       :level-label="levelLabel"
       :multiplier="multiplier"
+      :show-room-code="isP2PMode"
       :seats="seatDataDisplay"
       :show-clock="myTurn && !isDealing"
       :turn-seconds="turnTimeLeft"
@@ -34,6 +35,7 @@
         :last-player-name="lastPlayerName"
         :last-player-emoji="lastPlayerEmoji"
         :last-player-pos="lastPlayerPos"
+        :last-play-type="lastPlayTypeName"
         :team-levels="teamLevels"
         :level-rank-num="levelRank"
         :self-seat="selfSeat"
@@ -88,15 +90,15 @@
           ]"
           :style="{ minHeight: colMinHeight(col) + 'px' }"
         >
-          <!-- v3.6:列顶 rank 数字标签(7/9/10/K/2)
-                 v0.4.3:大小王列隐藏 rank 标签(卡通小丑占满牌面已自带视觉标识,不需要"王"字) -->
+          <!-- ★ v0.4.25:绿色点数角标(A/Q/J…)全部去掉(牌面自带点数,角标纯噪声);
+               仅保留牌型名列标(顺子/同花顺/炸弹/鬼),给用户真正的增量信息 -->
           <div
-            v-if="!col.isJoker"
+            v-if="!col.isJoker && col.label"
             class="col-rank"
             :class="{ 'is-level-rank': isLevel({ suit: 0, rank: col.rank }) }"
           >{{ colRankLabel(col) }}</div>
-          <!-- v3-3:列底 ×N 小气泡,强化"一列一列"概念 -->
-          <div class="col-count">×{{ col.cards.length }}</div>
+          <!-- v3-3:列底 ×N 小气泡,强化"一列一列"概念(v0.4.25:单张列不显示) -->
+          <div v-if="col.cards.length > 1" class="col-count">×{{ col.cards.length }}</div>
           <div
             v-for="(c, i) in col.cards"
             :key="cardKey(c)"
@@ -344,7 +346,7 @@ const onEsc = (e) => {
   if (e.key === 'Escape') showMenu()
 }
 // v0.4.25:拖动连选 — mouseup 结束拖动(命名函数,卸载时精确移除)
-const onGlobalMouseUp = () => { dragEnd() }
+const onGlobalMouseUp = () => { dragEnd(); reorderEnd() }
 onMounted(() => {
   if (typeof window !== 'undefined' && window.matchMedia) {
     mqLandscape = window.matchMedia('(orientation: landscape) and (max-height: 500px)')
@@ -429,7 +431,7 @@ const {
   hostMigrationToast, hostMigrationBadge, urgent,
   isP2PMode, selfSeat, game, isNetworkHost,
   // computed
-  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+  myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, lastPlayTypeName, tipText,
   seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
@@ -437,6 +439,7 @@ const {
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   dragStart, dragOver, dragEnd, consumeDragSuppress,
+  isCustomSort, reorderStart, reorderOver, reorderEnd,
   onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
   onRestartMatch, isRestartAfterA,  // ★ v0.4.9
   onIcon, initGame, retryDeal,
@@ -459,11 +462,15 @@ function onHandCardClick(c) {
   toggleCardId(cardKey(c))
 }
 function onDragStart(c, e) {
-  if (!myTurn.value || isDealing.value) return
+  if (isDealing.value) return
   e.preventDefault()
+  // ★ v0.4.25:自定义理牌模式下拖动 = 换位排序;否则 = 拖动连选
+  if (reorderStart(c)) return
+  if (!myTurn.value) return
   dragStart(c)
 }
 function onDragEnter(c) {
+  if (isCustomSort.value) { reorderOver(c); return }
   dragOver(c)
 }
 
@@ -847,43 +854,35 @@ function onNickEditorConfirmed(p) {
   overflow: visible;
   scrollbar-width: thin;
 }
-/* v3-3:手牌列 — 浅底 + 描边 + 列间竖线,让"一列一列"清晰可见 */
+/* v3-3:手牌列 — ★ v0.4.25:列与列横向重叠收紧(负 margin -18px,牌压牌更紧密);
+ *   列底/分隔线在重叠下会被下一列盖住,去掉只保留选中态高亮(选中列 z-index 抬到最上) */
 .hand-column {
   position: relative;
-  width: 64px;                                  /* v0.4.25:78 → 64,布局更紧凑(用户反馈占宽过大);牌仍 60px 不缩 */
+  width: 64px;
   min-height: 98px;
   flex-shrink: 0;
   margin: 0;
-  padding: 18px 0 2px;                         /* v3.6: 上 18px 给 .col-rank 标签留位 */
+  margin-left: -18px;
+  padding: 2px 0 2px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);        /* 列底浅色 */
-  /* v3.6: 列间竖线 1px → 2px 渐变(透明→18%白→30%金→18%白→透明) */
-  border-right: 2px solid;
-  border-image: linear-gradient(180deg,
-    transparent,
-    rgba(255, 255, 255, 0.18) 30%,
-    rgba(255, 215, 0, 0.3) 50%,
-    rgba(255, 255, 255, 0.18) 70%,
-    transparent) 1;
-  border-radius: 6px;                          /* 圆角软化 */
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);  /* 内描边 */
+  background: transparent;
+  border-right: none;
+  border-radius: 6px;
   transition:
     transform var(--t-fast) var(--ease-out),
     background var(--t-fast) var(--ease-out),
     box-shadow var(--t-fast) var(--ease-out);
 }
-.hand-column:hover {
-  background: rgba(255, 255, 255, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-.hand-column:last-child { border-right: none; }  /* 最后一列不加竖线 */
+.hand-column:first-child { margin-left: 0; }  /* 首列不重叠,保证最左完整可见 */
+.hand-column:last-child { border-right: none; }
 .hand-column.is-selected {
-  /* v4.x: 抬升 + 金色下划线 */
+  /* v4.x: 抬升 + 金色下划线;★ v0.4.25:重叠布局下选中列抬到最上层,不被相邻列盖 */
   transform: translateY(-18px);
   background: rgba(255, 215, 0, 0.12);
   box-shadow:
     inset 0 0 0 2px var(--gold),
     0 0 16px var(--gold-soft);
+  z-index: 20;
 }
 .hand-column.is-selected::after {
   content: "";

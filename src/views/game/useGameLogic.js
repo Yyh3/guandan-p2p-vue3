@@ -19,7 +19,7 @@
  * 返回:GameView 模板需要的所有 reactive / computed / methods
  */
 
-import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { createGame } from '@/common/guandan-game.js'
 import * as E from '@/common/guandan-engine.js'
 import dealAnim from '@/common/deal-animation.js'
@@ -436,6 +436,21 @@ export function useGameLogic(opts = {}) {
     if (who === r.right) return 'right'
     return 'bottom'
   })
+  // ★ v0.4.25:桌面刚出牌的牌型名(对 3 / 三 3 / 顺子…),归属胶囊一并展示,
+  //   解决"桌面牌叠在一起,分不清是一张3、两张3还是三张3"
+  const lastPlayTypeName = computed(() => {
+    if (!lastPlay.value) return ''
+    const t = lastPlay.value.type
+    if (typeof t === 'number') {
+      // 引擎数字枚举(与 PREVIEW_TYPE_CN 同表)
+      const CN = { 1:'单张',2:'对子',3:'三张',4:'三带二',5:'顺子',6:'连对',7:'钢板',8:'炸弹',9:'炸弹',10:'炸弹',11:'炸弹',12:'炸弹',13:'同花顺',14:'王炸' }
+      return CN[t] || ''
+    }
+    const CN2 = { SINGLE:'单张',PAIR:'对子',TRIPLE:'三张',TRIPLE_PAIR:'三带二',STRAIGHT:'顺子',STRAIGHT_PAIR:'连对',STRAIGHT_TRIPLE:'钢板',STRAIGHT_FLUSH:'同花顺',JOKER_BOMB:'王炸' }
+    if (CN2[t]) return CN2[t]
+    if (typeof t === 'string' && t.startsWith('BOMB')) return '炸弹'
+    return ''
+  })
   const tipText = computed(() => {
     if (phase.value === 'finished') return '本局结束'
     if (isDealing.value) return '发牌中...'
@@ -517,8 +532,38 @@ export function useGameLogic(opts = {}) {
   }
 
   // v3-2:按 rank 分组竖叠
-  const handColumns = computed(() => E.groupHandByRank(myHand.value))
+  // ★ v0.4.25:理牌模式 — rank(点数分组,默认) / combo(牌型优先:顺子/同花顺/连对/钢板成列)
+  //   / custom(自定义:用户手动排顺序,每列一张,拖动换位)
+  const SORT_MODES = ['rank', 'combo', 'custom']
+  const SORT_MODE_LABEL = { rank: '点数分组', combo: '牌型优先', custom: '自定义' }
+  // ★ v0.4.25:默认牌型优先(combo)— 炸弹/同花顺等大结构统一靠左,其余按点数降序;
+  //   无牌型时自然退化为近点数分组,用户仍可点理牌循环回 rank
+  const sortMode = ref('combo')
+  const customOrder = ref([])  // 自定义模式的卡牌顺序(cardKey 数组)
+  const isCustomSort = computed(() => sortMode.value === 'custom')
+
+  const handColumns = computed(() => {
+    if (sortMode.value === 'combo') {
+      return E.groupHandCombo(myHand.value, levelRank.value)
+        .map((c, i) => ({ ...c, _cid: `combo-${i}` }))
+    }
+    if (sortMode.value === 'custom') {
+      // customOrder 中仍存在的牌 + 不在 customOrder 的新牌(发新牌/同步后兜底)
+      const byKey = new Map(myHand.value.map(c => [cardKey(c), c]))
+      const ordered = []
+      for (const k of customOrder.value) {
+        const c = byKey.get(k)
+        if (c) { ordered.push(c); byKey.delete(k) }
+      }
+      for (const c of myHand.value) {
+        if (byKey.has(cardKey(c))) ordered.push(c)
+      }
+      return ordered.map((c, i) => ({ rank: c.rank, cards: [c], isJoker: c.suit === -1, _cid: `custom-${i}` }))
+    }
+    return E.groupHandByRank(myHand.value)
+  })
   function columnKey(col) {
+    if (col._cid) return col._cid
     return col.isJoker ? `joker-${col.rank}` : `r${col.rank}`
   }
   function colMinHeight(col) {
@@ -527,6 +572,8 @@ export function useGameLogic(opts = {}) {
   }
   const RANK_LABELS = { 3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',15:'2',16:'小王',17:'大王' }
   function colRankLabel(col) {
+    // ★ v0.4.25:combo 列优先显示牌型名(顺子/同花顺/炸弹…)
+    if (col.label) return col.label
     if (col.isJoker) return '王'
     return RANK_LABELS[col.rank] || String(col.rank)
   }
@@ -748,6 +795,16 @@ export function useGameLogic(opts = {}) {
     addTimer(() => { bombFx.value = null }, 1500)
   }
 
+  // ★ v0.4.25 修复:发牌动画结束后再执行 fn(音效/特效/语音播报)。
+  //   发牌中 AI 已按 game state 出牌,若立即播音,炸弹音会在动画中段突然炸出;
+  //   isDealing 翻 false 时补播(8s dealTimeout 兜底保证一定会触发)
+  function _afterDeal(fn) {
+    if (!isDealing.value) { fn(); return }
+    const stop = watch(isDealing, (v) => {
+      if (!v) { stop(); fn() }
+    })
+  }
+
   // ===== 游戏初始化 =====
   function initGame(opts2 = {}) {
     const isP2P = opts2.isP2P === true
@@ -859,14 +916,15 @@ export function useGameLogic(opts = {}) {
       //   下游音效 / 炸弹特效 / 震屏 / speakBomb 语音播报全部基于字符串契约
       const playType = playTypeName(rawType)
       if (cards && cards.length > 0) {
-        try {
-          audio.playSfxForType(playType, cards.length)
-          if (playType === 'JOKER_BOMB' || (typeof playType === 'string' && playType.startsWith('BOMB'))) {
+        // ★ v0.4.25 修复:发牌动画未完时延迟音效/特效/语音,动画结束再播(_afterDeal)
+        // ★ v0.4.25 修正:特效统一交给 showBombFx(bombFxForType 判定) —
+        //   顺子/连对/钢板/三带二也弹大字,不再只限炸弹系
+        _afterDeal(() => {
+          try {
+            audio.playSfxForType(playType, cards.length)
             showBombFx(playType)
-          } else if (playType === 'STRAIGHT_FLUSH') {
-            showBombFx(playType)
-          }
-        } catch (e) { audio.playSfxForType('SINGLE', 1) }
+          } catch (e) { audio.playSfxForType('SINGLE', 1) }
+        })
       }
       const oldCount = lastCardCounts.value[seat] ?? 27
       const newCount = Math.max(0, oldCount - (cards?.length || 0))
@@ -874,9 +932,9 @@ export function useGameLogic(opts = {}) {
       nextCounts[seat] = newCount
       lastCardCounts.value = nextCounts
       if (newCount > 0 && newCount <= 5) {
-        audio.sfxCountdownWarn()
+        _afterDeal(() => audio.sfxCountdownWarn())
       } else if (newCount > 0 && newCount <= 10) {
-        audio.sfxCountdownTick()
+        _afterDeal(() => audio.sfxCountdownTick())
       }
       if (seat === getMe()) {
         const remove = new Set(cards.map(c => cardKey(c)))
@@ -1094,10 +1152,48 @@ export function useGameLogic(opts = {}) {
   function onSortHand() {
     if (isDealing.value) return
     haptics.click()
-    myHand.value = E.sortHandGrouped(myHand.value.slice())
+    // ★ v0.4.25:理牌模式循环 点数分组 → 牌型优先 → 自定义 → 点数分组
+    const i = SORT_MODES.indexOf(sortMode.value)
+    const next = SORT_MODES[(i + 1) % SORT_MODES.length]
+    sortMode.value = next
+    if (next === 'custom') {
+      // 进入自定义:以当前显示顺序铺平作为初始顺序,之后拖动卡牌调整
+      customOrder.value = handColumns.value.flatMap(col => col.cards.map(c => cardKey(c)))
+      showToast('自定义理牌:拖动卡牌调整顺序')
+    } else {
+      showToast(`理牌:${SORT_MODE_LABEL[next]}`)
+    }
     suitFilter.value = null
     hintCards.value = []
     mainActionsRef.value?.setShowing(false)
+  }
+
+  // ===== v0.4.25:自定义理牌(拖动换位)=====
+  // 把 key 牌移动到 targetKey 之前(targetKey=null 移到末尾)
+  function moveCustomCard(key, targetKey) {
+    if (sortMode.value !== 'custom') return
+    const arr = customOrder.value.filter(k => k !== key)
+    let idx = targetKey == null ? arr.length : arr.indexOf(targetKey)
+    if (idx < 0) idx = arr.length
+    arr.splice(idx, 0, key)
+    customOrder.value = arr
+  }
+  const _reorder = { active: false, key: null }
+  // 自定义模式下开始拖动换位;非自定义返回 false(调用方走拖动连选)
+  function reorderStart(c) {
+    if (sortMode.value !== 'custom' || !c) return false
+    _reorder.active = true
+    _reorder.key = cardKey(c)
+    return true
+  }
+  function reorderOver(c) {
+    if (!_reorder.active || !c) return
+    const k = cardKey(c)
+    if (k !== _reorder.key) moveCustomCard(_reorder.key, k)
+  }
+  function reorderEnd() {
+    _reorder.active = false
+    _reorder.key = null
   }
 
   // ===== BUG-003 修复:统一 commitPlay / commitPass =====
@@ -2080,7 +2176,7 @@ function commitPass(seat, source = 'manual') {
     isRestartAfterA,  // ★ v0.4.9:过 A 标志
     isP2PMode, selfSeat, isNetworkHost,
     // computed
-    myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, tipText,
+    myTurn, currentPlayerName, firstPlayerName, firstPlayerEmoji, lastPlayerName, lastPlayerEmoji, lastPlayerPos, lastPlayTypeName, tipText,
     seatData, handColumns, selectedCount, selectedPreview, cardCounter,
     // methods
     showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
@@ -2090,6 +2186,7 @@ function commitPass(seat, source = 'manual') {
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, toggleCardId, isCardSelected, onClear,
     selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
     setCardSelected, dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,
+    sortMode, isCustomSort, moveCustomCard, reorderStart, reorderOver, reorderEnd,
     onHintToggle, onAutoPlay, onPlay, onPass, onNext, onChat, onSeatClick,
     onIcon, showMenu, initGame, startDealAnimation, applyNetworkPlayers,
     // v0.4.8 N-2:AI 补位辅助函数(测试 / 外部 trigger 用)
