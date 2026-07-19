@@ -4,6 +4,15 @@
 >
 > 任何 AI agent 接手本项目前**先读这个文件**，能少走 90% 的弯路。
 
+## 构建环境（本机 Windows,2026-07-19 配置）
+
+- JDK 21：`C:\dev\jdk-21`（TUNA 镜像 Temurin）
+- Android SDK：`C:\dev\android-sdk`（build-tools 35.0.0/36.0.0 + platform android-36，腾讯镜像；licenses 已接受）
+- Gradle 8.14.3：`C:\dev\gradle-8.14.3`（腾讯镜像；用 `gradle.bat assembleDebug`，gradlew 会去官方源下载）
+- Maven 依赖：`~/.gradle/init.gradle` 配了阿里云镜像（google/central/gradle-plugin），`android/local.properties` 指 `sdk.dir`
+- 构建命令：`export JAVA_HOME='C:\dev\jdk-21' ANDROID_HOME='C:\dev\android-sdk' && cd android && /c/dev/gradle-8.14.3/bin/gradle.bat assembleDebug --no-daemon`
+- 产物：`android/app/build/outputs/apk/debug/app-debug.apk`（约 18MB）
+
 ## 当前任务记录
 
 - 2026-07-19：完成四项体验修复（用户反馈）：
@@ -73,7 +82,7 @@
 ```bash
 npm install          # 装依赖
 npm run dev          # 开发服务器（http://localhost:8848）
-npm test             # 全部测试（59 套件 / 2106 case，v0.4.24 基线）
+npm test             # 全部测试（61 套件 / 2724 case，v0.4.25 基线）
 npm run test:engine  # 单套：规则引擎（另有 test:ai / test:game / test:anim / test:ws / test:rotation / test:kick / test:room）
 npm run bench        # 性能基准
 npm run build        # 生产构建（产物在 dist/）
@@ -114,7 +123,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架。**基线：59 套件 / 2106 case 全绿（v0.4.24）。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架。**基线：61 套件 / 2724 case 全绿（v0.4.25）。**
 
 **测试文件规范**：
 - 文件名 `<name>.test.js`，与被测文件同目录；顶部 `import * as X from './<name>.js'`
