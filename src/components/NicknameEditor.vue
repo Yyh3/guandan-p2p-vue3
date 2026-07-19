@@ -5,16 +5,19 @@
       <p class="modal-tip">仅本机保存,不会上传任何服务器</p>
 
       <div class="avatar-grid">
-        <div
+        <!-- ★ v0.4.24 P2 修复:div → <button type="button">,去掉 aria-hidden 标记
+             (之前 img 角色 + aria-label + aria-hidden 同时挂,aria-hidden 让前两个失效,
+             且可点击 div 键盘不可达);button 天然可 Tab 聚焦 + Enter/Space 触发 -->
+        <button
           v-for="a in avatars"
           :key="a"
+          type="button"
           class="avatar-cell"
           :class="{ active: picked === a }"
-          @click="picked = a"
-          role="img"
           :aria-label="`头像 ${a}`"
-          aria-hidden="true"
-        >{{ a }}</div>
+          :aria-pressed="picked === a"
+          @click="picked = a"
+        >{{ a }}</button>
       </div>
 
       <div class="nickname-row">
@@ -104,6 +107,9 @@ function confirm() {
   font-size: 26px;
   cursor: pointer;
   transition: all 0.1s;
+  /* v0.4.24:div → button 后清掉 UA 默认样式 */
+  padding: 0;
+  font-family: inherit;
 }
 .avatar-cell.active {
   background: #fff8d9;

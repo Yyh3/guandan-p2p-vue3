@@ -304,6 +304,10 @@ export class WebSocketTransport {
     this._mode = 'client'
     this._hostIp = hostIp
     const port = hostPort != null ? hostPort : this._port
+    // ★ v0.4.24:把实际连接的 host/port 回写到实例字段,
+    //   _scheduleReconnect 用 this._hostIp/this._port 重连,
+    //   不回写则重连永远拨构造时的默认 8848(拨错端口)。
+    this._port = port
     const bracketedHost = (hostIp.includes(':') && !hostIp.startsWith('[')) ? `[${hostIp}]` : hostIp
     this._url = `ws://${bracketedHost}:${port}${this._path}`
     const url = this._url

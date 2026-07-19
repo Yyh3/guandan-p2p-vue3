@@ -199,6 +199,16 @@ function createGame(opts) {
       return JSON.parse(JSON.stringify(v))
     }
     for (const k of keys) snap[k] = clone(state[k])
+    // ★ v0.4.24 修复:handCounts 实时重算,不直接信任 state.handCounts —
+    //   host 模式 applyPlay 只减 hands 不更新 handCounts(仅 deal 时设置),
+    //   中局快照会携带全 27 的陈旧 counts,接收端牌数显示错误。
+    //   规则:有真实手牌的座位(host 全部座位 / joiner 自己的座位)用 hands 长度;
+    //   joiner 远程座位 hands 是空数组占位但 handCounts 有真值,保留原值而非重算成 0。
+    snap.handCounts = snap.hands.map((h, i) => {
+      const hasRealHand = mode === 'host' || i === ownSeat
+      if (hasRealHand) return Array.isArray(h) ? h.length : 0
+      return snap.handCounts?.[i] ?? 0
+    })
     // Phase 2:按目标座位过滤手牌,避免泄露他人真实手牌
     if (isValidSeat(forSeat)) {
       snap.hands = snap.hands.map((h, i) => (i === forSeat ? h : []))
@@ -467,6 +477,10 @@ function applyPlay(seat, cards, hand, rec) {
 
   // ============ AI 自动出牌 ============
   function scheduleAI() {
+    // ★ v0.4.24 修复:AI 定时器只在 host 端运行。joiner 端手牌隐藏(其他座位
+    //   hands 是空数组占位),本地跑 AI 会用空数据替 AI 座位决策(必然 pass),
+    //   污染本地状态,与 host 权威状态分叉。
+    if (mode !== 'host') return
     if (state.phase !== 'playing') return
     const seat = state.currentPlayer
     if (!aiPlayers.includes(seat)) return
@@ -495,6 +509,18 @@ function applyPlay(seat, cards, hand, rec) {
         if (res?.ok !== false) {
           // ★ v3.8 P1:联机模式下 AI 出的牌要广播给其他 tab
           if (aiBroadcast) aiBroadcast(seat, r.cards, 'PLAY')
+        } else {
+          // ★ v0.4.24 修复:AI 决策出的牌被规则拒绝(引擎/AI 判定不一致)时,
+          //   旧版什么都不做 → timer 已消耗、回合悬置、整局永久卡死。
+          //   兜底:尝试 playerPass;pass 也不合法(如首家不能 pass)则重调度,
+          //   下一 tick 用最新 state 重新评估,避免死锁。
+          console.warn('[game] AI play rejected, fallback to pass:', res?.error)
+          const passRes = playerPass(seat)
+          if (passRes?.ok !== false) {
+            if (aiBroadcast) aiBroadcast(seat, null, 'PASS')
+          } else {
+            scheduleAI()
+          }
         }
       } else {
         // ★ v0.4.14 对抗性审查 (V0412-03):AI pass 也必须广播给 joiner,

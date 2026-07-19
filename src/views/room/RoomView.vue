@@ -32,7 +32,7 @@
         <span class="header-roomno">{{ roomNo }}</span>
       </div>
       <div class="header-meta">
-        <span class="net-status" :class="netStatusClass">{{ netStatus }}</span>
+        <span class="net-status" :class="netStatusClass">{{ netStatus }} {{ netStatusText }}</span>
         <button class="header-more" @click="onEditMyInfo" title="编辑昵称" aria-label="编辑昵称" data-testid="edit-info-btn"><span aria-hidden="true">⋯</span></button>
       </div>
     </header>
@@ -202,6 +202,7 @@ function cleanupRoomListeners() {
     try { disposers.pop()() } catch (e) { /* swallow */ }
   }
   clearCutTimers()
+  clearJoinTimeout()
 }
 
 function genStars() {
@@ -278,6 +279,21 @@ const cutRevealed = ref(false)
 let cutTimer = null
 let cutInterval = null
 
+// ★ v0.4.24 修复:joiner 加入超时 — joinRoom 同步返回 ok 只代表本地 channel 开好,
+//   BC 模式输入不存在的房间号也显示绿灯。8s 内没收到 SYNC/ROOM_FULL 就给用户明确反馈。
+let joinTimeoutId = null
+function clearJoinTimeout() {
+  if (joinTimeoutId) { clearTimeout(joinTimeoutId); joinTimeoutId = null }
+}
+function armJoinTimeout() {
+  clearJoinTimeout()
+  joinTimeoutId = setTimeout(() => {
+    joinTimeoutId = null
+    netStatus.value = '🔴'
+    showToast('未找到房间,请确认房间号或房主 IP 后重试')
+  }, 8000)
+}
+
 // ★ P1-04 修复:房主座位不显示准备按钮;★ P1-14 修复:主按钮根据状态显示具体提示。
 const primaryBtnText = computed(() => {
   if (!isHost.value) return myReady.value ? '取消准备' : '准备'
@@ -300,6 +316,12 @@ const netStatusClass = computed(() => {
   if (netStatus.value === '🟢') return 'net-ok'
   if (netStatus.value === '🔴') return 'net-bad'
   return 'net-pending'
+})
+// ★ v0.4.24:圆点旁加文字,色弱用户/新用户不再看不懂状态
+const netStatusText = computed(() => {
+  if (netStatus.value === '🟢') return '已连接'
+  if (netStatus.value === '🔴') return '未连接'
+  return '连接中'
 })
 
 async function generateQr() {
@@ -335,6 +357,7 @@ function formatHostAddr() {
 function attachRoomListeners() {
   onNet('connect', ({ seat, info }) => {
     netStatus.value = '🟢'
+    clearJoinTimeout()  // v0.4.24:连上即取消加入超时
     if (seat != null && info) {
       peers.set(seat, { ...info, ready: false })
     }
@@ -348,6 +371,24 @@ function attachRoomListeners() {
   onNet('error', (e) => {
     netStatus.value = '🔴'
     console.error('network error:', e)
+    // ★ v0.4.24:连接失败不再只有红点,给用户可读反馈
+    clearJoinTimeout()
+    showToast('连接失败,请检查网络或房主地址')
+  })
+  // ★ v0.4.24 修复:房间页感知 host 掉线 — joiner 等房期间 host 杀 App/断电,
+  //   旧版界面无任何变化、假绿灯干等。
+  onNet('host:lost', () => {
+    if (isHost.value) return
+    cleanupRoomListeners()
+    try { net.close() } catch (e) { /* swallow */ }
+    showToast('房主已断开,已返回首页')
+    router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开'))
+  })
+  // ★ v0.4.24:满房反馈 — host 拒绝第 5 人时明确告知,不再空等
+  onNet('message:ROOM_FULL', () => {
+    clearJoinTimeout()
+    netStatus.value = '🔴'
+    showToast('房间已满(4/4),请让房主先踢出空位')
   })
   onNet('peer:leave', ({ seat, reason, migrate }) => {
     if (seat == null) return
@@ -397,6 +438,7 @@ function attachRoomListeners() {
     // ★ LOGIC-14 修复:SYNC 只能由 host 权威发出
     const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (from !== hs) return
+    clearJoinTimeout()  // v0.4.24:收到权威 SYNC = 已进房,取消加入超时
     if (payload && payload.peers) {
       peers.clear()
       for (const [s, info] of payload.peers) peers.set(s, info)
@@ -410,7 +452,10 @@ function attachRoomListeners() {
     if (!isHost.value) {
       const firstSeat = payload && typeof payload.firstSeat === 'number' ? payload.firstSeat : undefined
       const qs = firstSeat != null ? '&firstSeat=' + firstSeat : ''
-      router.push('/game?roomNo=' + roomNo.value + '&role=joiner' + qs)
+      // ★ v0.4.24 修复:跨设备 WS joiner 跳转对局必须带 host 参数 —
+      //   否则打完一局「返回房间」时 host 丢失,session 复用判断失败,joiner 掉进空房间
+      const hostQ = route.query.host ? '&host=' + encodeURIComponent(String(route.query.host)) : ''
+      router.push('/game?roomNo=' + roomNo.value + '&role=joiner' + qs + hostQ)
     }
   })
   onNet('peer:seat_swap', (payload) => {
@@ -522,11 +567,15 @@ async function initNetwork() {
   } else {
     const hostParam = route.query.host ? String(route.query.host) : null
     if (hostParam) {
-      const r = net.joinRemoteRoom(hostParam, { nickname: myName.value, avatar: myAvatar.value })
+      // ★ v0.4.24:把房间号传给 joinRemoteRoom,覆盖 WS 路径写死的 roomId='ws',
+      //   返回房间时 session 复用判断(getRoomId() === roomNo)才能命中
+      const r = net.joinRemoteRoom(hostParam, { nickname: myName.value, avatar: myAvatar.value }, roomNo.value)
       netStatus.value = r.ok ? '🟢' : '🔴'
+      armJoinTimeout()
     } else {
       const r = net.joinRoom(route.query.roomNo || 'default', { nickname: myName.value, avatar: myAvatar.value })
       netStatus.value = r.ok ? '🟢' : '🔴'
+      armJoinTimeout()
     }
   }
   try {

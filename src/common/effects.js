@@ -5,10 +5,19 @@
 
 /**
  * 牌型 → 中央大字特效
- * @param {string|number} type TYPE.X(recognize 返回)
+ * @param {string|number} type TYPE.X(recognize 返回)或字符串牌型名
  * @returns {{ kind: 'bomb'|'joker'|'super'|'none', text: string } | null}
  */
+// ★ v0.4.24 修复:引擎 TYPE 是数字枚举,game 'play' 事件直接携带数字 type —
+//   先做数字→字符串映射,数字入参也能命中炸弹/王炸/同花顺特效(旧版全部返回 null)
+const TYPE_NUM_TO_NAME = {
+  1: 'SINGLE', 2: 'PAIR', 3: 'TRIPLE', 4: 'TRIPLE_PAIR',
+  5: 'STRAIGHT', 6: 'STRAIGHT_PAIR', 7: 'STRAIGHT_TRIPLE',
+  8: 'BOMB_4', 9: 'BOMB_5', 10: 'BOMB_6', 11: 'BOMB_7', 12: 'BOMB_8',
+  13: 'STRAIGHT_FLUSH', 14: 'JOKER_BOMB',
+}
 export function bombFxForType(type) {
+  if (typeof type === 'number') type = TYPE_NUM_TO_NAME[type]
   if (type === 'JOKER_BOMB') return { kind: 'joker', text: '王炸' }
   if (typeof type === 'string' && type.startsWith('BOMB')) {
     if (type === 'BOMB_6' || type === 'BOMB_7' || type === 'BOMB_8' || type === 'BOMB_9' || type === 'BOMB_10') {

@@ -65,6 +65,9 @@ const commands = [
   'node src/common/v0421-adversarial-fixes.test.js',
   'node src/common/v0422-adversarial-fixes.test.js',
   'node src/common/v0423-adversarial-fixes.test.js',
+  'node src/common/v0424-game-fixes.test.js',
+  'node src/common/v0424-gameview-fixes.test.js',
+  'node src/common/v0424-room-join-fixes.test.js',
 ]
 
 function run(cmd) {

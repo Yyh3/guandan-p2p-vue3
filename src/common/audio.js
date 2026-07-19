@@ -3,16 +3,13 @@
  *
  * BGM 部分:
  *   - v0.4.8 前:Web Audio API 合成(零文件依赖,但质感有限)
- *   - v0.4.8 起:7 首 Kevin MacLeod CC-BY BGM(MP3 真实音频,128kbps 压缩后 ~27MB)
- *     加载失败时自动降级 Web Audio 合成(不会让游戏无声音)
+ *   - v0.4.8 起:Kevin MacLeod CC-BY MP3 真实音频,加载失败时自动降级
+ *     Web Audio 合成(不会让游戏无声音)
+ *   - v0.4.23 起:安装包瘦身,内置 BGM 从 7 首精简为 3 首
  *   - 风格对应:
  *     - 'energetic' / 'normal' / 'main'  → bgm-chinese.mp3 (Shenyang,中式器乐主对局)
  *     - 'calm'      / 'idle'    / 'lobby' → bgm-carefree.mp3 (Carefree,轻快明快,开局/等待/结算)
  *     - 'bossa'                              → bgm-bossa.mp3 (Bossa Antigua,慵懒闲适备选)
- *     - 'ripples'                            → bgm-ripples.mp3 (舒缓氛围,残局紧张)
- *     - 'intense' / 'drums'                  → bgm-asian-drums.mp3 (亚洲鼓乐,炸弹连击)
- *     - 'lobby' / 'warm'                     → bgm-firesong.mp3 (温暖民谣,大厅/房间等待)
- *     - 'casual'                             → bgm-galway.mp3 (爱尔兰风笛,轻松休闲)
  *
  * SFX 部分:
  *   - 仍是 Web Audio API 合成(5 种牌型 + 炸弹层级 + 王炸 + 超级炸弹 + 报数 tick + 警告 + 蜂鸣)
@@ -27,7 +24,7 @@
  *   audio.stopBgm()
  *   audio.setBgmEnabled(bool)
  *   audio.setBgmVolume(0..1)
- *   audio.playSfxForType(type, count?)      // type: SINGLE|PAIR|...|JOKER_BOMB, count 可选
+ *   audio.playSfxForType(type, count?)      // type: SINGLE|PAIR|...|JOKER_BOMB(也接受引擎数字 TYPE), count 可选
  *   audio.setSfxEnabled(bool)
  *   audio.setSfxVolume(0..1)
  *   audio.sfxCountdownTick()                // 报数 tick 短音
@@ -349,6 +346,10 @@ function unlock() {
     try {
       const p = bgmAudioEl.play()
       if (p && typeof p.catch === 'function') p.catch(() => {})
+      // ★ v0.4.24 修复:恢复播放后把 bgmUseMp3 置回 true — autoplay 被拒时
+      //   startMp3Bgm 的 promise catch 已把它置 false,残留 false 会导致之后
+      //   setBgmStyle 切歌走不进 startMp3Bgm 分支(bgmTimer 又是 null)→ 静默失效
+      bgmUseMp3 = true
     } catch (e) { /* swallow */ }
   }
   return ok
@@ -1013,8 +1014,25 @@ function speakBomb(text = '炸弹') {
   } catch (e) { /* ignore */ }
 }
 
+// ★ v0.4.24 修复:引擎 TYPE 是数字枚举(SINGLE=1..KINGS_BOMB=14),game 层
+//   'play' 事件直接携带数字 type;先映射成字符串牌型名,避免下方
+//   type.includes('STRAIGHT') 对数字抛 TypeError,音效静默退化成单张音。
+//   命名差异:KINGS_BOMB→'JOKER_BOMB'、THREE→'TRIPLE'、THREE_PAIR→'TRIPLE_PAIR'、
+//   PAIR_STRAIGHT→'STRAIGHT_PAIR'、THREE_STRAIGHT→'STRAIGHT_TRIPLE',其余同名。
+const TYPE_NUM_TO_NAME = {
+  1: 'SINGLE', 2: 'PAIR', 3: 'TRIPLE', 4: 'TRIPLE_PAIR',
+  5: 'STRAIGHT', 6: 'STRAIGHT_PAIR', 7: 'STRAIGHT_TRIPLE',
+  8: 'BOMB_4', 9: 'BOMB_5', 10: 'BOMB_6', 11: 'BOMB_7', 12: 'BOMB_8',
+  13: 'STRAIGHT_FLUSH', 14: 'JOKER_BOMB',
+}
+function _normalizeSfxType(type) {
+  if (typeof type === 'number') return TYPE_NUM_TO_NAME[type] || null
+  return type
+}
+
 function playSfxForType(type, count) {
   if (!sfxEnabled) return
+  type = _normalizeSfxType(type)
   if (!type) {
     if (sfxMode === 'real' && _shouldUseMp3('SINGLE') && playMp3Sfx('SINGLE')) return
     sfxSingle(count); return
@@ -1077,8 +1095,13 @@ function setSfxVolume(v) {
   if (sfxGain) sfxGain.gain.value = sfxVol
   // ★ v0.4.9:real 模式同步所有缓存 audio 元素
   if (sfxMode === 'real') {
-    for (const el of sfxAudioCache.values()) {
-      try { el.volume = sfxVol } catch (e) { /* ignore */ }
+    // ★ v0.4.24 修复:cache 值是 pool entry({ elements, nextIndex, unlockPending }),
+    //   对 entry 本身赋 .volume 无效,必须遍历 entry.elements 更新每个 Audio element
+    for (const entry of sfxAudioCache.values()) {
+      const els = entry && Array.isArray(entry.elements) ? entry.elements : []
+      for (const el of els) {
+        try { el.volume = sfxVol } catch (e) { /* ignore */ }
+      }
     }
   }
 }

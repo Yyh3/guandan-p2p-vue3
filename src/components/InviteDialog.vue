@@ -41,11 +41,30 @@ const emit = defineEmits(['close', 'copied'])
 
 function onClose() { emit('close') }
 function onCopied(text) { emit('copied', text) }
-function copyRoomNo() {
-  navigator.clipboard.writeText(props.roomNo).then(
-    () => emit('copied', props.roomNo),
-    () => emit('copied', props.roomNo)
-  )
+async function copyRoomNo() {
+  // ★ v0.4.24 修复:LAN http 源(非安全上下文)下 navigator.clipboard 为 undefined,
+  //   旧版同步抛 TypeError、按钮毫无反应。先现代 API,失败退回 execCommand;
+  //   无论成败都通知父组件(父组件 onCopied 会再尝试一次并如实提示)。
+  let ok = false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(props.roomNo)
+      ok = true
+    }
+  } catch { /* 走 execCommand 兜底 */ }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = props.roomNo
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch { ok = false }
+  }
+  emit('copied', props.roomNo, ok)
 }
 </script>
 

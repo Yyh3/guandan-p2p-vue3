@@ -4,9 +4,8 @@
    *
    * 用途:
    *   - 点击右下角 💬 按钮,弹 10 颗 pill 短语
-   *   - 点击短语 → 触发父组件的 toast 显示(2s) + 自动关闭
-   *   - v3.7 P1 **不接 P2P**,emit `select` 后由父组件决定处理(目前只 toast)
-   *   - v2.0 计划:把 select 的内容 net.broadcast({ type: 'CHAT_QUICK', payload: phrase })
+   *   - 点击短语 → emit `select` 由父组件处理(toast 显示 2s + 联机时广播给同桌玩家) + 自动关闭
+   *   - v0.4.24:提示文案更新,去掉过时的「尚未接入广播,仅本地显示」说明
    *
    * 关闭:
    *   - 点遮罩(半透明背景)
@@ -29,7 +28,7 @@
           <span class="chat-title"><span aria-hidden="true">💬</span> 聊天</span>
           <button class="chat-close" @click="$emit('close')" title="关闭(Esc)">×</button>
         </div>
-        <div class="chat-hint">点击短语,向房间内玩家广播(v2.0 接入,目前仅本地显示)</div>
+        <div class="chat-hint">快捷短语会发送给同桌玩家</div>
         <div class="chat-grid">
           <button
             v-for="p in phrases"

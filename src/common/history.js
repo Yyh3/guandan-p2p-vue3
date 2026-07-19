@@ -12,7 +12,9 @@
  *   格式:[
  *     { time, ranks: [seatA, seatB, seatC, seatD], players: {seat: {name, avatar}}, levelUp, mySeat, ... }
  *   ]
- * 玩家自己座位随每局记录保存在 mySeat 中;所有函数都接受 mySeatIndex 参数,默认 0。
+ * 玩家自己座位随每局记录保存在 mySeat 中;
+ * ★ v0.4.24:所有统计函数逐条使用 rec.mySeat(联机每局座位可能不同),
+ *   记录缺 mySeat 时才回退到 mySeatIndex 参数(默认 0,保持旧 API 兼容)。
  *
  * 用法:
  *   import { computeWinRate, ... } from '@/common/history.js'
@@ -20,14 +22,25 @@
  */
 
 /**
+ * 取单条记录的玩家座位:优先记录自带的 mySeat,缺省回退到调用方传入值。
+ * @param {Object} rec - 单局战绩
+ * @param {number} fallback - rec.mySeat 缺失时使用的座位
+ * @returns {number}
+ */
+function _seatOf(rec, fallback) {
+  return (rec && typeof rec.mySeat === 'number') ? rec.mySeat : fallback
+}
+
+/**
  * 判定我方是否获胜
  * @param {Object} rec - 单局战绩
- * @param {number} mySeatIndex - 自己的座位(默认 0)
+ * @param {number} mySeatIndex - 自己的座位(默认 0;rec.mySeat 存在时被忽略)
  * @returns {boolean}
  */
 export function isMyTeamWin(rec, mySeatIndex = 0) {
   if (!rec || !Array.isArray(rec.ranks) || rec.ranks.length === 0) return false
-  const myTeam = mySeatIndex % 2  // 0/2 一队, 1/3 一队
+  const seat = _seatOf(rec, mySeatIndex)
+  const myTeam = seat % 2  // 0/2 一队, 1/3 一队
   const winnerSeat = rec.ranks[0]  // 头游
   return myTeam === (winnerSeat % 2)
 }
@@ -38,7 +51,7 @@ export function isMyTeamWin(rec, mySeatIndex = 0) {
  */
 export function getMyRank(rec, mySeatIndex = 0) {
   if (!rec || !Array.isArray(rec.ranks)) return -1
-  const idx = rec.ranks.indexOf(mySeatIndex)
+  const idx = rec.ranks.indexOf(_seatOf(rec, mySeatIndex))
   return idx
 }
 

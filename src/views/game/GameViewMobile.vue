@@ -157,7 +157,8 @@
     <!-- ===== 6. 状态提示条 (发牌中 / 等待) ===== -->
     <div v-if="isDealing || phase === 'finished'" class="status-tip-mobile">
       <template v-if="isDealing">
-        <span>🃏 发牌中 {{ dealProgress }}%</span>
+        <!-- ★ v0.4.24 P2 修复:补 role/aria-live(对齐桌面端 deal-progress-label) -->
+        <span role="status" aria-live="polite">🃏 发牌中 {{ dealProgress }}%</span>
         <div class="deal-progress-bar" aria-hidden="true">
           <div class="deal-progress-fill" :style="{ width: dealProgress + '%' }"></div>
         </div>
@@ -254,10 +255,11 @@
             :key="cardKey(c)"
             class="hand-card"
             :style="{ zIndex: i + 1, top: (i * -12) + 'px' }"
-            @click="toggleCardId(cardKey(c))"
+            @click="onCardClick(c)"
             @touchstart="onCardTouchStart($event, col)"
             @touchend="onCardTouchEnd"
             @touchmove="onCardTouchEnd"
+            @touchcancel="onCardTouchEnd"
           >
             <CardPlay
               :card="c"
@@ -383,10 +385,20 @@ function onBackToRoom() {
     },
   })
 }
-function exitGame() {
+// ★ v0.4.24 P0 修复:exitGame 支持迁移参数 — host 退出时把 newHostSeat/newHostAddress
+//   传给 net.close,保证旧 host 立即关闭时公开 PEER_LEAVE 仍带齐迁移字段
+function exitGame(migration) {
   try {
-    if (isNetworkHost.value) net.close({ broadcast: true, reason: 'user_leave' })
-    else net.leaveRoom({ reason: 'user_leave' })
+    if (isNetworkHost.value) {
+      net.close({
+        broadcast: true,
+        reason: 'user_leave',
+        newHostSeat: migration?.newHostSeat,
+        newHostAddress: migration?.newHostAddress,
+      })
+    } else {
+      net.leaveRoom({ reason: 'user_leave' })
+    }
   } catch (e) {}
   router.replace('/')
 }
@@ -442,12 +454,19 @@ const {
 })
 
 // ★ P0-01:移动端长按某张牌选中整列(替代桌面双击)
+// ★ v0.4.24 P1 修复:longPressFired 标志 — 长按触发 toggleCol 后,touchend 只清
+//   timer 没拦合成事件,浏览器补发一个合成 click 把按住那张牌反选。
+//   现在:长按真正触发时置 true,click 处理器(onCardClick)发现 true 则吞掉这次
+//   click 并复位;touchstart 先复位上一轮残留标志(长按后滑走/取消没产生 click 的场景)。
 const longPressTimer = ref(null)
+const longPressFired = ref(false)
 const LONG_PRESS_MS = 500
 function onCardTouchStart(e, col) {
+  longPressFired.value = false
   if (longPressTimer.value) clearTimeout(longPressTimer.value)
   longPressTimer.value = setTimeout(() => {
     longPressTimer.value = null
+    longPressFired.value = true
     toggleCol(col)
   }, LONG_PRESS_MS)
 }
@@ -456,6 +475,14 @@ function onCardTouchEnd() {
     clearTimeout(longPressTimer.value)
     longPressTimer.value = null
   }
+}
+function onCardClick(c) {
+  // 长按后的合成 click:吞掉,不复位选择状态
+  if (longPressFired.value) {
+    longPressFired.value = false
+    return
+  }
+  toggleCardId(cardKey(c))
 }
 
 // ★ P1-09 修复:动态计算手牌列重叠量,列数多时自动收紧,
@@ -480,6 +507,14 @@ const handOverlap = computed(() => {
 })
 
 // ★ P1-03 修复:移动端 host 退出与桌面端行为一致,先尝试 host 迁移再退出。
+// ★ v0.4.24 P0 修复(与桌面端对称):
+//   (a) snapshot 改用 game.getSnapshot() 完整白名单(含 handCounts / difficulty / round /
+//       levelUp / isRestartAfterA / previousLevelRank / abandonedSeats);之前手写字段
+//       列表缺 handCounts 等 → 新 host promoteToHost 校验必失败,房主一退全房解散
+//   (b) newHostSeat/newHostAddress 传入 exitGame → net.close,旧 host 立即关闭时
+//       公开 PEER_LEAVE 仍带齐迁移字段(不再依赖三阶段 ACK 先完成)
+//   (c) 顺带修复:onConfirm 里误用裸 isP2PMode.value(脚本作用域未定义,只在模板可用),
+//       移动端 host 确认退出时直接 ReferenceError,迁移与退出都不执行;改用 props.isP2PMode
 function showMenu() {
   haptics.click()
   showConfirm({
@@ -488,17 +523,10 @@ function showMenu() {
     confirmText: '退出',
     cancelText: '取消',
     onConfirm: () => {
-      if (isP2PMode.value && isNetworkHost.value && game.value) {
-        const st = game.value.getState()
-        if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
-          const snapshot = {
-            hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
-            firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
-            lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
-            trickHistory: st.trickHistory, passCount: st.passCount,
-            tribute: st.tribute, ghost: st.ghost,
-            levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
-          }
+      let migration = null
+      if (props.isP2PMode && isNetworkHost.value && game.value) {
+        const snapshot = game.value.getSnapshot()
+        if (snapshot.phase === 'playing' || snapshot.phase === 'dealing' || snapshot.phase === 'trick_end') {
           const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
           const peers = net.getPeers ? net.getPeers() : new Map()
           const candidates = [
@@ -507,10 +535,12 @@ function showMenu() {
             (selfSeat + 3) % 4,
           ]
           const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
+          const newHostAddress = peers.get(newHostSeat)?.hostAddress
           try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+          migration = { newHostSeat, newHostAddress }
         }
       }
-      exitGame()
+      exitGame(migration)
     },
   })
 }

@@ -128,7 +128,9 @@ function findMinSameType(concrete, ghosts, target, levelRank) {
         }
       }
       // 无实牌可压:用鬼牌(鬼牌变任何 rank > target.mainRank)
-      if (ghostAvail > 0) {
+      // ★ v0.4.24 修复:鬼牌最大变 17,target.mainRank=17(单张大王)时鬼牌压不过,
+      //   必须返回 null 走 pass — 否则 AI 出一张必被规则拒绝的牌,该座位永久卡死
+      if (ghostAvail > 0 && target.mainRank < 17) {
         return [ghosts[0]]
       }
       return null

@@ -41,6 +41,33 @@ import * as haptics from '@/common/haptics.js'
 
 const RANK_LABEL = { 3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',15:'2',16:'小王',17:'大王' }
 
+// ★ v0.4.24 修复:引擎 TYPE 是数字枚举,game 'play' 事件携带数字 type —
+//   统一映射为字符串牌型名,下游 playSfxForType / bombFxForType / 炸弹特效
+//   字符串比较才能生效(旧版数字直接传入,炸弹/王炸音效特效全部从不触发)。
+//   命名差异:KINGS_BOMB→'JOKER_BOMB'、THREE→'TRIPLE'、THREE_PAIR→'TRIPLE_PAIR'、
+//   PAIR_STRAIGHT→'STRAIGHT_PAIR'、THREE_STRAIGHT→'STRAIGHT_TRIPLE',其余同名。
+const TYPE_NUM_TO_NAME = {
+  [E.TYPE.SINGLE]: 'SINGLE',
+  [E.TYPE.PAIR]: 'PAIR',
+  [E.TYPE.THREE]: 'TRIPLE',
+  [E.TYPE.THREE_PAIR]: 'TRIPLE_PAIR',
+  [E.TYPE.STRAIGHT]: 'STRAIGHT',
+  [E.TYPE.PAIR_STRAIGHT]: 'STRAIGHT_PAIR',
+  [E.TYPE.THREE_STRAIGHT]: 'STRAIGHT_TRIPLE',
+  [E.TYPE.BOMB_4]: 'BOMB_4',
+  [E.TYPE.BOMB_5]: 'BOMB_5',
+  [E.TYPE.BOMB_6]: 'BOMB_6',
+  [E.TYPE.BOMB_7]: 'BOMB_7',
+  [E.TYPE.BOMB_8]: 'BOMB_8',
+  [E.TYPE.STRAIGHT_FLUSH]: 'STRAIGHT_FLUSH',
+  [E.TYPE.KINGS_BOMB]: 'JOKER_BOMB',
+}
+function playTypeName(t) {
+  if (t == null) return null
+  if (typeof t === 'string') return t
+  return TYPE_NUM_TO_NAME[t] || null
+}
+
 export function useGameLogic(opts = {}) {
   const mainActionsRef = opts.mainActionsRef || ref(null)
 
@@ -162,6 +189,31 @@ export function useGameLogic(opts = {}) {
     chatPhraseToast.value = phrase
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
     chatPhraseTimer = addTimer(() => { chatPhraseToast.value = '' }, 2000)
+    // ★ v0.4.24:P2P 模式把快捷聊天广播给其他玩家(对端 toast 显示「昵称: 文本」)
+    if (isP2PMode.value) {
+      try {
+        net.broadcast({ type: 'CHAT_QUICK', payload: { seat: selfSeat.value, text: phrase } })
+      } catch (e) { /* 离线时静默 */ }
+    }
+  }
+
+  // ★ v0.4.24:收到其他玩家的快捷聊天 → toast「昵称: 文本」
+  //   昵称优先取 players,其次网络 peers,兜底按座位关系「队友/对手」
+  function onChatQuick(payload) {
+    if (!payload || typeof payload.text !== 'string' || payload.text.length === 0) return
+    if (payload.seat === selfSeat.value) return  // 自己的消息本地已 toast
+    let name = players.value[payload.seat]?.name || ''
+    if (!name) {
+      try {
+        const peers = net.getPeers ? net.getPeers() : null
+        name = (peers && typeof peers.get === 'function' && peers.get(payload.seat)?.nickname) || ''
+      } catch (e) { /* ignore */ }
+    }
+    if (!name) {
+      const isTeammate = typeof payload.seat === 'number' && ((payload.seat - selfSeat.value + 4) % 4 === 2)
+      name = isTeammate ? '队友' : '对手'
+    }
+    showToast(`${name}: ${payload.text}`)
   }
 
   // ★ P2-01:selfSeat 有效性校验
@@ -487,14 +539,8 @@ export function useGameLogic(opts = {}) {
         stopTimer()
         urgent.value = false
         if (myTurn.value) {
-          if (myHand.value.length > 0) {
-            const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
-            // ★ BUG-003:超时自动出牌走 commitPlay 统一广播
-            commitPlay(selfSeat.value, [sorted[0]], 'timeout')
-          } else {
-            // ★ BUG-003:超时自动过牌走 commitPass 统一广播
-            commitPass(selfSeat.value, 'timeout')
-          }
+          // ★ v0.4.24 修复:超时自动行动抽到独立函数(需异步加载 AI 模块找最小可压)
+          autoPlayOnTimeout()
         }
       }
     }, 1000)
@@ -502,6 +548,40 @@ export function useGameLogic(opts = {}) {
   function stopTimer() {
     if (timer) { clearInterval(timer); timer = null }
     urgent.value = false
+  }
+
+  // ★ v0.4.24 修复:超时自动行动 — 旧版无脑 commitPlay 最小单张且不查返回值:
+  //   跟牌场景最小单张必不合法 → timer 已停、回合悬置、全房卡死。
+  //   新逻辑:有 lastPlay(非首家)先用 AI.findMinBeat 找最小可压,找不到 commitPass;
+  //   首家才出最小单张;commit 失败时重启计时器兜底,避免死锁。
+  async function autoPlayOnTimeout() {
+    let result = null
+    try {
+      if (myHand.value.length === 0) {
+        // ★ BUG-003:超时自动过牌走 commitPass 统一广播
+        result = commitPass(selfSeat.value, 'timeout')
+      } else if (lastPlay.value) {
+        // 跟牌场景:找最小能压的牌,压不起才 pass
+        const AI = await _loadAI()
+        const ghostCount = E.splitGhosts(myHand.value, levelRank.value).ghosts.length
+        const beat = AI.findMinBeat(myHand.value, lastPlay.value, ghostCount, levelRank.value)
+        result = beat && beat.length > 0
+          ? commitPlay(selfSeat.value, beat, 'timeout')
+          : commitPass(selfSeat.value, 'timeout')
+      } else {
+        // 首家:出最小单张
+        const sorted = [...myHand.value].sort((a, b) => a.rank - b.rank)
+        // ★ BUG-003:超时自动出牌走 commitPlay 统一广播
+        result = commitPlay(selfSeat.value, [sorted[0]], 'timeout')
+      }
+    } catch (e) {
+      console.warn('[timeout] auto action failed', e)
+    }
+    // commit 失败(非法牌型/状态过期)且仍轮到自己 → 重启计时器,下轮再兜底
+    if ((!result || result.ok === false) && myTurn.value && phase.value === 'playing') {
+      console.warn('[timeout] auto action rejected, restart timer')
+      startTimer()
+    }
   }
 
   // ===== 发牌动画 =====
@@ -644,7 +724,10 @@ export function useGameLogic(opts = {}) {
   function initGame(opts2 = {}) {
     const isP2P = opts2.isP2P === true
     const seed = opts2.seed
+    // ★ v0.4.24 修复:URL 切牌传入的 opts.firstSeat 只用于首局,消费一次即置空 —
+    //   否则 onNext 之后每局 initGame 都复用同一首家,整场比赛同一人先出
     const firstSeat = opts2.firstSeat != null ? opts2.firstSeat : opts.firstSeat
+    if (opts2.firstSeat == null && opts.firstSeat != null) opts.firstSeat = null
     currentDealId.value = String(seed ?? Date.now())
     // ★ P0-09:每局新比赛生成唯一 matchInstanceId;reuse 时保留已有(如 retryDeal)
     if (opts2.reuse !== true || !matchInstanceId) {
@@ -743,7 +826,10 @@ export function useGameLogic(opts = {}) {
     })
     game.value.on('play', ({ seat, cards, type }) => {
       // ★ P1-18:直接用 game 层已经识别好的 type,避免重复 recognize
-      const playType = type || (() => { try { return E.recognize(cards)?.type } catch { return null } })()
+      const rawType = type ?? (() => { try { return E.recognize(cards)?.type } catch { return null } })()
+      // ★ v0.4.24 修复:game 层 emit 的 type 是引擎数字枚举,先映射为字符串牌型名,
+      //   下游音效 / 炸弹特效 / 震屏 / speakBomb 语音播报全部基于字符串契约
+      const playType = playTypeName(rawType)
       if (cards && cards.length > 0) {
         try {
           audio.playSfxForType(playType, cards.length)
@@ -993,6 +1079,9 @@ function commitPass(seat, source = 'manual') {
           const minKey = cardKey(sorted[0])
           hintCards.value = [minKey]
           selectCardIds(hintCards.value)
+        } else if (lastPlay.value) {
+          // ★ v0.4.24 修复:跟牌场景找不到能大过的牌时给出反馈,不再静默无响应
+          showToast('没有能大过上家的牌')
         }
       }
     } else {
@@ -1233,7 +1322,11 @@ function commitPass(seat, source = 'manual') {
     const firstSeat = st.firstPlayer
     const dealId = currentDealId.value
     const fullHands = st.hands
-    for (let s = 1; s < 4; s++) {
+    // ★ v0.4.24 修复:遍历 0..3 并跳过 host 自己的座位 — 旧版硬编码 1..3 假设
+    //   host 是 seat 0,host 换座到 seat 2 后,seat 0 的真人永远收不到 DEAL
+    const hostSelfSeat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : 0 } catch { return 0 } })()
+    for (let s = 0; s < 4; s++) {
+      if (s === hostSelfSeat) continue  // host 自己本地已有完整手牌,无需发送
       const hands = [[], [], [], []]
       if (Array.isArray(fullHands[s])) hands[s] = fullHands[s].slice()
       try {
@@ -1547,6 +1640,10 @@ function commitPass(seat, source = 'manual') {
         }
       }
       refreshUiFromGameState()
+      // ★ v0.4.24 修复:快照恢复成功后清发牌超时/发牌中标志 —
+      //   否则 dealTimeout 遮罩 / 发牌 loading 在状态已恢复后仍盖屏
+      dealTimeout.value = false
+      isDealing.value = false
     } catch (e) { console.warn('applyStateSnapshot err', e) }
   }
 
@@ -1605,7 +1702,10 @@ function commitPass(seat, source = 'manual') {
     if (typeof from === 'number' && from !== hostSeat) return
     const seat = payload.seat
     if (typeof seat !== 'number') return
-    if (game.value.addAIPlayer) game.value.addAIPlayer(seat)
+    // ★ v0.4.24 修复:addAIPlayer 仅 host 端执行 — joiner 端本地 game 处于
+    //   手牌隐藏模式,往 aiPlayers 加 seat 会让本地 scheduleAI 用空数据替
+    //   AI 座位决策,污染本地状态。joiner 只更新下方 UI 的 AI 标记。
+    if (isNetworkHost.value && game.value.addAIPlayer) game.value.addAIPlayer(seat)
     const next = [...players.value]
     if (next[seat]) {
       next[seat] = { ...next[seat], isAI: true, name: (next[seat].name || '玩家') + ' (AI)' }
@@ -1722,6 +1822,8 @@ function commitPass(seat, source = 'manual') {
       onNet('message:MATCH_RESTART', onP2PMatchRestart)
       onNet('message:STATE_SNAPSHOT', onP2PStateSnapshot)
       onNet('message:AI_TAKEOVER', onP2PAITakeover)
+      // ★ v0.4.24:跨端快捷聊天(收到对端 CHAT_QUICK 广播后 toast 显示)
+      onNet('message:CHAT_QUICK', onChatQuick)
       // ★ 静态审查 BUG-C 修复:host 端心跳超时只本地 emit 'ai:takeover' + 广播
       //   AI_TAKEOVER,但游戏层之前只监听 'message:AI_TAKEOVER'(即远端消息),
       //   host 自己不监听本地 'ai:takeover' 事件 → host 端不会进入
@@ -1844,7 +1946,7 @@ function commitPass(seat, source = 'manual') {
     round, levelRank, levelLabel, nextLevelLabel, levelUp, multiplier,
     players, myHand, selected, selectedCardIds, selectedColKeys, tableCards, lastPlay,
     phase, currentPlayer, firstPlayer, turnTimeLeft, finishedOrder, game,
-    isDealing, dealProgress, hintCards, bombFx, floatingPasses, playedHistory,
+    isDealing, dealProgress, dealTimeout, hintCards, bombFx, floatingPasses, playedHistory,
     suitFilter, isShaking, lastCardCounts, showNickToast, showChatPanel,
     chatPhraseToast, hostMigrationToast, hostMigrationBadge, urgent,
     isRestartAfterA,  // ★ v0.4.9:过 A 标志

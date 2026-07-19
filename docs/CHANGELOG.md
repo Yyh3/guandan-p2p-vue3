@@ -4,6 +4,38 @@
 
 ---
 
+## v0.4.24 (2026-07-17) — 四路并行对抗性审查修复 + UI/HCI 改进(59 套件 / 2106 单测全过)
+
+> 新一轮四路并行对抗性审查的 P0/P1 修复与 UI/HCI 改进,细节见 git log。
+
+### A. P0 — 阻断级
+
+- `GameViewDesktop.vue`: 补 `import * as haptics`(菜单/退出/返回房间/返回大厅全部 ReferenceError)。
+- host 主动退出迁移: 两端 `showMenu` 手写 snapshot 缺 `handCounts` 等字段且立即 `close()` 打断三阶段握手;改为 `game.getSnapshot()` 完整快照 + `net.close({ broadcast:true, newHostSeat, newHostAddress })`(旧写法一退全房解散)。
+- `JoinView.vue`: `net.parseHostAddress` 不在默认导出且解构 `{host,port}`(实际返回 `{hostIp,hostPort}`)→ 真机加房全灭;默认导出补 `parseHostAddress`/`_getTransport`,network.js 迁移路径同源修复。
+
+### B. P1 — 对局核心
+
+- `'play'` 事件数字 type 统一映射牌型名(炸弹/王炸特效、震屏、中文语音播报、牌型音效复活);`audio.playSfxForType` / `effects.bombFxForType` 数字入参健壮化。
+- `scheduleAI` 仅 host 端运行 + AI 出牌被拒兜底 pass;AI 鬼牌不再压 rank17 大王;`dealTimeout` 导出 + 快照恢复后清超时遮罩;超时自动行动改 `findMinBeat` / 压不起 `commitPass` / 失败重启计时;`_broadcastPerSeatDeal` 遍历 0..3 跳过 host 自己(换座后 seat 0 能收到牌);URL 首局 `firstSeat` 只消费一次;`onP2PAITakeover` 仅 host `addAIPlayer`;`getSnapshot()` 按真实 hands 重算 `handCounts`。
+
+### C. P1 — 网络层 / 房间加入
+
+- `smartReconnectToPeers` 三重修复(joiner 收 SYNC 也缓存 hostAddress、重连前只拆 transport 保留 handlers、检查 joinRoom 同步返回值 + 注入 WS factory);WS transport 回写实际连接端口;`_DISCONNECT` 读 `payload.seat` 断线快路径生效;`SEAT_SWAP_REQUEST` 先广播 COMMITTED 再本地应用;`ROOM_FULL` 优先 `sendToConnection` 定向;`RELAY_TYPES` 加 `CHAT_QUICK`。
+- WS joiner GAME_START 跳转带 `host` + `joinRemoteRoom` 传房间号(返回房间不再掉房);RoomView 监听 `host:lost` + error toast + 加入 8s 超时反馈 + ROOM_FULL 提示;JoinView 扫描重入守卫 / 空态文案 / 扫码 start 后复查防相机句柄泄漏。
+
+### D. UI/HCI
+
+- 战绩 `computeSummary` 逐条按 `rec.mySeat` 统计;HistoryChart 补 `barGroupLabelX(gi)`;HudTop 假 25s 改 `--`、删死按钮、⚙ 接组件层 showMenu;桌面端 Esc 开菜单、去假金币/等级、聊天按钮常显;移动端长按选列吞合成 click、发牌进度条补 aria-live;`CHAT_QUICK` 快捷聊天跨端广播 + 对端 toast;InviteDialog 复制 clipboard fallback;GuideView 文案对齐现 UI;AIView / GuideView / HistoryView 补返回按钮;SettingsView `aria-expanded` 动态绑定;NicknameEditor 头像格子键盘可达。
+
+### E. 测试与基线
+
+- 新增 `v0424-game-fixes.test.js`(40)/ `v0424-gameview-fixes.test.js`(45)/ `v0424-room-join-fixes.test.js`(56),全部注册进 `scripts/run-all-tests.js`;`network.test.js` 3 条、`history.test.js` 2 条断言按新正确行为反转。
+- 基线: `npm test` **59 套件 / 2106 case 全绿**;`npm run build` 成功。
+- 暂缓(记录在 `tmp/v0424-progress.md`): Android Java 侧 ROOM_PROBE 应答、uuid 复用 seat 单一活连接、BC 模式伪造防线、mDNS playerCount、Windows 热点网段 192.168.137.x。
+
+---
+
 ## v0.4.22 (未发布) — Plan C 技术债清偿:Phase 1 引擎/AI/状态机 + Phase 2 网络层 + Phase 3 UI + Phase 4 测试补强(50 套件 / 2302 单测全过)
 
 > 在 v0.4.21 基线上,按第一性原理系统性修复隐藏技术债,覆盖规则引擎、AI、对局状态机、P2P 网络、UI 生命周期与测试基线。

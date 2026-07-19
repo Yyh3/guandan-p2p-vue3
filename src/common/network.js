@@ -511,6 +511,9 @@ const RELAY_TYPES = new Set([
   //   所有 host 权威 COMMITTED / REJECTED / STATE_SNAPSHOT / ROUND_END / MATCH_RESTART /
   //   SEAT_SWAP_COMMITTED 必须由 host 自身产生并广播,拒绝 joiner 伪造转发。
   'CHAT', 'NICK_UPDATE', 'READY',
+  // ★ v0.4.24:快捷聊天跨端广播(契约 { type:'CHAT_QUICK', payload:{ seat, text } }),
+  //   加白名单后 host 才会 relay;joiner 端由通用路由以 'message:CHAT_QUICK' 事件送达。
+  'CHAT_QUICK',
 ])
 
 function relayFromClient(msg) {
@@ -653,7 +656,16 @@ function _handleHostMessage(msg) {
       if (!used.has(i)) { assignedSeat = i; break }
     }
     if (assignedSeat === -1) {
-      sendMessage({ type: 'ROOM_FULL', payload: { reason: '房间已满' }, to: msg.from })
+      // ★ v0.4.24:新 joiner 未绑 seat(from=-1)时按 seat 的定向路由可能到不了,
+      //   优先走 connId 单播(与 ROOM_PROBE_ACK 相同路径),不可用再回退原路由,
+      //   否则第 5 人满房时收不到任何提示(静默丢弃)。
+      const fullMsg = { type: 'ROOM_FULL', payload: { reason: '房间已满' }, to: msg.from }
+      if (typeof transport.sendToConnection === 'function' &&
+          Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
+        transport.sendToConnection(msg.trustedConnectionId, fullMsg).catch(() => {})
+      } else {
+        sendMessage(fullMsg)
+      }
       return
     }
     peers.set(assignedSeat, msg.payload)
@@ -711,9 +723,11 @@ function _handleHostMessage(msg) {
     // 只允许对家互换,且请求者必须是 a/b 之一
     if (!((a + 2) % 4 === b || (b + 2) % 4 === a)) return
     if (requester !== a && requester !== b) return
-    _applySeatSwapLocal(a, b)
-    // 广播 COMMITTED(走 RELAY_TYPES 让 WS host 转发给其它 joiner)
+    // ★ v0.4.24:必须先广播 COMMITTED 再应用本地 swap(对齐 swapSeats() 的顺序)。
+    //   若先 _applySeatSwapLocal,host 自己在 {a,b} 中时 hostSeat 已变,
+    //   COMMITTED 的 from 是新 hostSeat,joiner 按旧 hostSeat 做权威校验会拒绝 → 座位分裂。
     sendMessage({ type: 'SEAT_SWAP_COMMITTED', payload: { a, b, ts: Date.now() } })
+    _applySeatSwapLocal(a, b)
   } else if (msg.type === 'HEARTBEAT') {
     if (peers.has(msg.from)) {
       // ★ v2.4-p4 BUG-007:被踢 joiner 在 ws 完全关闭前可能还有最后一帧心跳,
@@ -724,7 +738,9 @@ function _handleHostMessage(msg) {
   } else if (msg.type === '_DISCONNECT') {
     // v3.x P1-11 修复(N-1):host 端立即感知 joiner 断连,不再等 6-8s 心跳超时
     // joiner 端 ws.onclose 会 emit _DISCONNECT 上来
-    const seat = msg.from
+    // ★ v0.4.24:WS / AndroidWs transport emit 的座位在 payload.seat(没有 from),
+    //   旧代码只读 msg.from → 快路径从未生效,异常掉线都走满 6-8s 心跳。
+    const seat = msg.from ?? msg.payload?.seat
     if (peers.has(seat)) {
       // ★ v2.4-p4 BUG-007:被踢 joiner 的 ws.onclose 触发的 _DISCONNECT 不要再触发清理
       //   (kickPlayer 已经清过 peers / lastHeartbeat / emit 过 peer:leave)
@@ -779,6 +795,11 @@ function _handleJoinerMessage(msg) {
     peers.clear()
     for (const [seat, info] of msg.payload.peers) {
       peers.set(seat, info)
+      // ★ v0.4.24:joiner 端收到 SYNC 也逐条缓存 peer hostAddress(原来只在 host 端
+      //   JOIN 时缓存,joiner 永远没有缓存 → host 崩溃后 smartReconnectToPeers 无候选)。
+      if (info && info.hostAddress) {
+        try { cachePeerHostAddress(roomId, seat, info.hostAddress, info.canHost) } catch (_) {}
+      }
       // ★ 静态审查 BUG-D 修复:新玩家被分配到某 seat 时,如果该 seat 之前
       //   已被踢过(_kickedSeats 包含),需要清掉该标记。否则该玩家后续
       //   心跳的 from===seat 会被 host 忽略,被误判掉线,无法正常再次踢出。
@@ -960,7 +981,7 @@ function _handleJoinerMessage(msg) {
     }
     // WS / AndroidWs 模式:真 transport rebuild
     if (!transport) return
-    // 解析 newHostAddress → { host, port }
+    // 解析 newHostAddress → { hostIp, hostPort }
     let parsed
     try {
       parsed = parseHostAddress(newHostAddress)
@@ -971,7 +992,9 @@ function _handleJoinerMessage(msg) {
     // 异步 rebuild,不阻塞当前 message 处理循环
     ;(async () => {
       try {
-        await transport.rebuildAsClient(parsed.host, parsed.port)
+        // ★ v0.4.24:parseHostAddress 返回 { hostIp, hostPort },
+        //   旧代码写 parsed.host/parsed.port → rebuildAsClient(undefined, undefined) 必失败
+        await transport.rebuildAsClient(parsed.hostIp, parsed.hostPort)
         // 同步 hostSeat(joiner 端保留新 host peer 在原 seat)
         if (announceHostSeat != null && peers.has(announceHostSeat)) {
           _setHostSeat(announceHostSeat)
@@ -1213,9 +1236,13 @@ function parseHostAddress(hostAddress) {
  *
  * @param {string} hostAddress —— 'IP' / 'IP:port',端口默认 8848
  * @param {{nickname:string,avatar:string}} self
+ * @param {string} [roomNo] —— ★ v0.4.24:调用方已知的房间号(扫码/扫描结果带来)。
+ *   WS 模式 joinRoom 内部把 roomId 写死 'ws',导致对局页返回房间时
+ *   复用判断 net.getRoomId() === roomNo 永不匹配 → close 重连失败;
+ *   传入后在 joinRoom 成功时同步 setRoomId(roomNo)。
  * @returns {{ok: boolean, error?: string}}
  */
-function joinRemoteRoom(hostAddress, self) {
+function joinRemoteRoom(hostAddress, self, roomNo) {
   let parsed
   try {
     parsed = parseHostAddress(hostAddress)
@@ -1229,7 +1256,10 @@ function joinRemoteRoom(hostAddress, self) {
     _setTransportFactory(() => new WebSocketTransport())
   }
   // 复用 joinRoom 的 WS 路径 — 它内部会解析 hostIp/hostPort,创建 transport,open,发 JOIN,启心跳
-  return joinRoom(hostAddress, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+  const r = joinRoom(hostAddress, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+  // ★ v0.4.24:覆盖 joinRoom WS 路径写死的 roomId='ws',让返回房间时能匹配复用 session
+  if (r && r.ok && roomNo) setRoomId(roomNo)
+  return r
 }
 
 /**
@@ -1944,6 +1974,12 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
   if (!self) {
     return { ok: false, reason: 'no_self_info', tried: [] }
   }
+  // ★ v0.4.24:浏览器端默认 factory 是 BroadcastChannelTransport,
+  //   会把 IP 当 roomId 用 → 永远连不上。复用 joinRemoteRoom 的 WS factory 注入路径
+  //   (仅在调用方/测试未注入 factory 时注入,尊重 _setTransportFactory)。
+  if (!_transportFactory) {
+    _setTransportFactory(() => new WebSocketTransport())
+  }
   const timeoutMs = opts.timeoutMs || 2000
   const maxRetries = Math.min(opts.maxRetries || 5, candidates.length)
 
@@ -1954,6 +1990,13 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
     // ★ 解析 hostAddress 为 hostIp:hostPort → 调 joinRoom
     let parsed = null
     try { parsed = parseHostAddress(c.hostAddress) } catch (e) { continue }
+    // ★ v0.4.24:重连前拆掉旧 transport(首次是 host 掉线后的死 client,
+    //   之后是上一候选的残留),只关 transport、保留事件 handlers,不调完整 close();
+    //   否则 joinRoom 同步返回 'network session already active' 直接失败。
+    if (transport) {
+      try { transport.close() } catch (e) {}
+      transport = null
+    }
     try {
       // joinRoom 是同步的(open 是异步 fire-and-forget),连接成功由 transport 内部 emit 'connect'
       //   失败由 transport 内部 emit 'error' 或 '_DISCONNECT'
@@ -1994,7 +2037,16 @@ async function smartReconnectToPeers(roomNo, opts = {}) {
           on('connect', onConnect)
           on('error', onError)
           // 同步调 joinRoom(open 是异步,transport 内部 emit 'connect'/'error')
-          joinRoom(roomNo, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+          const joinRes = joinRoom(roomNo, self, { hostIp: parsed.hostIp, hostPort: parsed.hostPort })
+          // ★ v0.4.24:joinRoom 同步失败(如 session 冲突)立即视该候选失败,
+          //   进入下一个候选,不傻等 timeoutMs。
+          if (!joinRes || joinRes.ok !== true) {
+            if (!resolved) { resolved = true; cleanup(); resolve(false) }
+          } else {
+            // joinRoom WS 路径会把 roomId 写死 'ws',恢复为真实房间号,
+            // 保证后续 cachePeerHostAddress / 返回房间复用判断一致
+            setRoomId(roomNo)
+          }
         } catch (e) {
           if (!resolved) { resolved = true; cleanup(); resolve(false) }
         }
@@ -2364,6 +2416,8 @@ const net = {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, getHostEpoch, setHostEpoch, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
+  // ★ v0.4.24:JoinView/RoomView 等 UI 通过默认导出使用,缺了会 TypeError
+  parseHostAddress, _getTransport,
   // ★ v2.4-p4 BUG-006/007
   swapSeats, kickPlayer,
   scanLanRooms,

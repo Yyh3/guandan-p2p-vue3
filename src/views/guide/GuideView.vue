@@ -1,6 +1,8 @@
 <template>
   <div class="page">
     <div class="bg app-half-table-bg"></div>
+    <!-- ★ v0.4.24:补返回入口(原来是纯死端页面) -->
+    <button class="back-btn-top" aria-label="返回" @click="router.back()">← 返回</button>
     <h1 class="title">新手引导</h1>
     <p class="subtitle">3 步搞定,4 人高铁/隧道也能开局</p>
 
@@ -25,6 +27,8 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
+const router = useRouter()
 const steps = [
   { title: '其中一人开手机热点', lines: [
     '· 选一个手机当"房主",打开系统设置',
@@ -38,10 +42,13 @@ const steps = [
     '· 输密码 → 等出现"已连接"',
     '· 这一步也要关闭自己的移动数据',
   ]},
+  // ★ v0.4.24 修复:步骤文案与现 UI 对齐(旧版按钮名已不存在,
+  //   真机也没有"输入房间号"入口,会把新用户带进死路)
   { title: '打开 APP,4 人开局', lines: [
-    '· 房主:打开 APP → "开热点建房" → 看到房间号',
-    '· 其他人:打开 APP → "连热点加入" → 输入房间号',
-    '· 4 人齐 → 房主点"开局" → 进对局',
+    '· 房主:首页点"开始游戏" → 创建房间,展示二维码 / 本机 IP',
+    '· 其他人:首页点"加入房间" → 扫码,或手动输入房主 IP:端口',
+    '· (浏览器试玩:输入房主显示的 6 位房间号加入)',
+    '· 4 人齐 → 3 位加入者点"准备" → 房主切牌后自动开局',
   ]},
 ]
 const rules = [
@@ -59,6 +66,13 @@ const rules = [
 
 <style scoped>
 .page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
+/* ★ v0.4.24:左上角返回按钮 */
+.back-btn-top {
+  position: absolute; top: 18px; left: 18px; z-index: 2;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+.back-btn-top:hover { background: rgba(255,255,255,0.18); }
 .bg { z-index: 0; }
 .title, .subtitle, .step-card, .rules-card { position: relative; z-index: 1; }
 .title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }

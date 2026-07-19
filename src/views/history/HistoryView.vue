@@ -1,6 +1,8 @@
 <template>
   <div class="page">
     <div class="bg app-half-table-bg"></div>
+    <!-- ★ v0.4.24:补返回入口(与 JoinView/SettingsView 一致) -->
+    <button class="back-btn-top" aria-label="返回" @click="router.back()">← 返回</button>
     <h1 class="title">本地战绩</h1>
     <p class="subtitle">只存本机,不上传任何服务器</p>
 
@@ -109,9 +111,9 @@ import { computeSummary, isMyTeamWin } from '@/common/history.js'
 const history = ref([])
 
 // ★ v0.4.9:用 computeSummary 一次拿全部统计
-// ★ Phase 3-B:战绩按本局记录的 mySeat 计算,缺省时回退到 0
-const mySeatForSummary = computed(() => history.value[0]?.mySeat ?? 0)
-const summary = computed(() => computeSummary(history.value, mySeatForSummary.value))
+// ★ v0.4.24:computeSummary 逐条按 rec.mySeat 计算(联机每局座位可能不同),
+//   不再用 history[0].mySeat 一个座位套所有记录;缺 mySeat 的旧记录回退到 0
+const summary = computed(() => computeSummary(history.value, 0))
 const streakClass = computed(() => {
   const s = summary.value.streak
   if (s > 0) return 'streak-win'
@@ -147,6 +149,13 @@ function onClear() {
 
 <style scoped>
 .page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
+/* ★ v0.4.24:左上角返回按钮 */
+.back-btn-top {
+  position: absolute; top: 18px; left: 18px; z-index: 2;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+.back-btn-top:hover { background: rgba(255,255,255,0.18); }
 .bg { z-index: 0; }
 .title, .subtitle, .stat-card, .empty, .history-list, .action { position: relative; z-index: 1; }
 /* v3.7 P2:让图表卡片也浮在 bg 之上 */

@@ -14,7 +14,7 @@
 
     <!-- 声音 -->
     <section class="settings-section">
-      <button class="section-title section-title-btn" @click="toggleSection('sound')" aria-expanded="!collapsedSections.sound">
+      <button class="section-title section-title-btn" @click="toggleSection('sound')" :aria-expanded="!collapsedSections.sound">
         <span>声音</span>
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.sound }" :size="16" aria-hidden="true" />
       </button>
@@ -116,7 +116,7 @@
 
     <!-- 视觉 -->
     <section class="settings-section">
-      <button class="section-title section-title-btn" @click="toggleSection('visual')" aria-expanded="!collapsedSections.visual">
+      <button class="section-title section-title-btn" @click="toggleSection('visual')" :aria-expanded="!collapsedSections.visual">
         <span>外观</span>
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.visual }" :size="16" aria-hidden="true" />
       </button>
@@ -129,7 +129,7 @@
 
     <!-- AI 难度 -->
     <section class="settings-section">
-      <button class="section-title section-title-btn" @click="toggleSection('game')" aria-expanded="!collapsedSections.game">
+      <button class="section-title section-title-btn" @click="toggleSection('game')" :aria-expanded="!collapsedSections.game">
         <span>游戏</span>
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.game }" :size="16" aria-hidden="true" />
       </button>
@@ -157,7 +157,7 @@
 
     <!-- 数据 -->
     <section class="settings-section">
-      <button class="section-title section-title-btn" @click="toggleSection('data')" aria-expanded="!collapsedSections.data">
+      <button class="section-title section-title-btn" @click="toggleSection('data')" :aria-expanded="!collapsedSections.data">
         <span>数据</span>
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.data }" :size="16" aria-hidden="true" />
       </button>
@@ -179,7 +179,7 @@
 
     <!-- 关于 -->
     <section class="settings-section">
-      <button class="section-title section-title-btn" @click="toggleSection('about')" aria-expanded="!collapsedSections.about">
+      <button class="section-title section-title-btn" @click="toggleSection('about')" :aria-expanded="!collapsedSections.about">
         <span>关于</span>
         <IconChevronDown class="section-toggle" :class="{ collapsed: collapsedSections.about }" :size="16" aria-hidden="true" />
       </button>

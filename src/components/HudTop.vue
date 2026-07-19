@@ -5,7 +5,7 @@
    *   - 顶部居中:    队友座位(距离顶 60px)
    *   - 顶部中央偏下: 倒计时/状态提示
    *   - 顶部左:      ≡ 菜单 + 本局打 + 倍数卡片
-   *   - 顶部右:      4 个图标按钮(2x2 网格 🏆/📊/⋯/⚙)+ 信息紧凑条
+   *   - 顶部右:      ⚙ 设置按钮(v0.4.24 起只保留 1 个)+ 信息紧凑条
    *   - 左侧居中:    对手座位(距离左 40px)
    *   - 右侧居中:    对手座位(距离右 40px)
    *   - 底部右(自):  自己座位(避开中央操作栏 / 一键理牌 / 手牌)
@@ -100,41 +100,16 @@
       </div>
     </div>
 
-    <!-- ===== 顶部右侧:v3.6 — 2x2 网格图标 + 信息紧凑条 ===== -->
+    <!-- ===== 顶部右侧:v3.6 — 图标 + 信息紧凑条 ===== -->
+    <!-- ★ v0.4.24 P1 修复:删掉「对局/牌型/更多」三个无功能死按钮(useGameLogic.onIcon
+         只处理 settings 且 composable 内 showMenu 是空 stub,点了毫无效果),
+         只保留 ⚙ 设置;点击 emit 'menu',由 GameViewDesktop 调组件层 showMenu(带确认框) -->
     <div class="hud-topright">
       <div class="icon-grid">
         <button
           class="icon-btn"
-          :class="{ active: iconActive === 'fight' }"
-          @click="$emit('icon', 'fight')"
-          aria-label="对局"
-        >
-          <span class="emoji" aria-hidden="true">🏆</span>
-          <span v-if="fightBadge > 0" class="badge">{{ fightBadge }}</span>
-          <span class="tip">对局</span>
-        </button>
-        <button
-          class="icon-btn"
-          :class="{ active: iconActive === 'pattern' }"
-          @click="$emit('icon', 'pattern')"
-          aria-label="牌型"
-        >
-          <span class="emoji" aria-hidden="true">📊</span>
-          <span class="tip">牌型</span>
-        </button>
-        <button
-          class="icon-btn"
-          :class="{ active: iconActive === 'more' }"
-          @click="$emit('icon', 'more')"
-          aria-label="更多"
-        >
-          <span class="emoji" aria-hidden="true">⋯</span>
-          <span class="tip">更多</span>
-        </button>
-        <button
-          class="icon-btn"
           :class="{ active: iconActive === 'settings' }"
-          @click="$emit('icon', 'settings')"
+          @click="$emit('menu')"
           aria-label="设置"
         >
           <span class="emoji" aria-hidden="true">⚙</span>
@@ -207,9 +182,10 @@ const props = defineProps({
 defineEmits(['menu', 'seatClick', 'icon', 'editNickname', 'editRequest'])
 
 // v3.6 信息条上的倒计时(没在用 CountdownClock 时用这个回退)
+// ★ v0.4.24 P1 修复:非我回合/无计时时显示 '--'(之前硬编码 '25s',右上永远显示假数字)
 const clockText = computed(() => {
   if (props.showClock) return `${props.turnSeconds}s`
-  return '25s'
+  return '--'
 })
 
 // v3.x:房间号(A3K7 格式)从 net 单例直接读
@@ -353,7 +329,7 @@ const roomCode = computed(() => {
 }
 
 /* ============================================================
- * v3.6 顶部右侧:2x2 网格图标按钮 + hover tooltip + active 状态
+ * v3.6 顶部右侧:⚙ 设置按钮(v0.4.24 起只保留 1 个)+ hover tooltip + active 状态
  * ============================================================ */
 .hud-topright {
   position: absolute;
@@ -366,8 +342,8 @@ const roomCode = computed(() => {
 }
 .icon-grid {
   display: grid;
-  grid-template-columns: 36px 36px;
-  grid-template-rows: 36px 36px;
+  grid-template-columns: 36px;
+  grid-template-rows: 36px;
   gap: 6px;
 }
 .icon-btn {

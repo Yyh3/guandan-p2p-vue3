@@ -43,9 +43,10 @@ console.log('\n=== 1. isMyTeamWin 判定 ===')
   // 我在 seat 0,头游 seat 1 → 败(1%2=1)
   assert('★ seat 0 对家头游(seat 1)= 败', !isMyTeamWin(mkRec([1, 0, 2, 3]), 0))
   // 我在 seat 1,头游 seat 0 → 败
-  assert('★ seat 1 对家头游(seat 0)= 败', !isMyTeamWin(mkRec([0, 1, 2, 3]), 1))
+  // ★ v0.4.24:rec.mySeat 优先于参数座位,用例显式传 mySeat=1
+  assert('★ seat 1 对家头游(seat 0)= 败', !isMyTeamWin(mkRec([0, 1, 2, 3], 1, 1), 1))
   // 我在 seat 1,头游 seat 1 → 胜
-  assert('★ seat 1 自己头游 = 胜', isMyTeamWin(mkRec([1, 0, 2, 3]), 1))
+  assert('★ seat 1 自己头游 = 胜', isMyTeamWin(mkRec([1, 0, 2, 3], 1, 1), 1))
   // 无效 rec
   assert('空 rec 返回 false', !isMyTeamWin(null))
   assert('无 ranks 数组 返回 false', !isMyTeamWin({ time: 1 }))

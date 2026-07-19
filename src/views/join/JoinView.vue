@@ -33,10 +33,17 @@
       </div>
       <p v-if="scanError" class="form-error">{{ scanError }}</p>
       <ul v-if="discovered.length" class="discovered-list">
-        <li v-for="room in discovered" :key="room.key" @click="selectRoom(room)">
-          {{ room.name }}
+        <li v-for="room in discovered" :key="room.key">
+          <!-- ★ v0.4.24:li@click 不可键盘聚焦,改 button -->
+          <button type="button" class="discovered-item" @click="selectRoom(room)">
+            {{ room.name }}
+          </button>
         </li>
       </ul>
+      <!-- ★ v0.4.24:扫描完成但无结果的空态反馈 -->
+      <p v-else-if="scanDone && !scanning && !scanError" class="card-hint scan-empty">
+        未发现局域网房间,请确认房主已开房,或手动输入地址
+      </p>
       <div class="qr-row" v-if="route.query.scanHost">
         <p class="card-hint">扫到的房主地址:{{ route.query.scanHost }}</p>
         <button class="action-btn-small" @click="useScan">使用该地址</button>
@@ -59,10 +66,17 @@
       </div>
       <p v-if="scanError" class="form-error">{{ scanError }}</p>
       <ul v-if="discovered.length" class="discovered-list">
-        <li v-for="room in discovered" :key="room.key" @click="selectRoom(room)">
-          {{ room.name }}
+        <li v-for="room in discovered" :key="room.key">
+          <!-- ★ v0.4.24:li@click 不可键盘聚焦,改 button -->
+          <button type="button" class="discovered-item" @click="selectRoom(room)">
+            {{ room.name }}
+          </button>
         </li>
       </ul>
+      <!-- ★ v0.4.24:扫描完成但无结果的空态反馈 -->
+      <p v-else-if="scanDone && !scanning && !scanError" class="card-hint scan-empty">
+        未发现局域网房间,请确认房主已开房,或手动输入地址
+      </p>
     </div>
 
     <!-- 本机模拟说明仅在开发环境显示,避免干扰普通用户 -->
@@ -118,6 +132,8 @@ let scannerInstance = null  // html5-qrcode Html5Qrcode 实例(避免热重载 l
 const scanning = ref(false)
 const scanError = ref('')
 const discovered = ref([])
+// ★ v0.4.24:一轮扫描结束后置 true,用于「未发现房间」空态提示
+const scanDone = ref(false)
 
 onMounted(() => {
   isNative.value = isNativeCapacitor()
@@ -144,20 +160,23 @@ const addressError = computed(() => {
   const text = hostAddress.value.trim()
   if (!text) return ''
   try {
-    const { host, port } = net.parseHostAddress(text)
-    const octets = host.split('.').map(Number)
+    // ★ v0.4.24 修复:parseHostAddress 返回 { hostIp, hostPort }(不是 host/port),
+    //   旧解构拿到两个 undefined,host.split 直接抛 TypeError,真机加房全灭。
+    const { hostIp, hostPort } = net.parseHostAddress(text)
+    const octets = hostIp.split('.').map(Number)
     if (
       octets.length !== 4 ||
       octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)
     ) {
       return 'IP 地址格式不正确'
     }
-    if (port < 1 || port > 65535) {
+    if (hostPort < 1 || hostPort > 65535) {
       return '端口应在 1～65535 之间'
     }
     return ''
-  } catch (e) {
-    return e?.message || '地址格式不正确'
+  } catch {
+    // ★ v0.4.24 修复:不把 TypeError 等英文原始消息弹给用户
+    return '地址格式不正确,示例 192.168.43.1:8848'
   }
 })
 const selectedWsHost = ref('') // ★ P1-11 修复:浏览器扫描到 WS host 后记录 IP:port,加入时携带 host 参数
@@ -188,8 +207,11 @@ function onJoin() {
 }
 
 async function scanRooms() {
+  // ★ v0.4.24 修复:重入守卫 — 扫描中重复点击会并发多轮扫描
+  if (scanning.value) return
   scanning.value = true
   scanError.value = ''
+  scanDone.value = false
   try {
     discovered.value = await net.scanLanRooms()
   } catch (e) {
@@ -197,6 +219,7 @@ async function scanRooms() {
     scanError.value = `扫描失败: ${e?.message || e}`
   } finally {
     scanning.value = false
+    scanDone.value = true
   }
 }
 
@@ -220,8 +243,9 @@ async function openScanner() {
   try {
     const { Html5Qrcode } = await import('html5-qrcode')
     if (!showScanner.value) return  // 用户可能已经关掉
-    scannerInstance = new Html5Qrcode('qr-reader')
-    await scannerInstance.start(
+    const inst = new Html5Qrcode('qr-reader')
+    scannerInstance = inst
+    await inst.start(
       { facingMode: 'environment' },  // 后置摄像头
       {
         fps: 10,
@@ -242,6 +266,12 @@ async function openScanner() {
         // 持续扫描的"无码"回调 — 静默忽略
       }
     )
+    // ★ v0.4.24 修复:start() 挂起期间用户点了关闭 — closeScanner 已对未运行的实例
+    //   stop() 失败并把句柄置空,相机实际已开。resolve 后复查,立即释放。
+    if (!showScanner.value) {
+      try { await inst.stop(); await inst.clear() } catch { /* 忽略已停止 */ }
+      if (scannerInstance === inst) scannerInstance = null
+    }
   } catch (e) {
     console.warn('[JoinView] 扫码启动失败:', e)
     scannerError.value = `扫码启动失败: ${e?.message || e}。请检查相机权限后重试。`
@@ -342,12 +372,17 @@ async function closeScanner() {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
-  padding: 10px 12px;
   font-size: 13px;
   color: #fff;
-  cursor: pointer;
 }
 .discovered-list li:hover { background: rgba(255, 210, 78, 0.18); }
+/* ★ v0.4.24:li 内 button 占满整行,保持原 li 可点外观并支持键盘聚焦 */
+.discovered-item {
+  display: block; width: 100%; padding: 10px 12px;
+  background: transparent; border: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.scan-empty { margin-top: 10px; opacity: 0.85; }
 
 /* ★ v0.4.9:扫码 Modal 样式 */
 .scanner-modal {

@@ -8,7 +8,7 @@
     <HudTop
       :level-label="levelLabel"
       :multiplier="multiplier"
-      :seats="seatData"
+      :seats="seatDataDisplay"
       :show-clock="myTurn && !isDealing"
       :turn-seconds="turnTimeLeft"
       :is-my-turn="myTurn"
@@ -116,6 +116,15 @@
       @autoFind="onAutoFindBest"
       @chat="onChat"
     />
+    <!-- ★ v0.4.24 P2 修复:非己方回合/发牌时也保留聊天入口(对齐移动端常显);
+         与 QuickActions 互斥(QuickActions 内含 💬),避免两个聊天按钮同屏 -->
+    <button
+      v-if="!myTurn || isDealing"
+      class="chat-fab"
+      title="聊天"
+      aria-label="聊天"
+      @click="onChat"
+    ><span aria-hidden="true">💬</span></button>
 
     <!-- 发牌超时兜底 (desktop 版) -->
     <div v-if="dealTimeout" class="deal-timeout-mask" @click.self>
@@ -249,10 +258,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import storage from '@/common/storage.js'
 import { showConfirm } from '@/common/dialog-bus.js'
+// ★ v0.4.24 P0 修复:补 haptics 导入(exitGame/onBackToRoom/showMenu 里调用
+//   haptics.click() 但之前没 import → ReferenceError,菜单/返回按钮全部点不动)
+import * as haptics from '@/common/haptics.js'
 
 import HudTop from '@/components/HudTop.vue'
 import TableCenter from '@/components/TableCenter.vue'
@@ -301,6 +313,11 @@ const updateLandscape = () => {
   if (!mqLandscape) return
   isLandscape.value = mqLandscape.matches
 }
+// ★ v0.4.24 P1 修复:Esc 打开退出菜单(useGameLogic 里的 Escape 绑定是空 stub,
+//   组件层自己监听;命名函数定义在 onMounted 外,卸载时精确移除)
+const onEsc = (e) => {
+  if (e.key === 'Escape') showMenu()
+}
 onMounted(() => {
   if (typeof window !== 'undefined' && window.matchMedia) {
     mqLandscape = window.matchMedia('(orientation: landscape) and (max-height: 500px)')
@@ -313,6 +330,8 @@ onMounted(() => {
   }
   // Phase3 UI 修复:注册 host:lost 监听(命名函数定义在 onMounted 外,确保卸载可清理)
   net.on('host:lost', onHostLost)
+  // v0.4.24:Esc 快捷键
+  window.addEventListener('keydown', onEsc)
 })
 
 // ★ v0.4.17 对抗性审查 (V0416-04):joiner 端监听 host:lost — host 崩溃/断电
@@ -353,6 +372,8 @@ const onHostLost = async () => {
   router.push('/?force_disconnected=1&reason=' + encodeURIComponent('房主已断开连接,请重新开房'))
 }
 onUnmounted(() => {
+  // v0.4.24:Esc 快捷键清理
+  window.removeEventListener('keydown', onEsc)
   if (mqLandscape) {
     if (mqLandscape.removeEventListener) {
       mqLandscape.removeEventListener('change', updateLandscape)
@@ -399,12 +420,35 @@ const {
   firstSeat: props.firstSeat,
 })
 
+// ★ v0.4.24 P1 修复:桌面端座位不渲染假金币/等级(2026-06-28 已确认删除用户金币数)。
+//   players 默认值 coins:8888/level:7 经 seatData 透传到 PlayerSeat 显示 💰8888/LVx;
+//   对齐移动端做法(coins/level 传 null → PlayerSeat v-if="coins != null" 不渲染),
+//   包一层 computed 置 null,不动 useGameLogic 的 seatData。
+const seatDataDisplay = computed(() => {
+  const src = seatData.value || {}
+  const out = {}
+  for (const key of ['top', 'left', 'right', 'bottom']) {
+    if (src[key]) out[key] = { ...src[key], coins: null, level: null }
+  }
+  return out
+})
+
 // 路由相关的 UI 跳转(只能组件层做)
-function exitGame() {
+// ★ v0.4.24 P0 修复:exitGame 支持迁移参数 — host 退出时把 newHostSeat/newHostAddress
+//   传给 net.close,保证旧 host 立即关闭时公开 PEER_LEAVE 仍带齐迁移字段
+function exitGame(migration) {
   haptics.click()
   try {
-    if (isNetworkHost.value) net.close({ broadcast: true, reason: 'user_leave' })
-    else net.leaveRoom({ reason: 'user_leave' })
+    if (isNetworkHost.value) {
+      net.close({
+        broadcast: true,
+        reason: 'user_leave',
+        newHostSeat: migration?.newHostSeat,
+        newHostAddress: migration?.newHostAddress,
+      })
+    } else {
+      net.leaveRoom({ reason: 'user_leave' })
+    }
   } catch (e) {}
   router.replace('/')
 }
@@ -437,17 +481,17 @@ function showMenu() {
       //   现在 host 主动调 requestHostMigration 把当前 game state 传给新 host,
       //   joiner 端实时收到 host:migrated 事件,牌局无缝继续。
       //   仅当:isP2P 模式 + 本机是网络 host + 对局进行中
+      // ★ v0.4.24 P0 修复:
+      //   (a) snapshot 改用 game.getSnapshot() 完整白名单(含 handCounts / difficulty /
+      //       round / levelUp / isRestartAfterA / previousLevelRank / abandonedSeats);
+      //       之前手写字段列表缺 handCounts 等 → 新 host promoteToHost 校验必失败,
+      //       房主一退全房解散
+      //   (b) newHostSeat/newHostAddress 传入 exitGame → net.close,旧 host 立即
+      //       关闭时公开 PEER_LEAVE 仍带齐迁移字段(不再依赖三阶段 ACK 先完成)
+      let migration = null
       if (isP2PMode.value && isNetworkHost.value && game.value) {
-        const st = game.value.getState()
-        if (st.phase === 'playing' || st.phase === 'dealing' || st.phase === 'trick_end') {
-          const snapshot = {
-            hands: st.hands, tableCards: st.tableCards, currentPlayer: st.currentPlayer,
-            firstPlayer: st.firstPlayer, leaderPlayer: st.leaderPlayer,
-            lastPlay: st.lastPlay, finishedOrder: st.finishedOrder,
-            trickHistory: st.trickHistory, passCount: st.passCount,
-            tribute: st.tribute, ghost: st.ghost,
-            levelRank: st.levelRank, teamLevels: st.teamLevels, phase: st.phase,
-          }
+        const snapshot = game.value.getSnapshot()
+        if (snapshot.phase === 'playing' || snapshot.phase === 'dealing' || snapshot.phase === 'trick_end') {
           // Phase 1:座位稳定选新 host — 优先队友,其次其它在线 peer
           const selfSeat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
           const peers = net.getPeers ? net.getPeers() : new Map()
@@ -457,10 +501,12 @@ function showMenu() {
             (selfSeat + 3) % 4,
           ]
           const newHostSeat = candidates.find(s => s !== selfSeat && peers.has(s)) ?? 2
+          const newHostAddress = peers.get(newHostSeat)?.hostAddress
           try { net.requestHostMigration && net.requestHostMigration(newHostSeat, snapshot) } catch (e) { /* swallow */ }
+          migration = { newHostSeat, newHostAddress }
         }
       }
-      exitGame()
+      exitGame(migration)
     },
   })
 }
@@ -1019,6 +1065,38 @@ function onNickEditorConfirmed(p) {
 .suit-tab.active { background: rgba(255,255,255,0.25); }
 .suit-tab.suit-1.active, .suit-tab.suit-3.active { color: #ff5252; }
 .suit-tab.suit-0.active, .suit-tab.suit-2.active { color: #fff; }
+
+/* ============================================================
+ * v0.4.24:非己方回合聊天入口(chat-fab)— 位置对齐 QuickActions 最底部 💬
+ * (QuickActions 容器 right:12 / bottom:196,💬 是栈内最低的一颗)
+ * ============================================================ */
+.chat-fab {
+  position: fixed;
+  right: 12px;
+  bottom: 196px;
+  width: 44px;
+  height: 44px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  z-index: 6;
+  transition: all var(--t-fast, 120ms) var(--ease-out, ease);
+}
+.chat-fab:hover {
+  background: rgba(0, 0, 0, 0.7);
+  transform: scale(1.05);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.chat-fab:active { transform: scale(0.92); }
 
 /* 底部主操作栏容器
  * v4.x patch:把操作栏从手牌区上方移回最底部,手牌区加大底部 padding,

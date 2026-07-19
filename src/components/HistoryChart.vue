@@ -60,7 +60,7 @@
             </g>
             <!-- X 轴:局号(1=最新,N=最旧) -->
             <text
-              :x="barGeom.groupCenter + barGeom.groupW / 2 - barGeom.barW * 2"
+              :x="barGroupLabelX(gi)"
               :y="barView.h - 4"
               text-anchor="middle"
               class="axis-text"
@@ -168,7 +168,7 @@ const barGeom = computed(() => {
   const groupW = usableW / n
   const barW = Math.max(Math.min(groupW / 5, 10), 2)
   const barH = (barView.h - barView.padT - barView.padB) / 4
-  return { groupW, groupCenter: 0, barW, barH }
+  return { groupW, barW, barH }
 })
 
 function barY(posIdx) {
@@ -181,6 +181,11 @@ function barX(gi, pos) {
   const groupStart = barView.padL + gi * barGeom.value.groupW + 2
   const barW = barGeom.value.barW
   return groupStart + (pos - 1) * barW
+}
+// ★ v0.4.24 修复:模板 X 轴局号标签引用了从未定义的 barGroupLabelX(渲染抛错),
+//   补上实现 — 标签落在每组中心,按 gi 递增。
+function barGroupLabelX(gi) {
+  return barView.padL + gi * barGeom.value.groupW + barGeom.value.groupW / 2
 }
 function formatGameLabel(gi) {
   return `第 ${recentGames.value.length - gi} 局`
