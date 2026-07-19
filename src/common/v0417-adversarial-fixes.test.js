@@ -41,7 +41,7 @@ function check(name, cond) {
 console.log('\n=== 1. V0416-01: 修复版本可访问性 ===')
 {
   // 当前 package.json version 应该是 v0.4.22
-  check('package.json version === 0.4.22', pkg.version === '0.4.22')
+  check('package.json version === 0.4.25', pkg.version === '0.4.25')
 
   // 当前 HEAD 应该能跑测试 — 即 working tree 的修复版本
   check('network.js 含 host:lost emit 修复', /emit\(['"]host:lost['"]/.test(networkSrc))
@@ -175,9 +175,11 @@ console.log('\n=== 6. V0416-06: README 测试数字一致 ===')
   const baseline1887 = /基线是\s*1887|当前基线.*1887|1887\s*\/\s*0\s*(单测|用例|test)/.test(readmeSrc)
   check('README 没有把 1887 当作当前测试基线', !baseline1887)
 
-  // 6.3 README "测试覆盖" 段落应该提到当前 v0416-adversarial-fixes 31 case
-  check('README 测试覆盖提到 v0416-adversarial-fixes 31 case',
-    /v0416-adversarial-fixes\s+31\s+case/.test(readmeSrc))
+  // 6.3 README "测试覆盖" 段落应该是最新基线(v0.4.25:61 套件 / 2724 用例)
+  //   旧版曾断言逐套件明细(v0416-adversarial-fixes 31 case),
+  //   v0.4.25 README 简化为统一基线行,改为校验当前基线数字存在
+  check('README 测试覆盖是当前基线(61 套件 / 2724 用例)',
+    /测试覆盖.{0,80}61 套件/.test(readmeSrc) && readmeSrc.includes('2724'))
 
   // 6.4 README 不能同时有 v0.4.15 当前 + v0.4.16 当前 — 只能一个"当前"
   //    (v0.4.15 段标 ✅完成,v0.4.16 段标 ✅当前)

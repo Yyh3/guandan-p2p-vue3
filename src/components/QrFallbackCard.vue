@@ -43,6 +43,11 @@
       <div v-if="joinUrl" class="qr-fallback-join-url">
         或用电脑浏览器打开 <a :href="joinUrl" target="_blank" rel="noopener">{{ joinUrl }}</a> 也可加入
       </div>
+
+      <!-- ★ v0.4.25:App 直达深链(guandan://)— 已装 APK 的用户点链接直接拉起 App 进房 -->
+      <div v-if="deepLink" class="qr-fallback-join-url">
+        已安装 App?<a :href="deepLink">点此直接拉起 App 加入</a>
+      </div>
     </div>
   </div>
 </template>
@@ -52,6 +57,7 @@ import { computed } from 'vue'
 import {
   formatHostAddress,
   buildRoomJoinUrl,
+  buildAppDeepLink,
   shouldShowFallback,
   describeFallbackMode,
   clipboardPayload,
@@ -68,6 +74,8 @@ const emit = defineEmits(['copied'])
 
 const mode = computed(() => describeFallbackMode(props.qrcodeUrl))
 const joinUrl = computed(() => buildRoomJoinUrl(props.hostIp, props.hostPort, props.roomNo))
+// ★ v0.4.25:guandan:// App 深链(已装 APK 用户点击直接拉起)
+const deepLink = computed(() => buildAppDeepLink(props.hostIp, props.hostPort, props.roomNo))
 
 function onCopy() {
   const text = clipboardPayload(props.hostIp, props.hostPort)

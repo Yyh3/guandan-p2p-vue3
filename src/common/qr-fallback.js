@@ -41,6 +41,19 @@ export function buildRoomJoinUrl(hostIp, hostPort, roomNo) {
   return `http://${hostAddr}/#/room?${params.toString()}`
 }
 
+// ★ v0.4.25:构建 App 深链(guandan:// scheme)
+//   已安装 APK 的设备点击/扫码后由系统拉起 App,appUrlOpen 解析后直达房间。
+//   与 buildRoomJoinUrl(http) 互补:http 给浏览器,guandan:// 给已装 App 的用户。
+//   返回形如 guandan://room?host=IP:port&roomNo=ROOM
+export function buildAppDeepLink(hostIp, hostPort, roomNo) {
+  if (hostIp == null || hostIp === '') return null
+  const port = hostPort == null || hostPort === '' ? 8848 : hostPort
+  const params = new URLSearchParams({ host: `${hostIp}:${port}` })
+  const room = roomNo == null || roomNo === '' ? '' : String(roomNo)
+  if (room) params.set('roomNo', room)
+  return `guandan://room?${params.toString()}`
+}
+
 // 判断是否应该展示 QR fallback 卡片
 //   永远 true(IP 存在时) — 卡片是兜底,不是 qr 失败后才出现
 //   null IP 时不渲染(等 initNetwork 拿到 hostIp)
@@ -104,6 +117,21 @@ function _isValidPort(p) {
 export function parseQrScanResult(text) {
   if (typeof text !== 'string' || text.trim() === '') return null
   const trimmed = text.trim()
+  // 0) ★ v0.4.25:guandan:// App 深链(与 http room URL 同参数结构)
+  //   形如 guandan://room?host=IP:port&roomNo=123456(也兼容 guandan://join?...)
+  if (/^guandan:\/\/(room|join)\b/.test(trimmed)) {
+    const qi = trimmed.indexOf('?')
+    const params = new URLSearchParams(qi >= 0 ? trimmed.slice(qi + 1) : '')
+    const hostAddr = params.get('host') || ''
+    const m = hostAddr.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?$/)
+    if (!m) return null
+    const octets = m[1].split('.').map(Number)
+    if (!_isValidIpv4Octets(octets)) return null
+    const port = m[2] ? Number(m[2]) : 8848
+    if (!_isValidPort(port)) return null
+    const roomNo = params.get('roomNo') || null
+    return { host: m[1], port, roomNo }
+  }
   // 1) 纯 IP:port
   const ipPortMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?$/)
   if (ipPortMatch) {

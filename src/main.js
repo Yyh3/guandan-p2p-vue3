@@ -35,6 +35,25 @@ const router = createRouter({
   routes,
 })
 
+// ★ v0.4.25:guandan:// 深链 — App 被系统/浏览器/扫码拉起时解析并直达房间
+//   覆盖冷启动(getLaunchUrl)与热启动(appUrlOpen 事件);纯浏览器环境为 no-op
+import { App as CapApp } from '@capacitor/app'
+import { parseQrScanResult } from '@/common/qr-fallback.js'
+
+function _routeDeepLink(url) {
+  if (!url || !String(url).startsWith('guandan://')) return
+  const parsed = parseQrScanResult(url)
+  if (!parsed) return
+  const roomQ = parsed.roomNo ? `&roomNo=${parsed.roomNo}` : ''
+  router.push(`/room?role=joiner${roomQ}&host=${encodeURIComponent(`${parsed.host}:${parsed.port}`)}`)
+}
+try {
+  CapApp.addListener('appUrlOpen', ({ url }) => _routeDeepLink(url))
+  CapApp.getLaunchUrl()
+    .then((res) => { if (res && res.url) _routeDeepLink(res.url) })
+    .catch(() => {})
+} catch (e) { /* 非 Capacitor 环境(纯浏览器)忽略 */ }
+
 const app = createApp(App)
 app.use(router)
 app.mount('#app')

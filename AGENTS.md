@@ -15,6 +15,13 @@
 
 ## 当前任务记录
 
+- 2026-07-19：完成真机跨设备入房链路修复（用户真机反馈"多手机同热点进不了同一房间"）：
+  - 根因：浏览器版默认 BroadcastChannel（仅同机多标签），跨设备必须一台手机装 APK 当 host（AndroidWs 起真 WS server）；浏览器当 host 根本没法被加入。
+  - App 扫码自动进房：`JoinView` 扫码成功后直接 `router.push('/room?...')`（旧版只填地址还要手点加入）；`parseQrScanResult` 支持 `guandan://room|join` scheme。
+  - guandan:// 深链桥：`qr-fallback.js` 新增 `buildAppDeepLink`；`AndroidManifest.xml` 注册 `guandan` scheme；`main.js` 监听 `appUrlOpen` + `getLaunchUrl` 直达 `/room?role=joiner&host=...`；`QrFallbackCard` 展示「点此直接拉起 App 加入」链接；JoinView 浏览器页展示 App 深链桥。
+  - 测试：`qr-fallback.test.js` 深链 10 case（63 全过）；`v0425` 套件块 K（104 case）；`npm run build` 成功；`network-weaknet.test.js` kick 断言加固（KICKED/PEER_LEAVE 双路径任一 + 等待 600→1200ms）；v0410/v0417~v0421 版本断言随 0.4.25 刷新；v0424 扫码复查断言窗口放宽（自动进房回调变长）。
+  - APK 构建（国内镜像工具链）：JDK 21 `C:\dev\jdk-21`（TUNA）+ Android SDK `C:\dev\android-sdk`（腾讯，build-tools 35/36 + platform 36）+ Gradle `C:\dev\gradle-8.14.3` + 阿里云 maven 镜像（`~/.gradle/init.gradle`）；产物 `android/app/build/outputs/apk/debug/app-debug.apk`（约 18MB，已含 guandan:// 深链）。
+
 - 2026-07-19：完成四项体验修复（用户反馈）：
   - 桌面出牌分不清几张 3：归属胶囊加牌型名（`lastPlayTypeName`，数字/字符串 type 双映射），TableCenter `lp-type` 高亮显示（"AI-西 · 顺子"）。
   - AI 开局就扔炸弹：`chooseLead` 重排（对子→三张→顺子→残局炸弹（≤6 张）→单张→兜底炸），`chooseLeadHard` 保留阈值反转（>6 张保留、≤6 张才领炸）；单张选择不拆炸弹 rank（`nonBomb` 池优先）；`guandan-ai.test.js` 块 24/25 反转 + 25b 新增（80 case）。

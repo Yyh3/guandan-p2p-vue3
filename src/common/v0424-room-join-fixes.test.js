@@ -199,7 +199,7 @@ console.log('\n=== 17. C-17:扫描重入守卫 + 空态 + button + 句柄 ===')
   check('空态文案', joinSrc.includes('未发现局域网房间'))
   check('扫描结果 button 化', joinSrc.includes('class="discovered-item"'))
   check('扫码 start 后复查 showScanner(防句柄泄漏)',
-    /await inst\.start\([\s\S]{0,900}if \(!showScanner\.value\)/.test(joinSrc))
+    /await inst\.start\([\s\S]{0,1600}if \(!showScanner\.value\)/.test(joinSrc))
 }
 
 // ============== 18. C-18:RoomView netStatus 文字 ==============

@@ -30,6 +30,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- ★ v0.4.25:guandan:// 深链 — 浏览器/扫码/聊天里点链接可拉起 App 直达房间 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="guandan" />
+            </intent-filter>
+
         </activity>
 
         <provider

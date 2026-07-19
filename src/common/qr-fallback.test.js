@@ -183,7 +183,7 @@ assert('场景 C 卡片不渲染 (IP 没拿到)', sceneC.show === false)
 // ============================================================
 console.log('\n=== 5. parseQrScanResult: 解析 QR 扫描结果 ===')
 {
-  const { parseQrScanResult } = await import('./qr-fallback.js')
+  const { parseQrScanResult, buildAppDeepLink } = await import('./qr-fallback.js')
 
   // 1) 纯 IP:port
   const r1 = parseQrScanResult('192.168.43.1:8848')
@@ -225,6 +225,24 @@ console.log('\n=== 5. parseQrScanResult: 解析 QR 扫描结果 ===')
   // 8) 边界:前后有空格
   const r7 = parseQrScanResult('  192.168.43.1:8848  ')
   assert('★ 前后空格自动 trim', r7 && r7.host === '192.168.43.1' && r7.port === 8848)
+
+  // 9) ★ v0.4.25:guandan:// App 深链
+  const d1 = parseQrScanResult('guandan://room?host=192.168.43.1:8848&roomNo=123456')
+  assert('★ guandan://room 解析正确', d1 && d1.host === '192.168.43.1' && d1.port === 8848 && d1.roomNo === '123456')
+  const d2 = parseQrScanResult('guandan://room?host=10.0.0.5:9000')
+  assert('★ guandan:// 无 roomNo 时为 null', d2 && d2.host === '10.0.0.5' && d2.port === 9000 && d2.roomNo === null)
+  const d3 = parseQrScanResult('guandan://join?host=192.168.43.1:8848&roomNo=654321')
+  assert('★ guandan://join 兼容', d3 && d3.host === '192.168.43.1' && d3.roomNo === '654321')
+  assert('guandan:// 缺 host 返回 null', parseQrScanResult('guandan://room?roomNo=123456') === null)
+  assert('guandan:// 非法 IP 返回 null', parseQrScanResult('guandan://room?host=999.1.1.1:8848') === null)
+  assert('guandan:// 非法端口返回 null', parseQrScanResult('guandan://room?host=192.168.43.1:99999') === null)
+  // buildAppDeepLink
+  assert('★ buildAppDeepLink 基本', buildAppDeepLink('192.168.43.1', 8848, '123456') === 'guandan://room?host=192.168.43.1%3A8848&roomNo=123456')
+  assert('★ buildAppDeepLink 无 roomNo', buildAppDeepLink('192.168.43.1', 8848) === 'guandan://room?host=192.168.43.1%3A8848')
+  assert('buildAppDeepLink null IP 返回 null', buildAppDeepLink(null, 8848, '1') === null)
+  // 深链可被 parseQrScanResult 回环解析
+  const loop = parseQrScanResult(buildAppDeepLink('192.168.43.1', 8848, '123456'))
+  assert('★ buildAppDeepLink ↔ parse 回环', loop && loop.host === '192.168.43.1' && loop.port === 8848 && loop.roomNo === '123456')
 }
 
 console.log('\n========== qr-fallback test result: ' + pass + ' pass / ' + fail + ' fail ==========')

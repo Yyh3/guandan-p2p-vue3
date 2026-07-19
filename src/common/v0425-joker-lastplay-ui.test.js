@@ -201,5 +201,21 @@ console.log('\n=== 10. J:理牌三模式 + 出牌牌型名 ===')
   check('AI 单张优先不拆炸弹 rank', aiSrc.includes('nonBomb.length > 0 ? nonBomb : concrete'))
 }
 
+// ============== 11. K:扫码自动进房 + guandan:// 深链 ==============
+console.log('\n=== 11. K:扫码自动进房 + guandan:// 深链 ===')
+{
+  const joinSrc = fs.readFileSync(path.join(repoRoot, 'src/views/join/JoinView.vue'), 'utf-8')
+  const manifestSrc = fs.readFileSync(path.join(repoRoot, 'android/app/src/main/AndroidManifest.xml'), 'utf-8')
+  const mainSrc = fs.readFileSync(path.join(repoRoot, 'src/main.js'), 'utf-8')
+  const qrCardSrc = fs.readFileSync(path.join(repoRoot, 'src/components/QrFallbackCard.vue'), 'utf-8')
+  check('JoinView 扫码成功直接 router.push 进房', /closeScanner\(\)[\s\S]{0,200}router\.push\(`\/room\?role=joiner/.test(joinSrc))
+  check('JoinView 扫码不再仅填地址(旧版填充逻辑移除)', !joinSrc.includes('hostAddress.value = `${parsed.host}:${parsed.port}`'))
+  check('JoinView 浏览器页有 App 深链桥(appDeepLink)', joinSrc.includes('appDeepLink') && joinSrc.includes('buildAppDeepLink'))
+  check('AndroidManifest 注册 guandan scheme', manifestSrc.includes('android:scheme="guandan"'))
+  check('main.js 监听 appUrlOpen + getLaunchUrl', mainSrc.includes('appUrlOpen') && mainSrc.includes('getLaunchUrl'))
+  check('main.js 深链用 parseQrScanResult 解析', mainSrc.includes('parseQrScanResult(url)'))
+  check('QrFallbackCard 展示 App 深链', qrCardSrc.includes('deepLink') && qrCardSrc.includes('buildAppDeepLink'))
+}
+
 console.log(`\n========== v0.4.25 大小王 + 出牌归属测试: ${pass} 通过 / ${fail} 失败 ==========`)
 if (fail > 0) process.exit(1)

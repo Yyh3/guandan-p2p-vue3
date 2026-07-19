@@ -73,10 +73,14 @@
           </button>
         </li>
       </ul>
-      <!-- ★ v0.4.24:扫描完成但无结果的空态反馈 -->
+      <!-- ★ v0.4.25:扫描完成但无结果的空态反馈 -->
       <p v-else-if="scanDone && !scanning && !scanError" class="card-hint scan-empty">
         未发现局域网房间,请确认房主已开房,或手动输入地址
       </p>
+      <!-- ★ v0.4.25:浏览器→App 桥 — 已装 APK 的用户一键切到 App 进房(guandan:// 深链) -->
+      <div class="scan-row" v-if="appDeepLink">
+        <a class="app-deep-link" :href="appDeepLink">📱 已安装 App？点此用 App 加入</a>
+      </div>
     </div>
 
     <!-- 本机模拟说明仅在开发环境显示,避免干扰普通用户 -->
@@ -113,7 +117,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { isNativeCapacitor } from '@/common/ws-server.js'
-import { parseQrScanResult } from '@/common/qr-fallback.js'
+import { parseQrScanResult, buildAppDeepLink } from '@/common/qr-fallback.js'
 import net from '@/common/network.js'
 
 const router = useRouter()
@@ -180,6 +184,16 @@ const addressError = computed(() => {
   }
 })
 const selectedWsHost = ref('') // ★ P1-11 修复:浏览器扫描到 WS host 后记录 IP:port,加入时携带 host 参数
+// ★ v0.4.25:浏览器→App 深链(guandan://room?host=...)— 有房主地址时可一键切到 App
+const appDeepLink = computed(() => {
+  if (isNative.value) return null
+  const src = selectedWsHost.value || hostAddress.value.trim() || String(route.query.scanHost || '')
+  if (!src) return null
+  try {
+    const { hostIp, hostPort } = net.parseHostAddress(src)
+    return buildAppDeepLink(hostIp, hostPort, roomNo.value || null)
+  } catch { return null }
+})
 const canJoin = computed(() => {
   if (isNative.value) {
     return !addressError.value && hostAddress.value.trim().length > 0
@@ -255,9 +269,15 @@ async function openScanner() {
         // 扫码成功回调
         const parsed = parseQrScanResult(decodedText)
         if (parsed) {
-          hostAddress.value = `${parsed.host}:${parsed.port}`
-          if (parsed.roomNo) roomNo.value = parsed.roomNo
           closeScanner()
+          // ★ v0.4.25:扫码成功直接进房(旧版只填地址,还要手点一次「加入房间」)
+          const hostAddr = `${parsed.host}:${parsed.port}`
+          if (isNative.value) {
+            router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddr)}`)
+          } else {
+            const roomQ = parsed.roomNo ? `&roomNo=${parsed.roomNo}` : ''
+            router.push(`/room?role=joiner${roomQ}&host=${encodeURIComponent(hostAddr)}`)
+          }
         } else {
           scannerError.value = `无法解析该二维码内容: ${decodedText.slice(0, 50)}`
         }
