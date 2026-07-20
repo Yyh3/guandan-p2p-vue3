@@ -203,21 +203,22 @@ function stackStyle(i) {
   max-width: 960px;
   height: 88%;
   border-radius: 50%;
+  /* ★ v0.4.29 配色统一:桌面环境光从旧蓝紫改为翡翠深绿 + 一丝金色外晕,
+     与品牌色(翡翠绿+金)及房间页 --felt-base 一致;旧蓝紫是 v3 前的遗留 */
   box-shadow:
     inset 0 0 40px rgba(0, 0, 0, 0.7),
-    inset 0 0 80px rgba(74, 25, 130, 0.35),
-    inset 0 0 120px rgba(10, 18, 51, 0.5),
+    inset 0 0 80px rgba(4, 32, 22, 0.5),
+    inset 0 0 120px rgba(3, 22, 15, 0.55),
     inset 0 0 0 3px #a0683a,
     inset 0 0 0 4px #8B5A2B,
     inset 0 0 0 5px #6b3f1d,
     inset 0 0 0 6px rgba(0, 0, 0, 0.4),
-    0 0 40px rgba(126, 87, 194, 0.18),
+    0 0 40px rgba(212, 175, 55, 0.12),
     0 10px 28px rgba(0, 0, 0, 0.55);
   background: var(--table-felt, radial-gradient(ellipse at center,
-    #3a5a8a 0%,
-    #2a3a6a 35%,
-    #1a2a4e 70%,
-    #0a1233 100%));
+    #1f7a55 0%,
+    #14533b 60%,
+    #0a3d2c 100%));
   overflow: hidden;
 }
 

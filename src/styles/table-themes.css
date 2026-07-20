@@ -9,17 +9,18 @@
  * App.vue 启动时把对应 class 挂到 documentElement。
  * ============================================================ */
 
-/* ----- 经典(默认,不挂类也等价)——蓝紫牌桌 + 深红漆器牌背 ----- */
+/* ----- 经典(默认,不挂类也等价)——翡翠绿牌桌 + 深红漆器牌背 ----- */
+/* ★ v0.4.29 配色统一:经典款从旧蓝紫改为翡翠绿(品牌色),与首页/房间/结算卡一致;
+   原蓝紫桌保留为下方「深海蓝」主题,喜欢旧观感可一键切回 */
 .theme-classic {
-  --table-felt: radial-gradient(ellipse at center, #3a5a8a 0%, #2a3a6a 35%, #1a2a4e 70%, #0a1233 100%);
+  --table-felt: radial-gradient(ellipse at center, #1f7a55 0%, #14533b 60%, #0a3d2c 100%);
   --card-back-base: linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%);
 }
 
-/* ----- 墨绿竹纹——翡翠绿牌桌 + 墨绿牌背(呼应首页翡翠主题) ----- */
-.theme-bamboo {
-  --table-felt: radial-gradient(ellipse at center, #1f7a55 0%, #14533b 55%, #0a3d2c 100%);
-  --card-back-base: linear-gradient(135deg, #1b5e20 0%, #0d3b16 100%);
-  --card-back-svg: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 110'><defs><pattern id='b' x='0' y='0' width='20' height='27.5' patternUnits='userSpaceOnUse'><path d='M 10 4 Q 14 10 10 14 Q 6 18 10 24' fill='none' stroke='%23ffd700' stroke-width='0.6' opacity='0.5'/><circle cx='10' cy='13' r='1.2' fill='%23ffd700' opacity='0.4'/></pattern></defs><rect width='80' height='110' fill='url(%23b)'/></svg>");
+/* ----- 深海蓝——旧版蓝紫牌桌 + 深红牌背(怀旧观感) ----- */
+.theme-ocean {
+  --table-felt: radial-gradient(ellipse at center, #3a5a8a 0%, #2a3a6a 35%, #1a2a4e 70%, #0a1233 100%);
+  --card-back-base: linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%);
 }
 
 /* ----- 绛红漆器——深红牌桌 + 绛红牌背(传统喜庆) ----- */

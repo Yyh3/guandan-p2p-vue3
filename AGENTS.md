@@ -15,6 +15,13 @@
 
 ## 当前任务记录
 
+- 2026-07-20：完成配色统一（用户反馈“蓝色牌桌与新增绿色元素不搭配”）：
+  - 根因：对局桌面（`.ellipse-table`）与大厅半桌背景（`app-half-table-bg`）还是 v3 前的**蓝紫色**，而品牌规范（UI-REDESIGN-V3-SPEC）与新增 UI（引导卡/生涯卡/结算卡/成就墙）均走翡翠绿 → 蓝桌成了“少数派”。
+  - 修复：`.ellipse-table` 桌毡改翡翠绿径向渐变（与房间页 `--felt-base` 同色），桌面环境光从蓝紫改翡翠深绿 + 金色外晕；`app-half-table-bg` 半桌桌毡同步改翡翠绿、氛围光改暖金顶光 + 深翡翠暗场。
+  - 主题重构：`table-themes.css` 经典款从蓝紫改为翡翠绿（品牌默认）；原蓝紫保留为新增「深海蓝」（`theme-ocean`）主题供怀旧；移除与经典重复的「墨绿竹纹」；SettingsView/App.vue 选项同步（翡翠绿/深海蓝/绛红漆器/月白青花）。
+  - 保留：队友=蓝/对手=红/自己=绿的身份三色不动（语义色，非背景冲突）。
+  - 验证：dev server 截图核对首页（深翡翠+金 casino 风）与对局页（绿色椭圆桌面）；无测试断言旧色值；`npm test` 全绿；`npm run build` 成功。
+
 - 2026-07-20：完成 v0.4.28 UI 留存功能落地（用户要求“完成 UI 修改建议并真实运行验证美观”，基于 `docs/UI-RETENTION-SUGGESTIONS.md`）：
   - P0-1 首启引导：HomeView 一次性「30 秒开一桌」三步图卡（翡翠绿玻璃卡 + 四花色浮动 + 金色序号），localStorage `guandan_onboarded` 打标。
   - P0-2 回到上次的牌局：storage 新增 `setLastGame/getLastGame/clearLastGame`；RoomView 进房记录（role/roomNo/host）；HomeView 24h 内展示金色横幅一键直达。

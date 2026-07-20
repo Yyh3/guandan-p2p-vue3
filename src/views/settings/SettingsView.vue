@@ -310,8 +310,8 @@ const themes = [
 ]
 // ★ v0.4.28 P1-3:牌桌主题选项(felt/back 仅用于设置页缩略预览,真实样式在 table-themes.css)
 const tableThemes = [
-  { id: 'classic', label: '经典', felt: 'radial-gradient(ellipse at center, #3a5a8a 0%, #1a2a4e 70%, #0a1233 100%)', back: 'linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%)' },
-  { id: 'bamboo', label: '墨绿竹纹', felt: 'radial-gradient(ellipse at center, #1f7a55 0%, #14533b 55%, #0a3d2c 100%)', back: 'linear-gradient(135deg, #1b5e20 0%, #0d3b16 100%)' },
+  { id: 'classic', label: '翡翠绿', felt: 'radial-gradient(ellipse at center, #1f7a55 0%, #14533b 60%, #0a3d2c 100%)', back: 'linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%)' },
+  { id: 'ocean', label: '深海蓝', felt: 'radial-gradient(ellipse at center, #3a5a8a 0%, #1a2a4e 70%, #0a1233 100%)', back: 'linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%)' },
   { id: 'lacquer', label: '绛红漆器', felt: 'radial-gradient(ellipse at center, #8a3a3a 0%, #5e2a2a 55%, #3d1414 100%)', back: 'linear-gradient(135deg, #7a1f1f 0%, #4a0f0f 100%)' },
   { id: 'porcelain', label: '月白青花', felt: 'radial-gradient(ellipse at center, #4a6fa5 0%, #33507e 55%, #1e3350 100%)', back: 'linear-gradient(135deg, #e8eef5 0%, #c9d6e8 100%)' },
 ]

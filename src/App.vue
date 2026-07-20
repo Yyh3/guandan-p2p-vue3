@@ -11,7 +11,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import storage from '@/common/storage.js'
 
 // ★ v0.4.28 P1-3:牌桌主题 — 启动时挂载 class 到 <html>,并监听设置页切换
-const THEME_IDS = ['classic', 'bamboo', 'lacquer', 'porcelain']
+const THEME_IDS = ['classic', 'ocean', 'lacquer', 'porcelain']
 function applyTableTheme(theme) {
   const id = THEME_IDS.includes(theme) ? theme : 'classic'
   const el = document.documentElement
