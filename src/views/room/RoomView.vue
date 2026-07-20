@@ -660,8 +660,11 @@ function onNickConfirm({ nickname, avatar }) {
   // ★ v0.4.25 修复:本地座位同步更新 — 旧版只改 myName/myAvatar ref + 广播,
   //   peers 里的自己没更新,本机座位卡看不到新昵称/头像(其他手机却能收到广播看到)
   const seat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
-  const prev = peers.get(seat) || {}
-  peers.set(seat, { ...prev, nickname, avatar })
+  // ★ v0.4.27 修复:joiner 未分配座位(selfSeat === -1)时改名,防止 peers.set(-1) 写幽灵座位
+  if (seat >= 0 && seat <= 3) {
+    const prev = peers.get(seat) || {}
+    peers.set(seat, { ...prev, nickname, avatar })
+  }
   // ★ v0.4.25 修复:持久化到 storage(旧版没写,下次进 App 又变回旧昵称)
   storage.setNickname(nickname)
   storage.setAvatar(avatar)
@@ -716,11 +719,11 @@ async function onCopyIp() {
 function openInvite() {
   haptics.click()
   if (isHost.value && !canInviteCrossDevice.value) {
-    // ★ P0-06 修复:浏览器 BC 模式明确提示不能跨设备邀请。
-    showToast('当前模式仅支持本机多标签联机,跨手机请用 Android App 开房')
-    return
-  }
-  if (isHost.value && !hostIp.value) {
+    // ★ v0.4.27 一致性修复:不再 return 拦死弹窗 — web/本机多标签模式下弹窗会自动落到
+    //   房间号分支(hostIp 为空 → 展示房间号 + 复制),这正是 web 房主邀请同机多标签好友的入口。
+    //   旧版直接 return,web 房主点"邀请好友"只看到一条报错式 toast,弹窗永远打不开。
+    showToast('浏览器模式：让好友在同一设备新标签页输入下方房间号加入')
+  } else if (isHost.value && !hostIp.value) {
     showToast('本机 IP 暂未获取，已改用房间号邀请')
   }
   showInvite.value = true

@@ -4,6 +4,41 @@
 
 ---
 
+## v0.4.27 (2026-07-20) — 全项目对抗性审查修复 + web/安卓一致性 + UI 留存建议
+
+> 用户要求“用对抗性审查的方式查出整个项目的 bug”。网络层 6 bug（修 5 缓 1）+ 视图层 5 项，并确保 web/安卓页面一致（不一致按用户友好取舍）。
+
+### A. P0 — 阻断级
+
+- `network.js` 心跳检查器不跳过 `hostSeat`：换座（v0.4.26 主打功能）后 host 新座位无心跳，~6-23s 被收割 → RoomView `peer:leave` 命中 hostSeat 即解散房间（**任何一次换座必然解散**）。修复：真实/测试版心跳检查器均跳过 `hostSeat`，收割时补清 `seatResumeTokens`/`seatConnAlive`；`swapSeats(a,b)` 同步互换 `lastHeartbeat`/`seatResumeTokens`/`seatConnAlive` 账目（顺带修二次换座 token 不匹配 P1-2）。
+
+### B. P1/P2 — 网络层
+
+- P1-1：joiner 收到涉及自身的 `SEAT_SWAP_COMMITTED` 后不重绑 ws↔seat → 加 `scheduleJoinRetry()` 立即重绑。
+- P2-1：`relayFromClient` 三处 seat 0 硬编码改 `hostSeat`（换座后 host 不在 0 号位时转发全断）。
+- P2-2：`_scanHttpWsRooms` 加 `stopOnFirst` 提前终止；JoinView 输房号快扫接线（命中即选中）。
+- 暂缓：P1-3（ws 瞬断即踢回首页 / AndroidWs 无重连）——需 transport 层重连状态机，架构改动大。
+
+### C. 视图层 / web-安卓一致性（按用户友好取舍）
+
+- web 房主「邀请好友」弹窗不再被 `return` 拦死（落房间号分支，web 房主终于能打开邀请弹窗）。
+- web 输房号点「加入房间」自动扫描同网房主（`roomNo>=4` 位先 `stopOnFirst` 快扫，命中自动填 host）。
+- JoinView 误导文案（“房号仅用于本机多标签模拟”）改引导式。
+- `RoomView.onNickConfirm` 加幽灵座位守卫：`selfSeat===-1` 时不写 `peers.set(-1)`。
+- web 无扫码入口判为有意设计（浏览器扫码需相机权限且安卓 App 才是主入口），不强制对齐。
+
+### D. 测试与基线
+
+- 新增 `v0427-adversarial-fixes.test.js`（29 case，含真 WS 链路换座收割场景 + 全部源码断言）并注册。
+- `v0425-joker-lastplay-ui.test.js` 字符窗口断言放宽（400→700 / 500→800）——行为未变，仅因 onNickConfirm 新增守卫注释拉长距离。
+- 基线：`npm test` 全绿；`npm run build` 成功。
+
+### E. 文档
+
+- `docs/UI-RETENTION-SUGGESTIONS.md`：UI 美化与用户留存建议（P0 快速见效 / P1 进度闭环 / P2 质感氛围三档 + 设计原则），立足于现有翡翠绿+金色玻璃拟态主题。
+
+---
+
 ## v0.4.24 (2026-07-17) — 四路并行对抗性审查修复 + UI/HCI 改进(59 套件 / 2106 单测全过)
 
 > 新一轮四路并行对抗性审查的 P0/P1 修复与 UI/HCI 改进,细节见 git log。

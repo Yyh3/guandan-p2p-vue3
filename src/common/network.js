@@ -459,6 +459,13 @@ function startHeartbeatChecker() {
   heartbeatCheckTimer = _setIntervalFn(() => {
     const now = Date.now()
     for (const [seat, ts] of lastHeartbeat.entries()) {
+      // ★ v0.4.27 P0-1:host 自己的座位永不被心跳收割 — host 从不发心跳,
+      //   换座后 host 新座位上若残留换座前玩家的心跳条目(或其 ws 重绑前的过期心跳),
+      //   会被误判"joiner 超时"删掉 host 自己的 peers 条目 → 全房间误解散
+      if (seat === hostSeat) {
+        lastHeartbeat.delete(seat)
+        continue
+      }
       if (now - ts > HEARTBEAT_TIMEOUT_MS) {
         // ★ v2.4-p4 BUG-007:被踢的 seat 即使心跳超时也不重复处理
         //   kickPlayer 已经清掉 lastHeartbeat / peers / emit 过 peer:leave,
@@ -472,6 +479,9 @@ function startHeartbeatChecker() {
         lastHeartbeat.delete(seat)
         const info = peers.get(seat)
         peers.delete(seat)
+        // ★ v0.4.27:心跳释放 seat 时同步清理 token 与连接状态(与 _tickHeartbeatChecker 对齐)
+        seatResumeTokens.delete(seat)
+        seatConnAlive.delete(seat)
         // ★ v2.0 BUG-7 修复:host 自己直接 emit 本地事件,不等 broadcast loopback
         emit('peer:leave', { seat, info })
         emit('ai:takeover', { seat, info })
@@ -562,7 +572,9 @@ const RELAY_TYPES = new Set([
 
 function relayFromClient(msg) {
   if (!isHostFlag || !transport || !msg || !RELAY_TYPES.has(msg.type)) return
-  if (msg.from == null || msg.from <= 0) return
+  // ★ v0.4.27 P2-1:跳过的是"host 本人座位"而非写死 seat 0 — 换座后 hostSeat 可为任意座位,
+  //   坐在 seat 0 的普通玩家消息必须正常转发,否则其快捷聊天双向永久中断
+  if (msg.from == null || msg.from < 0 || msg.from === hostSeat) return
   // ★ BC 模式天然广播,无需显式 relay(否则会变成 2 倍消息,joiner 端 _handleJoinerMessage
   //   会收到双份,触发双倍 apply)。
   // 只有 WS-like host (server mode)需要显式定向 relay:
@@ -574,7 +586,7 @@ function relayFromClient(msg) {
 
   // ★ Phase 2 修复:保留 joiner 指定的定向 to,不要覆盖成广播
   if (msg.to != null) {
-    if (msg.to <= 0 || msg.to === msg.from || !peers.has(msg.to)) return
+    if (msg.to < 0 || msg.to === hostSeat || msg.to === msg.from || !peers.has(msg.to)) return
     try {
       transport.send({
         ...msg,
@@ -586,7 +598,7 @@ function relayFromClient(msg) {
   }
 
   for (const [seat] of peers.entries()) {
-    if (seat <= 0 || seat === msg.from) continue  // 跳过 host 自己 + 原 sender
+    if (seat === hostSeat || seat === msg.from) continue  // ★ v0.4.27 P2-1:跳过 host 本人(非写死 0)+ 原 sender
     try {
       transport.send({
         ...msg,
@@ -877,6 +889,10 @@ function _handleJoinerMessage(msg) {
     if (typeof a !== 'number' || typeof b !== 'number' || a === b) return
     if (a < 0 || a > 3 || b < 0 || b > 3) return
     _applySeatSwapLocal(a, b)
+    // ★ v0.4.27 P1-1:换座涉及自己 → 立即重发 JOIN 重绑 transport 层 ws↔seat 映射。
+    //   否则要等下一轮 15s 周期 REJOIN 才自愈,窗口内自己消息带旧 seat、
+    //   host 发往自己新 seat 的定向消息(DEAL/STATE)找不到 ws 被静默丢弃 → 卡"发牌中"/出不了牌
+    if (selfSeat === a || selfSeat === b) scheduleJoinRetry()
   } else if (msg.type === 'READY_COMMITTED') {
     // ★ P1-05 修复:joiner 只接受 host 权威的 ready 状态提交。
     if (!isAuthorityMessage(msg)) return
@@ -1639,6 +1655,19 @@ function swapSeats(a, b) {
   else peers.delete(b)
   if (infoB) peers.set(a, infoB)
   else peers.delete(a)
+  // ★ v0.4.27 P0-1/P1-2:心跳 / resumeToken / connAlive 账目随 peers 同步互换。
+  //   否则换座后:① host 新座位残留换座前玩家的心跳条目被检查器误收割(解散房间);
+  //   ② token 留在旧座位 → 第二次换座(换回)时 token 不匹配,玩家被当新玩家重新分配
+  //   (座位错乱 / peers 重复条目 / 满房时误判 ROOM_FULL)
+  const _swapAux = (m) => {
+    const va = m.get(a)
+    const vb = m.get(b)
+    if (va !== undefined) m.set(b, va); else m.delete(b)
+    if (vb !== undefined) m.set(a, vb); else m.delete(a)
+  }
+  _swapAux(lastHeartbeat)
+  _swapAux(seatResumeTokens)
+  _swapAux(seatConnAlive)
   // ★ 2) 广播 SEAT_SWAP_COMMITTED(host 权威提交)
   //   注意:host 自己也在 {a,b} 中时,必须先发送再更新 selfSeat/hostSeat,
   //   否则消息 from 会变成新 host seat,joiner 的 epoch/authority 校验会拒绝。
@@ -2510,6 +2539,8 @@ async function _scanHttpWsRooms(opts = {}) {
   }
   for (let i = 0; i < candidates.length; i += SCAN_CONCURRENCY) {
     if (signal?.aborted) break
+    // ★ v0.4.27 P2-2:已发现房间且要求"找到即停"时提前结束,避免盲扫全部候选(最坏 ~50s)
+    if (opts?.stopOnFirst && found.length > 0) break
     await Promise.all(candidates.slice(i, i + SCAN_CONCURRENCY).map(processOne))
   }
   return found
@@ -2557,6 +2588,11 @@ function _tickHeartbeatChecker() {
   if (!heartbeatCheckTimer) return false
   const now = Date.now()
   for (const [seat, ts] of lastHeartbeat.entries()) {
+    // ★ v0.4.27 P0-1:host 自己的座位永不被心跳收割(与 startHeartbeatChecker 对齐)
+    if (seat === hostSeat) {
+      lastHeartbeat.delete(seat)
+      continue
+    }
     // ★ Phase 2 修复:被踢 seat 已在 kickPlayer 中清理,如果 lastHeartbeat 还有残留则跳过,
     //   避免重复 emit peer:leave / ai:takeover。
     if (_kickedSeats.has(seat)) {

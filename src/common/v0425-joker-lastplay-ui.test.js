@@ -225,8 +225,8 @@ console.log('\n=== 12. L:体验五件套(用户反馈) ===')
   const qrCardSrc = fs.readFileSync(path.join(repoRoot, 'src/components/QrFallbackCard.vue'), 'utf-8')
   const mainSrc = fs.readFileSync(path.join(repoRoot, 'src/main.js'), 'utf-8')
   // L-1 昵称/头像本地同步
-  check('onNickConfirm 更新本地 peers 座位', /onNickConfirm[\s\S]{0,400}peers\.set\(seat, \{ \.\.\.prev, nickname, avatar \}\)/.test(roomSrc))
-  check('onNickConfirm 持久化 storage', /onNickConfirm[\s\S]{0,500}storage\.setNickname\(nickname\)/.test(roomSrc))
+  check('onNickConfirm 更新本地 peers 座位', /onNickConfirm[\s\S]{0,700}peers\.set\(seat, \{ \.\.\.prev, nickname, avatar \}\)/.test(roomSrc))
+  check('onNickConfirm 持久化 storage', /onNickConfirm[\s\S]{0,800}storage\.setNickname\(nickname\)/.test(roomSrc))
   // L-2 进 App 播放 BGM
   check('main.js 进 App 尝试 startBgm', /storage\.getSettings\(\)\.bgmEnabled !== false\) audio\.startBgm\(\)/.test(mainSrc))
   check('main.js 首次 pointerdown 解锁并启动 BGM', mainSrc.includes("document.addEventListener('pointerdown', unlockAndStart)"))

@@ -75,7 +75,7 @@
         <span class="input-label">房间号</span>
         <input v-model="roomNo" maxlength="6" placeholder="6 位数字" class="input" />
       </div>
-      <p class="card-hint">房间号仅用于本机多标签模拟;跨设备请填房主 IP 或扫描</p>
+      <p class="card-hint">不知道 IP？输房间号后点「加入房间」会自动匹配同网房主；也可点下方扫描</p>
       <div class="scan-row">
         <button class="action-btn-small" :class="{ disabled: scanning }" @click="scanRooms">
           {{ scanning ? '扫描中...' : '🔍 扫描局域网房间' }}
@@ -248,7 +248,15 @@ async function onJoin() {
     // ★ P1-11 修复:浏览器扫描到 WS 房间后,按真实 IP:port 加入,不走本地 BC
     router.push(`/room?role=joiner&roomNo=${roomNo.value}&host=${encodeURIComponent(selectedWsHost.value)}`)
   } else {
-    router.push(`/room?role=joiner&roomNo=${roomNo.value}`)
+    // ★ v0.4.27 一致性修复(对齐安卓):只输房间号 → 先自动扫描匹配同网房主,
+    //   匹配到 selectedWsHost 则走 WS 跨设备加入;扫不到才回退本机多标签 BC。
+    //   旧版直接走 BC,安卓房主的房间收不到 → 8 秒后报"未找到房间",用户以为房间不存在。
+    if (roomNo.value.length >= 4) await scanRooms()  // 匹配到会自动填 selectedWsHost
+    if (selectedWsHost.value) {
+      router.push(`/room?role=joiner&roomNo=${roomNo.value}&host=${encodeURIComponent(selectedWsHost.value)}`)
+    } else {
+      router.push(`/room?role=joiner&roomNo=${roomNo.value}`)  // 扫不到 → 回退本机多标签
+    }
   }
 }
 
@@ -272,9 +280,22 @@ async function scanRooms() {
         }
       } catch (_) { /* 拿不到本机 IP,走默认候选 */ }
     }
-    discovered.value = await net.scanLanRooms(candidates ? { candidates } : {})
-    // ★ v0.4.26 BUG-02:若已输入房间号,扫到后自动匹配对应房间(实现“输房间号加入”)
-    if (roomNo.value && roomNo.value.length >= 4) {
+    const baseOpts = candidates ? { candidates } : {}
+    // ★ v0.4.27 P2-2:已输房间号 → 先"找到即停"快扫(候选网关优先,通常第一批就命中),
+    //   命中目标即选中返回;快扫到的房间不匹配才退回全量扫描,确保不漏目标房。
+    const wantRoomNo = roomNo.value && roomNo.value.length >= 4
+    if (wantRoomNo) {
+      const quick = await net.scanLanRooms({ ...baseOpts, stopOnFirst: true })
+      const hit = quick.find(r => String(r.roomNo) === String(roomNo.value))
+      if (hit) {
+        discovered.value = quick
+        selectRoom(hit)
+        return
+      }
+    }
+    discovered.value = await net.scanLanRooms(baseOpts)
+    // ★ v0.4.26 BUG-02:若已输入房间号,扫到后自动匹配对应房间(实现"输房间号加入")
+    if (wantRoomNo) {
       const match = discovered.value.find(r => String(r.roomNo) === String(roomNo.value))
       if (match) selectRoom(match)
     }

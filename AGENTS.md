@@ -15,6 +15,16 @@
 
 ## 当前任务记录
 
+- 2026-07-20：完成 v0.4.27 全项目对抗性审查修复 + web/安卓一致性 + UI 留存建议（用户要求“对抗性审查查出整个项目 bug”）：
+  - 网络层 P0-1（换座×心跳检查器×解散三者叠加，任何一次换座必在 ~6-23s 内解散房间）：心跳检查器不跳过 `hostSeat`，换座后 host 新座位无心跳被收割 → RoomView `peer:leave` 命中 hostSeat 即解散。修复：真实/测试版心跳检查器均跳过 `hostSeat`（收割时补清 token/connAlive）；`swapSeats(a,b)` 同步互换 `lastHeartbeat`/`seatResumeTokens`/`seatConnAlive` 账目（顺带修二次换座 token 不匹配 P1-2）。
+  - 网络层 P1-1：joiner 收到涉及自身的 `SEAT_SWAP_COMMITTED` 后不重绑 ws↔seat → 加 `scheduleJoinRetry()`。
+  - 网络层 P2-1：`relayFromClient` 三处 seat 0 硬编码改 `hostSeat`（换座后 host 不在 0 号位时转发全断）。
+  - 网络层 P2-2：`_scanHttpWsRooms` 加 `stopOnFirst` 提前终止；JoinView 输房号快扫接线（命中即选中）。
+  - 视图一致性（web/安卓，按用户友好取舍）：web 房主「邀请好友」弹窗不再被 `return` 拦死（落房间号分支）；web 输房号点加入自动扫描同网房主；JoinView 误导文案改引导式；`onNickConfirm` 加幽灵座位守卫（`selfSeat===-1` 不写 `peers.set(-1)`）。web 无扫码入口判为有意设计不强制对齐。
+  - 暂缓：P1-3（ws 瞬断即踢回首页 / AndroidWs 无重连）——需 transport 层重连状态机，架构改动大。
+  - 测试：新增 `v0427-adversarial-fixes.test.js`（29 case，含真 WS 链路换座收割场景）并注册；`v0425-joker-lastplay-ui.test.js` 字符窗口断言放宽（400→700 / 500→800，行为未变仅注释拉长）；`npm test` 全绿；`npm run build` 成功。
+  - 文档：`docs/UI-RETENTION-SUGGESTIONS.md`（UI 美化与留存建议，P0/P1/P2 三档 + 设计原则）。
+
 - 2026-07-20：完成发牌稳定性加固 + 聊天配音（用户真机反馈）：
   - 真机"AI 模式不自动发牌"：根因疑似真机 WebView 冻结/节流定时器链导致 `dealAnim` onComplete 永不到达；`startDealAnimation` 新增 3.2s 软兜底（动画理论时长 2.3s）——超时强制 `dealAnim.cancel()` + `isDealing=false` + `finishDeal`，不弹超时遮罩只留日志；新增 `[deal] anim start/complete` 面包屑日志便于现场诊断；8s 硬兜底保留。
   - 聊天配音：`audio.js` 新增导出 `speakText`（与牌型播报同 `_speak` 通道，voiceEnabled 开关 + cancel 顶掉旧播报）；`onChatSelect` 发送时本地朗读、`onChatQuick` 收到对方快捷聊天也朗读（"打得不错"等两侧都有配音）。
