@@ -242,11 +242,12 @@ const roomCode = computed(() => {
   left: 24px;
 }
 .seat-right {
-  /* v3.6: top: 50% → top: 220px,right: 40px → right: 240px
-   * 跟 mockup 一致,避开 self 座位(右下 bottom: 380px / right: 30px) */
+  /* ★ v0.4.29 修复遮挡:旧 right:240px 侵入桌面出牌区,压住右侧飞入的牌;
+   * 改贴右边缘(与左侧对手 left:24px 对称)。记牌器在 top:46%、聊天在 bottom:196px,
+   * 与 top:220px 的座位纵向错开,不冲突。 */
   position: absolute;
   top: 220px;
-  right: 240px;
+  right: 24px;
 }
 
 /* ============================================================

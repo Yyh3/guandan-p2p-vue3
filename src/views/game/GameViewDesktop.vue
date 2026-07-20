@@ -1279,9 +1279,15 @@ function onNickEditorConfirmed(p) {
   line-height: 1;
 }
 
-/* v4.x:桌面端隐藏自座位面板 — 手牌已代表自己,避免跟中央牌桌/操作栏重叠 */
+/* ★ v0.4.29:桌面端显示本人座位 — 旧版 display:none 隐藏导致玩家看不到自己的身份卡。
+   操作栏/手牌都是居中布局,左下角是空档,把自座位放在这里(与右上队友/左右对手形成四角布局)。 */
 :deep(.seat-bottom) {
-  display: none;
+  display: block;
+  left: 16px;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  top: auto;
+  transform: none;
+  z-index: 6;
 }
 @media (max-width: 768px) {
   /* v3-5 移动端 self 座位:
