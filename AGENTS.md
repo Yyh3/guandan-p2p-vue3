@@ -15,6 +15,19 @@
 
 ## 当前任务记录
 
+- 2026-07-20：完成发牌稳定性加固 + 聊天配音（用户真机反馈）：
+  - 真机"AI 模式不自动发牌"：根因疑似真机 WebView 冻结/节流定时器链导致 `dealAnim` onComplete 永不到达；`startDealAnimation` 新增 3.2s 软兜底（动画理论时长 2.3s）——超时强制 `dealAnim.cancel()` + `isDealing=false` + `finishDeal`，不弹超时遮罩只留日志；新增 `[deal] anim start/complete` 面包屑日志便于现场诊断；8s 硬兜底保留。
+  - 聊天配音：`audio.js` 新增导出 `speakText`（与牌型播报同 `_speak` 通道，voiceEnabled 开关 + cancel 顶掉旧播报）；`onChatSelect` 发送时本地朗读、`onChatQuick` 收到对方快捷聊天也朗读（"打得不错"等两侧都有配音）。
+  - 测试：`audio.test.js` speakText 2 case（149 全过）；`v0425` 套件块 M（8 case，累计 124）；`npm run build` 成功。
+
+- 2026-07-20：完成体验五件套（用户真机/实机反馈）：
+  - 昵称/头像本地不刷新：`RoomView.onNickConfirm` 旧版只改 ref + 广播，`peers` 里自己没更新且未持久化；改为同步更新本地座位 + `storage.setNickname/setAvatar`。
+  - 进 App 自动 BGM：`main.js` 原生直接 `startBgm`，浏览器注册一次性 `pointerdown` 解锁 AudioContext 后启动（autoplay 策略）。
+  - 按钮轻音效：`audio.js` 新增 `sfxClick`（1250→900Hz triangle 50ms、音量 0.12 不吵）；`main.js` 全局 `pointerdown` 委托 `button/a/[role=button]` 触发。
+  - 二维码放大：生成宽度 180→320，展示 100→168px。
+  - 息屏掉线解析与修复：息屏后 WebView 冻结 JS/WebSocket，心跳停发 6s 被 host 释放（局域网没断）；`RoomView` 新增 `visibilitychange` 监听，唤醒发现断线自动 `joinRemoteRoom`（uuid+resumeToken 恢复原 seat，已释放则新分配）。
+  - 测试：`v0425` 套件块 L（12 case，累计 116）；`npm run build` 成功。
+
 - 2026-07-19：完成真机跨设备入房链路修复（用户真机反馈"多手机同热点进不了同一房间"）：
   - 根因：浏览器版默认 BroadcastChannel（仅同机多标签），跨设备必须一台手机装 APK 当 host（AndroidWs 起真 WS server）；浏览器当 host 根本没法被加入。
   - App 扫码自动进房：`JoinView` 扫码成功后直接 `router.push('/room?...')`（旧版只填地址还要手点加入）；`parseQrScanResult` 支持 `guandan://room|join` scheme。

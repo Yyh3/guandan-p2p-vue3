@@ -217,5 +217,45 @@ console.log('\n=== 11. K:扫码自动进房 + guandan:// 深链 ===')
   check('QrFallbackCard 展示 App 深链', qrCardSrc.includes('deepLink') && qrCardSrc.includes('buildAppDeepLink'))
 }
 
+// ============== 12. L:昵称本地刷新 / 进 App BGM / 按钮音效 / QR 放大 / 息屏重连 ==============
+console.log('\n=== 12. L:体验五件套(用户反馈) ===')
+{
+  const roomSrc = fs.readFileSync(path.join(repoRoot, 'src/views/room/RoomView.vue'), 'utf-8')
+  const audioSrc = fs.readFileSync(path.join(repoRoot, 'src/common/audio.js'), 'utf-8')
+  const qrCardSrc = fs.readFileSync(path.join(repoRoot, 'src/components/QrFallbackCard.vue'), 'utf-8')
+  const mainSrc = fs.readFileSync(path.join(repoRoot, 'src/main.js'), 'utf-8')
+  // L-1 昵称/头像本地同步
+  check('onNickConfirm 更新本地 peers 座位', /onNickConfirm[\s\S]{0,400}peers\.set\(seat, \{ \.\.\.prev, nickname, avatar \}\)/.test(roomSrc))
+  check('onNickConfirm 持久化 storage', /onNickConfirm[\s\S]{0,500}storage\.setNickname\(nickname\)/.test(roomSrc))
+  // L-2 进 App 播放 BGM
+  check('main.js 进 App 尝试 startBgm', /storage\.getSettings\(\)\.bgmEnabled !== false\) audio\.startBgm\(\)/.test(mainSrc))
+  check('main.js 首次 pointerdown 解锁并启动 BGM', mainSrc.includes("document.addEventListener('pointerdown', unlockAndStart)"))
+  // L-3 按钮轻音效
+  check('audio.js 定义 sfxClick', audioSrc.includes('function sfxClick()'))
+  check('audio.js 导出 sfxClick', /sfxClick,/.test(audioSrc))
+  check('main.js 全局按钮点击委托 sfxClick', mainSrc.includes("closest('button, a, [role=\"button\"]')"))
+  // L-4 二维码放大
+  check('QrFallbackCard qr-img 168px', qrCardSrc.includes('width: 168px'))
+  check('RoomView QR 生成宽度 320', roomSrc.includes('width: 320, margin: 1'))
+  // L-5 息屏唤醒自动重连
+  check('RoomView 注册 visibilitychange', roomSrc.includes("document.addEventListener('visibilitychange', onVisibilityResume)"))
+  check('RoomView 卸载移除 visibilitychange', roomSrc.includes("document.removeEventListener('visibilitychange', onVisibilityResume)"))
+  check('onVisibilityResume 断线时 joinRemoteRoom 重连', /async function onVisibilityResume[\s\S]{0,500}joinRemoteRoom\(hostParam, self, roomNo\.value\)/.test(roomSrc))
+}
+
+// ============== 13. M:发牌软兜底 + 聊天配音 ==============
+console.log('\n=== 13. M:发牌软兜底 + 聊天配音 ===')
+{
+  const audioSrc = fs.readFileSync(path.join(repoRoot, 'src/common/audio.js'), 'utf-8')
+  check('audio.js 定义 speakText', audioSrc.includes('function speakText(text)'))
+  check('audio.js 导出 speakText', /speakText,/.test(audioSrc))
+  check('onChatSelect 发送时 speakText', /onChatSelect[\s\S]{0,400}audio\.speakText\(phrase\)/.test(logicSrc))
+  check('onChatQuick 接收时 speakText', /onChatQuick[\s\S]{0,900}audio\.speakText\(payload\.text\)/.test(logicSrc))
+  check('发牌软兜底 dealSoftTimeoutId 存在', logicSrc.includes('dealSoftTimeoutId'))
+  check('软兜底 3.2s + soft rescue 日志', logicSrc.includes('soft rescue: animation stalled') && logicSrc.includes('}, 3200)'))
+  check('软兜底取消动画 dealAnim.cancel', logicSrc.includes('dealAnim.cancel()'))
+  check('onComplete 清理双超时', logicSrc.includes('clearTimeout(dealSoftTimeoutId)'))
+}
+
 console.log(`\n========== v0.4.25 大小王 + 出牌归属测试: ${pass} 通过 / ${fail} 失败 ==========`)
 if (fail > 0) process.exit(1)

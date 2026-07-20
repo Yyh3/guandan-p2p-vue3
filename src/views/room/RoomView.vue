@@ -338,7 +338,7 @@ async function generateQr() {
   const text = buildRoomJoinUrl(hostIp.value, hostPort.value, roomNo.value)
   if (!text) return
   try {
-    qrDataUrl.value = await lib.toDataURL(text, { width: 180, margin: 1 })
+    qrDataUrl.value = await lib.toDataURL(text, { width: 320, margin: 1 })
   } catch (e) {
     qrLibOk.value = false
   }
@@ -597,11 +597,34 @@ onMounted(() => {
   myAvatar.value = route.query.avatar ? String(route.query.avatar) : storage.getAvatar()
   isNative.value = isNativeCapacitor()
   initNetwork()
+  // ★ v0.4.25:息屏唤醒自动重连 — 息屏时 WebView/浏览器冻结 JS 定时器并可能断开
+  //   WebSocket,心跳(2s)停发 6s 后被 host 释放座位(局域网没断,是客户端"睡着"了)。
+  //   唤醒时在此发现断线则自动重进:JOIN 携带 uuid + resumeToken,
+  //   心跳窗口内恢复原 seat;已释放则作为新玩家重新分配。
+  document.addEventListener('visibilitychange', onVisibilityResume)
 })
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityResume)
   cleanupRoomListeners()
   if (_copyToastTimer) clearTimeout(_copyToastTimer)
 })
+
+// ★ v0.4.25:息屏唤醒重连(见 onMounted 注释)
+async function onVisibilityResume() {
+  if (typeof document === 'undefined' || document.visibilityState !== 'visible') return
+  if (typeof net.isConnected === 'function' && net.isConnected()) return
+  const self = { nickname: myName.value, avatar: myAvatar.value }
+  try {
+    const hostParam = route.query.host ? String(route.query.host) : null
+    if (hostParam && typeof net.joinRemoteRoom === 'function') {
+      net.joinRemoteRoom(hostParam, self, roomNo.value)
+      return
+    }
+    if (typeof net.smartReconnectToPeers === 'function') {
+      await net.smartReconnectToPeers(roomNo.value, { self })
+    }
+  } catch (e) { /* 静默失败,走 host:lost / 心跳兜底 */ }
+}
 
 function showMenu() {
   haptics.click()
@@ -625,6 +648,14 @@ function onNickConfirm({ nickname, avatar }) {
   myName.value = nickname
   myAvatar.value = avatar
   showNickEditor.value = false
+  // ★ v0.4.25 修复:本地座位同步更新 — 旧版只改 myName/myAvatar ref + 广播,
+  //   peers 里的自己没更新,本机座位卡看不到新昵称/头像(其他手机却能收到广播看到)
+  const seat = (typeof net.getSelfSeat === 'function') ? net.getSelfSeat() : 0
+  const prev = peers.get(seat) || {}
+  peers.set(seat, { ...prev, nickname, avatar })
+  // ★ v0.4.25 修复:持久化到 storage(旧版没写,下次进 App 又变回旧昵称)
+  storage.setNickname(nickname)
+  storage.setAvatar(avatar)
   net.broadcast({ type: 'NICK_UPDATE', payload: { nickname, avatar } })
 }
 async function copyTextFallback(text) {

@@ -1006,6 +1006,28 @@ function sfxUrgentBeep() {
 }
 
 /**
+ * ★ v0.4.25:按钮轻音效 — 全局按钮点击反馈(不吵)
+ * 1200Hz triangle 50ms 短促"嗒",音量压到 0.12(出牌音效的 ~1/4)
+ */
+function sfxClick() {
+  if (!sfxEnabled) return
+  if (!ctx) return
+  const now = ctx.currentTime + 0.003
+  const osc = ctx.createOscillator()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(1250, now)
+  osc.frequency.exponentialRampToValueAtTime(900, now + 0.05)
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(0, now)
+  g.gain.linearRampToValueAtTime(0.12, now + 0.006)
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.06)
+  osc.connect(g)
+  g.connect(sfxGain)
+  osc.start(now)
+  osc.stop(now + 0.07)
+}
+
+/**
  * 根据牌型播放对应声效
  * ★ v0.4.9:优先尝试真实 MP3 采样(sfxMode === 'real'),失败/未启用降级 Web Audio 合成
  * @param {string} type - guandan-engine 的 TYPE 常量
@@ -1052,6 +1074,16 @@ const TYPE_SPEECH_TEXT = {
 function speakType(type) {
   const text = TYPE_SPEECH_TEXT[type]
   if (!text) return
+  _speak(text)
+}
+
+/**
+ * ★ v0.4.25:通用中文语音播报(快捷聊天配音等)
+ * 与牌型播报同通道(voiceEnabled 开关 + cancel 顶掉旧播报)
+ * @param {string} text - 要朗读的文本(如 "打得不错")
+ */
+function speakText(text) {
+  if (typeof text !== 'string' || !text) return
   _speak(text)
 }
 
@@ -1164,6 +1196,8 @@ export {
   setVoiceEnabled, isVoiceEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
+  sfxClick,
+  speakText,
   // ★ v0.4.9:SFX 模式切换(synth / real)
   setSfxMode, getSfxMode, isSfxModeReal,
   setMasterVolume,
@@ -1179,6 +1213,8 @@ const audio = {
   setVoiceEnabled, isVoiceEnabled,
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
+  sfxClick,
+  speakText,
   setSfxMode, getSfxMode, isSfxModeReal,
   setMasterVolume,
   getCtx,

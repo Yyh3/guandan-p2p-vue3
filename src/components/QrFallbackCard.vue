@@ -110,8 +110,9 @@ function onCopy() {
   flex: 0 0 auto;
 }
 .qr-fallback-qr .qr-img {
-  width: 100px;
-  height: 100px;
+  /* ★ v0.4.25:二维码 100 → 168px,手机隔一臂距离也能扫(用户反馈太小) */
+  width: 168px;
+  height: 168px;
   background: #fff;
   border-radius: 6px;
   padding: 4px;

@@ -191,6 +191,8 @@ export function useGameLogic(opts = {}) {
     chatPhraseToast.value = phrase
     if (chatPhraseTimer) clearTimeout(chatPhraseTimer)
     chatPhraseTimer = addTimer(() => { chatPhraseToast.value = '' }, 2000)
+    // ★ v0.4.25:快捷聊天配音 — 自己发送时本地朗读(炸弹播报同通道,voiceEnabled 开关)
+    try { audio.speakText(phrase) } catch (e) { /* 静默 */ }
     // ★ v0.4.24:P2P 模式把快捷聊天广播给其他玩家(对端 toast 显示「昵称: 文本」)
     if (isP2PMode.value) {
       try {
@@ -216,6 +218,8 @@ export function useGameLogic(opts = {}) {
       name = isTeammate ? '队友' : '对手'
     }
     showToast(`${name}: ${payload.text}`)
+    // ★ v0.4.25:收到快捷聊天也朗读(对方发的「打得不错」等,两侧都有配音)
+    try { audio.speakText(payload.text) } catch (e) { /* 静默 */ }
   }
 
   // ★ P2-01:selfSeat 有效性校验
@@ -687,10 +691,15 @@ export function useGameLogic(opts = {}) {
   }
 
   let dealTimeoutId = null
+  let dealSoftTimeoutId = null
   function clearDealTimeout() {
     if (dealTimeoutId) {
       clearTimeout(dealTimeoutId)
       dealTimeoutId = null
+    }
+    if (dealSoftTimeoutId) {
+      clearTimeout(dealSoftTimeoutId)
+      dealSoftTimeoutId = null
     }
   }
   function startDealAnimation() {
@@ -709,6 +718,21 @@ export function useGameLogic(opts = {}) {
 
     audio.unlock()
     if (storage.getSettings().bgmEnabled) audio.startBgm()
+    console.info('[deal] anim start')
+
+    // ★ v0.4.25:软兜底 — 动画理论时长 ≈ 2.3s(27×70ms stagger + 380ms flight + 余量)。
+    //   部分真机 WebView 定时器链被冻结/节流时 onComplete 可能永不到达,
+    //   3.2s 还没到就按同一路径强制完成(不弹超时遮罩,只留日志)。
+    if (dealSoftTimeoutId) clearTimeout(dealSoftTimeoutId)
+    dealSoftTimeoutId = addTimer(() => {
+      if (isDealing.value) {
+        console.warn('[deal] soft rescue: animation stalled, force complete')
+        try { dealAnim.cancel() } catch (e) { /* ignore */ }
+        isDealing.value = false
+        finishDeal()
+      }
+      dealSoftTimeoutId = null
+    }, 3200)
 
     // 兜底:无论动画为何卡住(真机 WebView / 后台切回前台 / 容错),
     // 8 秒后强制 isDealing=false 并进 playing,玩家至少能玩,而不是永远卡 loading。
@@ -738,6 +762,8 @@ export function useGameLogic(opts = {}) {
         onProgress: (p) => { dealProgress.value = Math.round(p * 100) },
         onComplete: () => {
           if (dealTimeoutId) { clearTimeout(dealTimeoutId); dealTimeoutId = null }
+          if (dealSoftTimeoutId) { clearTimeout(dealSoftTimeoutId); dealSoftTimeoutId = null }
+          console.info('[deal] anim complete')
           isDealing.value = false
           finishDeal()
         },

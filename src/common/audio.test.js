@@ -403,6 +403,12 @@ console.log('\n=== 15. 牌型中文语音播报(v0.4.25 扩展到特殊牌型) =
   audio.playSfxForType('BOMB_4')
   assert('★ voiceEnabled=false 时不播报', spoken.length === 0)
   audio.setVoiceEnabled(true)
+  // ★ v0.4.25:通用 speakText(快捷聊天配音)
+  spoken.length = 0
+  audio.speakText('打得不错')
+  assert('★ speakText 朗读聊天文本', spoken.includes('打得不错'))
+  audio.speakText('')
+  assert('★ speakText 空文本不播', spoken.length === 1)
   globalThis.window = origWindow
 }
 

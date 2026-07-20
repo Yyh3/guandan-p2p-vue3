@@ -5,6 +5,8 @@ import './styles/tokens.css'
 import './styles/app-theme.css'
 import './styles/html.css'
 import './styles/simple-mode.css'
+import audio from '@/common/audio.js'
+import storage from '@/common/storage.js'
 
 import HomeView from './views/index/HomeView.vue'
 import RoomView from './views/room/RoomView.vue'
@@ -57,3 +59,31 @@ try {
 const app = createApp(App)
 app.use(router)
 app.mount('#app')
+
+// ★ v0.4.25:进 App 即播 BGM + 全局按钮轻音效
+//   浏览器 autoplay 策略要求首次用户手势才出声 — 注册一次性 pointerdown 解锁;
+//   原生 WebView(Capacitor)通常无此限制,直接按设置尝试启动
+if (typeof document !== 'undefined') {
+  // 首次任意交互:解锁 AudioContext + 按设置启动 BGM(此后按钮轻音效也可出声)
+  const unlockAndStart = () => {
+    try {
+      audio.unlock()
+      if (storage.getSettings().bgmEnabled !== false) audio.startBgm()
+    } catch (e) { /* ignore */ }
+    document.removeEventListener('pointerdown', unlockAndStart)
+  }
+  document.addEventListener('pointerdown', unlockAndStart)
+  // 原生环境:进 App 直接尝试播(App WebView 一般允许 autoplay)
+  try {
+    if (storage.getSettings().bgmEnabled !== false) audio.startBgm()
+  } catch (e) { /* ignore */ }
+
+  // 全局按钮轻音效:点到 button / a / [role=button] 播一声很轻的"嗒"
+  document.addEventListener('pointerdown', (e) => {
+    try {
+      if (e.target && e.target.closest && e.target.closest('button, a, [role="button"]')) {
+        audio.sfxClick()
+      }
+    } catch (err) { /* ignore */ }
+  })
+}
