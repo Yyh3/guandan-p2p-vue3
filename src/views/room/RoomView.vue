@@ -445,6 +445,15 @@ function attachRoomListeners() {
     const hs = hostSeat.value ?? (() => { try { return net.getHostSeat ? net.getHostSeat() : 0 } catch { return 0 } })()
     if (from !== hs) return
     clearJoinTimeout()  // v0.4.24:收到权威 SYNC = 已进房,取消加入超时
+    // ★ v0.4.26 BUG-05:joiner 从 host 权威 SYNC 同步真实房间号,
+    //   修复直连(仅输 IP,URL 无 roomNo)时两端显示不同房间号
+    if (!isHost.value && payload && payload.roomNo != null && String(payload.roomNo)) {
+      const rn = String(payload.roomNo)
+      if (rn && rn !== roomNo.value) {
+        roomNo.value = rn
+        try { net.setRoomId(rn) } catch (e) { /* swallow */ }
+      }
+    }
     if (payload && payload.peers) {
       peers.clear()
       for (const [s, info] of payload.peers) peers.set(s, info)
@@ -656,7 +665,14 @@ function onNickConfirm({ nickname, avatar }) {
   // ★ v0.4.25 修复:持久化到 storage(旧版没写,下次进 App 又变回旧昵称)
   storage.setNickname(nickname)
   storage.setAvatar(avatar)
-  net.broadcast({ type: 'NICK_UPDATE', payload: { nickname, avatar } })
+  // ★ v0.4.26 BUG-01 修复:改走 net.updateSelfInfo — 旧版只 broadcast NICK_UPDATE,
+  //   network 内部 selfInfo / peers[selfSeat] 没同步,进对局页读 net.getPeers() 拿旧名
+  //   → 本人信息“局中不变、局后才变”。updateSelfInfo 同步内部状态 + 广播 + host 重广播 SYNC。
+  if (typeof net.updateSelfInfo === 'function') {
+    net.updateSelfInfo({ nickname, avatar })
+  } else {
+    net.broadcast({ type: 'NICK_UPDATE', payload: { nickname, avatar } })
+  }
 }
 async function copyTextFallback(text) {
   // ★ UX 改进:navigator.clipboard 在 HTTP/旧浏览器/某些 WebView 中不可用,

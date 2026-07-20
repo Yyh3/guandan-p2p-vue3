@@ -70,6 +70,7 @@ const commands = [
   'node src/common/v0424-room-join-fixes.test.js',
   'node src/common/v0425-joker-lastplay-ui.test.js',
   'node src/common/v0425-adversarial-fixes.test.js',
+  'node src/common/v0426-bug-fixes.test.js',
 ]
 
 function run(cmd) {

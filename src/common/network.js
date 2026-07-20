@@ -116,7 +116,7 @@ const ROOM_PROBE_TIMEOUT_MS = 1200
 const SCAN_HTTP_TIMEOUT_MS = 800
 const SCAN_CONCURRENCY = 8
 const MAX_SCAN_CANDIDATES = 200
-const COMMON_SUBNETS = ['192.168.43', '192.168.1', '192.168.0', '172.20.10', '10.0.0']
+const COMMON_SUBNETS = ['192.168.43', '192.168.1', '192.168.0', '192.168.137', '172.20.10', '10.0.0']
 
 // ============== UUID 持久化 ==============
 const UUID_KEY = 'guandan_session_uuid'
@@ -715,7 +715,9 @@ function _handleHostMessage(msg) {
       //   BC 退回 seat 定向(加入窗口对 SYNC 放行)。广播 SYNC 绝不含 token。
       const reuseSyncMsg = {
         type: 'SYNC',
-        payload: { peers: Array.from(peers.entries()), resumeToken: token, seat: assignedSeat },
+        // ★ v0.4.26 BUG-05:SYNC 带上 roomNo,joiner 直连(仅输 IP)时也能拿到房主真实房间号,
+        //   避免两端显示不同房间号
+        payload: { peers: Array.from(peers.entries()), resumeToken: token, seat: assignedSeat, roomNo: roomId },
       }
       if (typeof transport.sendToConnection === 'function' &&
           Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
@@ -726,7 +728,7 @@ function _handleHostMessage(msg) {
       // 顺便广播给老 joiner,让他们看到新昵称
       sendMessage({
         type: 'SYNC',
-        payload: { peers: Array.from(peers.entries()) },
+        payload: { peers: Array.from(peers.entries()), roomNo: roomId },
       })
       return
     }
@@ -778,7 +780,8 @@ function _handleHostMessage(msg) {
     //   (joiner 端加入窗口对 SYNC 放行,见 _onTransportMessage)。广播 SYNC 绝不含 token。
     const joinSyncMsg = {
       type: 'SYNC',
-      payload: { peers: Array.from(peers.entries()), resumeToken: joinToken, seat: assignedSeat },
+      // ★ v0.4.26 BUG-05:SYNC 带上 roomNo(见上 reuseSyncMsg 说明)
+      payload: { peers: Array.from(peers.entries()), resumeToken: joinToken, seat: assignedSeat, roomNo: roomId },
     }
     if (typeof transport.sendToConnection === 'function' &&
         Number.isInteger(msg.trustedConnectionId) && msg.trustedConnectionId >= 0) {
@@ -789,11 +792,17 @@ function _handleHostMessage(msg) {
     // 顺便广播给老 joiner
     sendMessage({
       type: 'SYNC',
-      payload: { peers: Array.from(peers.entries()) },
+      payload: { peers: Array.from(peers.entries()), roomNo: roomId },
     })
   } else if (msg.type === 'NICK_UPDATE') {
     if (peers.has(msg.from)) {
       peers.set(msg.from, { ...peers.get(msg.from), ...msg.payload })
+      // ★ v0.4.26 BUG-01:host 收到 joiner 改名后重广播 SYNC,
+      //   让所有端(含对局页 net.getPeers())拿到最新昵称/头像,不必等下一次 JOIN
+      sendMessage({
+        type: 'SYNC',
+        payload: { peers: Array.from(peers.entries()), roomNo: roomId },
+      })
     }
   } else if (msg.type === 'READY') {
     // ★ Phase 2:host 端校验 READY payload 合法
@@ -2092,6 +2101,41 @@ function isConnected() {
 function getPeers() { return peers }
 function getSelfInfo() { return selfInfo }
 
+/**
+ * ★ v0.4.26 BUG-01:更新本机玩家信息(昵称/头像)并广播。
+ *
+ * 旧版 RoomView.onNickConfirm 只改 UI 本地 peers + broadcast NICK_UPDATE,
+ * 但 network 内部 selfInfo / peers[selfSeat] 未同步 → 进入对局页
+ * applyNetworkPlayers() 读 net.getPeers() 拿到旧名,本人信息“局中不变局后才变”。
+ *
+ * 本方法统一更新 selfInfo + peers[selfSeat],并广播 NICK_UPDATE;
+ * host 额外重广播 SYNC 让所有 joiner 同步。
+ *
+ * @param {{nickname?:string, avatar?:string}} patch
+ * @returns {boolean}
+ */
+function updateSelfInfo(patch) {
+  if (!patch || typeof patch !== 'object') return false
+  selfInfo = { ...(selfInfo || {}), ...patch }
+  const seat = selfSeat
+  if (isValidSeat(seat)) {
+    const prev = peers.get(seat) || {}
+    peers.set(seat, { ...prev, ...patch })
+  }
+  // 广播给其他玩家(joiner 发给 host,host 收到后重广播 SYNC)
+  try { sendMessage({ type: 'NICK_UPDATE', payload: patch }) } catch (_) {}
+  // host 直接重广播 SYNC,让 joiner 的 net.getPeers() 立即拿到新信息
+  if (isHostFlag) {
+    try {
+      sendMessage({
+        type: 'SYNC',
+        payload: { peers: Array.from(peers.entries()), roomNo: roomId },
+      })
+    } catch (_) {}
+  }
+  return true
+}
+
 // ============== v0.4.20 V0420 真正的"第二发现通道"(纯 JS 版)==============
 // smartReconnectToPeers(roomNo, opts):
 //   循环尝试 connect 所有缓存的 peer hostAddress(canHost=true 优先,ts 最新优先)
@@ -2243,6 +2287,41 @@ async function _registerHostMdns() {
   const name = `guandan-${safeName || 'room'}`
   const r = await registerMdnsService({ name, port, roomNo: roomId })
   if (r.ok && r.stop) mdnsRegStop = r.stop
+}
+
+/**
+ * ★ v0.4.26 BUG-02:根据本机 IP 生成本子网扫描候选地址。
+ *
+ * 背景:旧版只猜 COMMON_SUBNETS 固定网段,若手机热点/路由器网段不在列表里
+ * (如 Windows 热点 192.168.137.x 、某些路由器 192.168.2.x)就扫不到。
+ * joiner 已知自己的 IP(WsServer.getLocalIp / WebRTC),据此推导同网段:
+ *   - 网关 .1 排最前(单手机开热点时 host 几乎总是网关)
+ *   - 再扇扫 .2..60 覆盖第三设备热点下手机 host 不是网关的情况
+ * 返回列表后接上默认候选(COMMON_SUBNETS + 缓存),作为 scanLanRooms opts.candidates。
+ *
+ * @param {string} localIp —— 形如 '192.168.137.45'
+ * @param {number} [port=8848]
+ * @returns {string[]}
+ */
+function buildScanCandidates(localIp, port = DEFAULT_WS_PORT) {
+  const out = []
+  const seen = new Set()
+  const push = (addr) => { if (addr && !seen.has(addr)) { seen.add(addr); out.push(addr) } }
+  if (typeof localIp === 'string') {
+    const m = localIp.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+    if (m) {
+      const subnet = `${m[1]}.${m[2]}.${m[3]}`
+      const selfLast = Number(m[4])
+      push(`${subnet}.1:${port}`)               // 网关优先
+      for (let i = 2; i <= 60; i++) {
+        if (i === selfLast) continue            // 跳过自己
+        push(`${subnet}.${i}:${port}`)
+      }
+    }
+  }
+  // 接上默认候选(常见热点网段 + localStorage 缓存 + location.host)
+  for (const addr of _generateLanCandidates()) push(addr)
+  return out
 }
 
 /**
@@ -2527,6 +2606,8 @@ export {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, getHostEpoch, setHostEpoch, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, parseHostAddress, send, broadcast, sendTo,
+  // ★ v0.4.26 BUG-01:更新本机昵称/头像并同步给全房
+  updateSelfInfo,
   // ★ v2.4-p4 BUG-006/007:swapSeats 网络层权威 + kickPlayer 统一踢人协议
   swapSeats, kickPlayer,
   scanLanRooms,
@@ -2548,7 +2629,7 @@ export {
   cachePeerHostAddress, getCachedPeerHostAddresses,
   smartReconnectToPeers, clearPeerHostAddressCache,
   // ★ v0.4.22 P1:局域网扫描发现内部 helper(单测用)
-  _generateLanCandidates, _probeHostHttp, _probeHostWs, _normalizeRoomInfo,
+  _generateLanCandidates, buildScanCandidates, _probeHostHttp, _probeHostWs, _normalizeRoomInfo,
   // ★ 测试辅助(不属于公开 API)
   _sendHeartbeat, _tickHeartbeatChecker, _forceExpireHeartbeat,
   _setIntervalFn, _clearIntervalFn, _setTimeoutFn, _clearTimeoutFn,
@@ -2566,11 +2647,15 @@ const net = {
   isHost, isConnected, getSelfInfo, getPeers,
   getRoomId, setRoomId, getSelfSeat, setSelfSeat, getHostSeat, getHostEpoch, setHostEpoch, isAuthorityMessage,
   startAsHost, joinRoom, joinRemoteRoom, send, broadcast, sendTo,
+  // ★ v0.4.26 BUG-01:更新本机昵称/头像并同步给全房
+  updateSelfInfo,
   // ★ v0.4.24:JoinView/RoomView 等 UI 通过默认导出使用,缺了会 TypeError
   parseHostAddress, _getTransport,
   // ★ v2.4-p4 BUG-006/007
   swapSeats, kickPlayer,
   scanLanRooms,
+  // ★ v0.4.26 BUG-02:按本机 IP 生成本子网扫描候选
+  buildScanCandidates,
   // ★ v2.1 P3:host 迁移
   selectNextHostBySeat, requestHostMigration, announceNewHost,
   // ★ v0.4.19 V0419-01:确定性本地选举

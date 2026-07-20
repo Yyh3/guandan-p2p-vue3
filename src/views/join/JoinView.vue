@@ -20,6 +20,12 @@
         />
       </div>
       <p v-if="addressError" class="form-error">{{ addressError }}</p>
+      <!-- ★ v0.4.26 BUG-02:支持“输房间号加入” — 输号后点扫描/加入会自动匹配同网房主 -->
+      <div class="input-row">
+        <span class="input-label">或房间号</span>
+        <input v-model="roomNo" maxlength="6" placeholder="6 位数字(自动扫描匹配)" class="input" />
+      </div>
+      <p class="card-hint">不知道 IP?输房间号后点下方“扫描局域网房间”,会自动找到同网房主</p>
       <!-- ★ v0.4.9:扫一扫按钮(真机才显示) -->
       <div class="qr-row">
         <button class="action-btn-small" @click="openScanner">📷 扫一扫</button>
@@ -50,14 +56,26 @@
       </div>
     </div>
 
-    <!-- 浏览器版:用 6 位房间号 -->
+    <!-- 浏览器版:用 6 位房间号 或 房主 IP -->
     <div v-else class="card">
-      <h2 class="card-title">方式 1:输入房间号</h2>
+      <h2 class="card-title">方式 1:输入房主 IP(跨设备)</h2>
+      <p class="card-hint">房主是 Android App 时会显示「本机 IP」,连同一 Wi-Fi 后填在这里可跨设备加入</p>
+      <div class="input-row">
+        <span class="input-label">IP:端口</span>
+        <input
+          v-model="hostAddress"
+          placeholder="192.168.43.1:8848"
+          class="input"
+        />
+      </div>
+      <p v-if="addressError" class="form-error">{{ addressError }}</p>
+
+      <h2 class="card-title" style="margin-top:16px">方式 2:输入房间号(同一浏览器多标签)</h2>
       <div class="input-row">
         <span class="input-label">房间号</span>
         <input v-model="roomNo" maxlength="6" placeholder="6 位数字" class="input" />
       </div>
-      <p class="card-hint">房主开热点后,会显示一个 6 位数字房间号</p>
+      <p class="card-hint">房间号仅用于本机多标签模拟;跨设备请填房主 IP 或扫描</p>
       <div class="scan-row">
         <button class="action-btn-small" :class="{ disabled: scanning }" @click="scanRooms">
           {{ scanning ? '扫描中...' : '🔍 扫描局域网房间' }}
@@ -116,7 +134,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { isNativeCapacitor } from '@/common/ws-server.js'
+import WsServer, { isNativeCapacitor } from '@/common/ws-server.js'
 import { parseQrScanResult, buildAppDeepLink } from '@/common/qr-fallback.js'
 import net from '@/common/network.js'
 
@@ -159,8 +177,8 @@ onUnmounted(() => {
 })
 
 // ★ P1-11 修复:IP 地址校验不只检查形状,还检查有效范围与端口。
+// ★ v0.4.26 BUG-04:浏览器端也支持手动输入房主 IP,校验对两端都生效(空则不报错)。
 const addressError = computed(() => {
-  if (!isNative.value) return ''
   const text = hostAddress.value.trim()
   if (!text) return ''
   try {
@@ -196,9 +214,12 @@ const appDeepLink = computed(() => {
 })
 const canJoin = computed(() => {
   if (isNative.value) {
-    return !addressError.value && hostAddress.value.trim().length > 0
+    // ★ v0.4.26 BUG-02:有效房主 IP 或 已输房间号(扫描匹配)均可加入
+    if (hostAddress.value.trim()) return !addressError.value
+    return roomNo.value.length >= 4
   }
-  // 浏览器模式:扫描到的 WS 房间可直接加入;否则需要房间号
+  // 浏览器模式:手动填的房主 IP(跨设备)> 扫描到的 WS 房间 > 房间号(本机多标签)
+  if (hostAddress.value.trim()) return !addressError.value
   if (selectedWsHost.value) return true
   return roomNo.value.length >= 4
 })
@@ -207,10 +228,21 @@ function useScan() {
   if (route.query.scanHost) hostAddress.value = String(route.query.scanHost)
 }
 
-function onJoin() {
+async function onJoin() {
   if (!canJoin.value) return
   if (isNative.value) {
+    // ★ v0.4.26 BUG-02:只输了房间号没输 IP → 先扫描局域网匹配该房间号
+    if (!hostAddress.value.trim() && roomNo.value.length >= 4) {
+      await scanRooms()  // 扫描内部会自动 selectRoom 匹配项 → 回填 hostAddress
+      if (!hostAddress.value.trim()) {
+        scanError.value = `未找到房间号 ${roomNo.value},请确认房主已开房且在同一 Wi-Fi`
+        return
+      }
+    }
     // ws 模式:URL ?role=joiner&host=1.2.3.4:8848
+    router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddress.value.trim())}`)
+  } else if (hostAddress.value.trim()) {
+    // ★ v0.4.26 BUG-04:浏览器手动输入房主 IP → 走 WS 跨设备加入(joinRemoteRoom)
     router.push(`/room?role=joiner&host=${encodeURIComponent(hostAddress.value.trim())}`)
   } else if (selectedWsHost.value) {
     // ★ P1-11 修复:浏览器扫描到 WS 房间后,按真实 IP:port 加入,不走本地 BC
@@ -227,7 +259,25 @@ async function scanRooms() {
   scanError.value = ''
   scanDone.value = false
   try {
-    discovered.value = await net.scanLanRooms()
+    // ★ v0.4.26 BUG-02:优先按本机 IP 推导本子网扫描(覆盖 Windows 热点/非常见网段),
+    //   拿不到本机 IP 时回退默认候选。
+    let candidates = null
+    if (isNative.value) {
+      try {
+        const ipRes = await WsServer.getLocalIp()
+        const localIp = ipRes?.ip
+        // 浏览器 fallback 返回 127.0.0.1 无意义,仅原生真实 IP 才用
+        if (localIp && localIp !== '127.0.0.1' && typeof net.buildScanCandidates === 'function') {
+          candidates = net.buildScanCandidates(localIp)
+        }
+      } catch (_) { /* 拿不到本机 IP,走默认候选 */ }
+    }
+    discovered.value = await net.scanLanRooms(candidates ? { candidates } : {})
+    // ★ v0.4.26 BUG-02:若已输入房间号,扫到后自动匹配对应房间(实现“输房间号加入”)
+    if (roomNo.value && roomNo.value.length >= 4) {
+      const match = discovered.value.find(r => String(r.roomNo) === String(roomNo.value))
+      if (match) selectRoom(match)
+    }
   } catch (e) {
     discovered.value = []
     scanError.value = `扫描失败: ${e?.message || e}`
