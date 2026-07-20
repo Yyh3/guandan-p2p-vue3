@@ -213,11 +213,11 @@ function stackStyle(i) {
     inset 0 0 0 6px rgba(0, 0, 0, 0.4),
     0 0 40px rgba(126, 87, 194, 0.18),
     0 10px 28px rgba(0, 0, 0, 0.55);
-  background: radial-gradient(ellipse at center,
+  background: var(--table-felt, radial-gradient(ellipse at center,
     #3a5a8a 0%,
     #2a3a6a 35%,
     #1a2a4e 70%,
-    #0a1233 100%);
+    #0a1233 100%));
   overflow: hidden;
 }
 

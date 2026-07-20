@@ -185,12 +185,20 @@
       </div>
     </div>
 
-    <!-- ===== 6.5 结算遮罩 (mobile 版) ===== -->
+    <!-- ===== 6.5 结算遮罩 (mobile 版) ★ v0.4.28 P0-3:与桌面同款战绩卡(金箔印章+亮点) ===== -->
     <div v-if="phase === 'finished'" class="result-mask-mobile">
-      <div class="result-card-mobile">
-        <h2 class="result-title-mobile">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
-        <p class="result-meta-mobile" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
-        <p class="result-meta-mobile" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局</p>
+      <div class="result-card-mobile" :class="myWin ? 'is-win' : 'is-lose'">
+        <div class="result-seal-mobile" aria-hidden="true"><span>{{ myWin ? '胜' : '负' }}</span></div>
+        <div class="result-head-mobile">
+          <h2 class="result-title-mobile">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
+          <p class="result-meta-mobile" v-if="!isRestartAfterA">升 {{ levelUp }} 级 · 下一局打 {{ nextLevelLabel }}</p>
+          <p class="result-meta-mobile" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局</p>
+        </div>
+        <div class="result-badges-mobile">
+          <span v-if="doubleUp" class="r-badge r-badge-gold">双上</span>
+          <span v-if="myWin" class="r-badge r-badge-green">旗开得胜</span>
+          <span v-else class="r-badge r-badge-gray">惜败</span>
+        </div>
         <div class="result-list-mobile">
           <div
             v-for="(seat, i) in finishedOrder"
@@ -290,6 +298,7 @@
               :is-level="isLevel(c)"
               :selected="isCardSelected(c)"
               :hinted="isHinted(c)"
+              :glow="isGlowing(c)"
               size="md"
             />
           </div>
@@ -440,6 +449,8 @@ const props = defineProps({
   initialLevelRank: { type: Number, default: undefined },
   // ★ Phase3 同步切牌:首家座位
   firstSeat: { type: Number, default: undefined },
+  // ★ v0.4.28 P1-4:生涯模式
+  career: { type: Boolean, default: false },
 })
 
 // 占位:给 useGameLogic 注入 mainActionsRef(虽然 mobile 不渲染桌面版 MainActions,
@@ -460,7 +471,7 @@ const {
   seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
-  playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
+  playerName, cardKey, isHinted, isGlowing, isLevel, rankColor, isWinningSeat, myWin, doubleUp,
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,
@@ -479,6 +490,7 @@ const {
   initialLevelRank: props.initialLevelRank,
   // ★ Phase3 同步切牌:首家座位
   firstSeat: props.firstSeat,
+  career: props.career,
 })
 
 // ★ P0-01:移动端长按某张牌选中整列(替代桌面双击)
@@ -1764,81 +1776,130 @@ button {
 /* ===== 结算遮罩 (mobile) ===== */
 .result-mask-mobile {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: rgba(2, 8, 6, 0.72);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   padding: 16px;
+  animation: resultFadeM 260ms var(--ease-out) both;
 }
+@keyframes resultFadeM { from { opacity: 0; } to { opacity: 1; } }
+/* ★ v0.4.28 P0-3:翡翠绿玻璃战绩卡(与桌面同款语言) */
 .result-card-mobile {
+  position: relative;
   width: 100%;
   max-width: 340px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,244,255,0.94));
-  border: 1px solid rgba(255,255,255,0.55);
-  border-radius: 18px;
-  padding: 20px 18px 16px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
-  color: #1a1a2e;
+  padding: 36px 18px 16px;
+  border-radius: 22px;
+  border: 1.5px solid var(--gold-primary);
+  background:
+    radial-gradient(130% 90% at 50% 0%, rgba(31, 122, 85, 0.5), rgba(10, 61, 44, 0.94) 62%),
+    var(--emerald-deep);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55), 0 0 40px rgba(212, 175, 55, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  color: #fff;
+  animation: resultPopM 460ms var(--ease-spring) both;
 }
+@keyframes resultPopM {
+  from { opacity: 0; transform: translateY(24px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.result-seal-mobile {
+  position: absolute;
+  top: -18px; right: 18px;
+  width: 66px; height: 66px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  transform: rotate(12deg);
+  border: 3px double currentColor;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), inset 0 0 0 4px rgba(255, 255, 255, 0.08);
+  animation: sealStampM 520ms var(--ease-spring) 120ms both;
+}
+@keyframes sealStampM {
+  from { opacity: 0; transform: rotate(12deg) scale(1.7); }
+  to { opacity: 1; transform: rotate(12deg) scale(1); }
+}
+.result-seal-mobile span { font-size: 32px; font-weight: 900; line-height: 1; }
+.result-card-mobile.is-win .result-seal-mobile { color: #ffd700; background: radial-gradient(circle at 35% 30%, #c62828, #8e1b1b); }
+.result-card-mobile.is-win .result-seal-mobile span { text-shadow: 0 0 12px rgba(255, 215, 0, 0.7); }
+.result-card-mobile.is-lose .result-seal-mobile { color: #b0bec5; background: radial-gradient(circle at 35% 30%, #455a64, #263238); }
+.result-head-mobile { text-align: center; margin-bottom: 12px; }
 .result-title-mobile {
-  margin: 0 0 6px;
-  font-size: 22px;
-  text-align: center;
-  background: linear-gradient(90deg, #2b2b52, #4a4a8a);
+  margin: 0 0 5px;
+  font-family: var(--font-display-cn);
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: var(--gold-metallic);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.result-meta-mobile {
-  margin: 0 0 14px;
-  text-align: center;
-  font-size: 13px;
-  color: #555;
+.result-meta-mobile { margin: 0; text-align: center; font-size: 12px; letter-spacing: 1px; color: rgba(255, 255, 255, 0.66); }
+.result-badges-mobile { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; }
+/* 亮点徽章(与桌面同款,scoped 需各自定义) */
+.r-badge {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  border: 1px solid transparent;
 }
-.result-list-mobile {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
+.r-badge-gold {
+  color: #2a1d08;
+  background: var(--gold-metallic);
+  box-shadow: 0 2px 10px rgba(212, 175, 55, 0.45);
 }
+.r-badge-green { color: #e8f5e9; background: rgba(67, 160, 71, 0.28); border-color: rgba(102, 187, 106, 0.5); }
+.r-badge-gray { color: rgba(255, 255, 255, 0.7); background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.18); }
+.result-list-mobile { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
 .result-row-mobile {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 9px 12px;
-  border-radius: 10px;
-  background: rgba(0,0,0,0.04);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 14px;
 }
-.result-row-mobile.rank-0 { background: linear-gradient(90deg, rgba(255,215,0,0.18), rgba(255,215,0,0.05)); }
-.result-row-mobile.rank-1 { background: rgba(212,175,55,0.12); }
-.result-row-mobile.rank-2 { background: rgba(120,120,150,0.12); }
-.result-row-mobile.rank-3 { background: rgba(180,80,80,0.12); }
-.result-rank-mobile { font-weight: 800; min-width: 38px; }
-.result-name-mobile { flex: 1; text-align: center; }
-.result-team-mobile { font-size: 12px; }
-.result-actions-mobile {
-  display: flex;
-  gap: 10px;
-}
+/* rankColor(i) 输出 gold/silver/bronze/last(旧 .rank-0 为死代码,已按真实类名重写) */
+.result-row-mobile.gold { border-left: 4px solid var(--gold-bright); }
+.result-row-mobile.gold .result-rank-mobile { color: var(--gold-bright); }
+.result-row-mobile.silver { border-left: 4px solid #cfd8dc; }
+.result-row-mobile.silver .result-rank-mobile { color: #cfd8dc; }
+.result-row-mobile.bronze { border-left: 4px solid #cd7f32; }
+.result-row-mobile.bronze .result-rank-mobile { color: #e0a06b; }
+.result-row-mobile.last { border-left: 4px solid #607d8b; }
+.result-row-mobile.last .result-rank-mobile { color: #90a4ae; }
+.result-rank-mobile { font-weight: 900; min-width: 38px; letter-spacing: 2px; }
+.result-name-mobile { flex: 1; text-align: center; color: rgba(255, 255, 255, 0.92); }
+.result-team-mobile { font-size: 12px; color: rgba(255, 255, 255, 0.6); }
+.result-actions-mobile { display: flex; gap: 10px; }
 .r-btn-mobile {
   flex: 1;
   padding: 12px 0;
   border: none;
   border-radius: 24px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 2px;
   cursor: pointer;
+  transition: transform var(--t-fast) var(--ease-out), filter 160ms var(--ease-out);
 }
+.r-btn-mobile:active:not(:disabled) { transform: scale(0.97); }
 .r-btn-mobile.primary {
-  background: linear-gradient(180deg, #f7d06f, #d4a827);
-  color: #2a1f08;
-  box-shadow: 0 4px 12px rgba(212,160,39,0.35);
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  color: #3a2308;
+  box-shadow: 0 6px 16px rgba(233, 173, 63, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 .r-btn-mobile.ghost {
-  background: rgba(0,0,0,0.06);
-  color: #444;
-  border: 1px solid rgba(0,0,0,0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
+.r-btn-mobile:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 发牌超时兜底 */
 .deal-timeout-mask {

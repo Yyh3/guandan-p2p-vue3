@@ -72,6 +72,7 @@ const commands = [
   'node src/common/v0425-adversarial-fixes.test.js',
   'node src/common/v0426-bug-fixes.test.js',
   'node src/common/v0427-adversarial-fixes.test.js',
+  'node src/common/v0428-features.test.js',
 ]
 
 function run(cmd) {

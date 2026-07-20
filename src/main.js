@@ -5,6 +5,7 @@ import './styles/tokens.css'
 import './styles/app-theme.css'
 import './styles/html.css'
 import './styles/simple-mode.css'
+import './styles/table-themes.css'
 import audio from '@/common/audio.js'
 import storage from '@/common/storage.js'
 

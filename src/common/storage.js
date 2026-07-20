@@ -7,6 +7,8 @@ const KEY_NICKNAME = 'guandan_nickname'
 const KEY_AVATAR = 'guandan_avatar'
 const KEY_HISTORY = 'guandan_history'
 const KEY_SETTINGS = 'guandan_settings'
+// ★ v0.4.28 P0-2:记录「上次的牌局」,首页可一键回到最近的对局
+const KEY_LAST_GAME = 'guandan_last_game'
 
 function getNickname() {
   try {
@@ -48,6 +50,8 @@ const DEFAULT_SETTINGS = {
   hapticsEnabled: true,
   // v0.4.25:简洁模式 — 隐藏牌桌/牌面装饰纹理,界面更干净(对局页 .page 加 simple-mode class)
   simpleMode: false,
+  // ★ v0.4.28 P1-3:牌桌/牌背主题 — classic/bamboo/lacquer/porcelain
+  tableTheme: 'classic',
 }
 
 function getSettings() {
@@ -100,11 +104,31 @@ function clearHistory() {
   try { localStorage.removeItem(KEY_HISTORY); return true } catch (e) { return false }
 }
 
+// ★ v0.4.28 P0-2:上次的牌局(房间号 / host 地址 / 角色 / 时间戳)
+//   首页读到最后 24h 内的记录时展示「回到上次的牌局」金色横幅。
+function setLastGame(info) {
+  if (!info || typeof info !== 'object') return false
+  try {
+    localStorage.setItem(KEY_LAST_GAME, JSON.stringify({ ...info, time: Date.now() }))
+    return true
+  } catch (e) { return false }
+}
+function getLastGame() {
+  try {
+    const raw = localStorage.getItem(KEY_LAST_GAME)
+    return raw ? JSON.parse(raw) : null
+  } catch (e) { return null }
+}
+function clearLastGame() {
+  try { localStorage.removeItem(KEY_LAST_GAME); return true } catch (e) { return false }
+}
+
 export {
   getNickname, setNickname,
   getAvatar, setAvatar,
   getSettings, setSettings,
   getHistory, addHistory, clearHistory,
+  setLastGame, getLastGame, clearLastGame,
 }
 
 // Default export for convenient `import storage from '@/common/storage.js'`
@@ -113,5 +137,6 @@ const storage = {
   getAvatar, setAvatar,
   getSettings, setSettings,
   getHistory, addHistory, clearHistory,
+  setLastGame, getLastGame, clearLastGame,
 }
 export default storage

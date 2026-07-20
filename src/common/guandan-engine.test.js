@@ -498,8 +498,9 @@ console.log('\n=== 15. P3-1 + P3-2:常量正确性回归 ===')
   // v3.x 修复:原注释写反(大王=16,小王=15),实际是 大王=17,小王=16
   eq('RANK_NAMES[16]=小王', E.RANK_NAMES[16], '小王')
   eq('RANK_NAMES[17]=大王', E.RANK_NAMES[17], '大王')
-  // v3.x 修复:LEVEL_SEQUENCE 不再 export(无调用方,避免误导)
-  assert('LEVEL_SEQUENCE 不在导出中', E.LEVEL_SEQUENCE === undefined)
+  // ★ v0.4.28:LEVEL_SEQUENCE 重新导出(career.js 生涯爬梯依赖)— 验证其正确性
+  assert('LEVEL_SEQUENCE 已导出', Array.isArray(E.LEVEL_SEQUENCE))
+  eq('LEVEL_SEQUENCE 为 2→A 共 13 级', E.LEVEL_SEQUENCE, [15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
 }
 
 console.log('\n=== 16. P3-4:王炸简化后仍识别 4 王 ===')

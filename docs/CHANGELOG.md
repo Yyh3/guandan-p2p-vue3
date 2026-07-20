@@ -4,6 +4,38 @@
 
 ---
 
+## v0.4.28 (2026-07-20) — UI 留存功能落地（P0/P1/P2 全套，真实运行截图验证）
+
+> 基于 v0.4.27 产出的 `docs/UI-RETENTION-SUGGESTIONS.md`，将 P0/P1/P2 建议全部落地，并用 dev server 真机截图逐页验证美观。
+
+### A. P0 快速见效
+
+- P0-1 首启引导：HomeView 一次性「30 秒开一桌」三步图卡（翡翠绿玻璃卡 + 四花色浮动 + 金色序号圆点），取代技术黑话文案。
+- P0-2 回到上次的牌局：storage 新增 lastGame 存取；RoomView 进房记录；HomeView 24h 内金色横幅一键直达（joiner 带 host 重进 / host 重开）。
+- P0-3 结算战绩卡：桌面/移动端结算遮罩重做为翡翠绿玻璃卡 + 金箔胜/负印章（sealStamp 动画）+ 双上/旗开得胜/惜败徽章；useGameLogic 新增 `myWin`/`doubleUp`。
+- P0-4 可出牌金光 + hover：CardPlay `glow` prop（呼吸金光不带 💡）；useGameLogic `autoGlowKeys` 轮到自己自动发光；桌面手牌 hover 3D 抬升。
+
+### B. P1 进度闭环（离线留存发动机）
+
+- P1-1 成就系统：`achievements.js` 6 个掼蛋术语成就（旗开得胜/双上高手/大获全胜/头游达人/常胜将军/百战老兵），纯函数从 history 推导 + 解锁持久化去重；局末弹金色解锁提示；HistoryView 成就徽章墙。
+- P1-2 牌风雷达：`PlayStyleRadar.vue` 零依赖 SVG 四维（胜率/头游/稳健/升级）接入 HistoryView。
+- P1-3 牌桌主题：`table-themes.css` 4 套（经典/墨绿竹纹/绛红漆器/月白青花），覆盖桌面毡 + 牌背；App.vue 挂 theme class；SettingsView 「牌桌主题」缩略选择器即时生效。
+- P1-4 AI 生涯：`career.js` 2→A 13 级爬梯（胜升负降）+ 段位对手 flavor/难度映射；AIView 生涯卡（进度轨 + 对手 + 生涯对战）；`?career=1` 局末结算计入爬梯；`guandan-engine.js` 重新导出 `LEVEL_SEQUENCE`。
+
+### C. P2 质感氛围
+
+- P2-1 字体：`--font-display-cn` 系统楷/宋栈（离线无 CDN），用于 Logo/引导卡/结算标题。
+- P2-2 氛围：HomeView 金色浮尘粒子（纯 CSS 动画）。
+- P2-3 声音：`sfxWin`（上行大三和弦）/`sfxLose`（下行小调），局末按胜负播放。
+
+### D. 测试与基线
+
+- 新增 `v0428-features.test.js`（43 case：成就判定/解锁去重 + 生涯爬梯/登顶/对手映射）并注册。
+- `guandan-engine.test.js` LEVEL_SEQUENCE 断言反转为“已导出 + 13 级正确”。
+- 版本断言对齐 0.4.28；基线：`npm test` 全绿；`npm run build` 成功。
+
+---
+
 ## v0.4.27 (2026-07-20) — 全项目对抗性审查修复 + web/安卓一致性 + UI 留存建议
 
 > 用户要求“用对抗性审查的方式查出整个项目的 bug”。网络层 6 bug（修 5 缓 1）+ 视图层 5 项，并确保 web/安卓页面一致（不一致按用户友好取舍）。

@@ -36,6 +36,8 @@ import { bombFxForType, floatingPosition } from '@/common/effects.js'
 import net from '@/common/network.js'
 import { rotateSeats } from '@/common/seat-rotation.js'
 import storage from '@/common/storage.js'
+import { checkNewUnlocks } from '@/common/achievements.js'
+import { recordCareerResult, careerLevelLabel } from '@/common/career.js'
 import { showToast } from '@/common/dialog-bus.js'
 import * as haptics from '@/common/haptics.js'
 
@@ -115,6 +117,8 @@ export function useGameLogic(opts = {}) {
   const multiplier = ref(1)
   // ★ v0.4.9:AI 难度(从 game.state.difficulty 读,默认 'medium')
   const gameDifficulty = ref(opts.difficulty || 'medium')
+  // ★ v0.4.28 P1-4:生涯模式(AIView 经 ?career=1 传入,局末结算计入 2→A 爬梯)
+  const careerMode = ref(opts.career === true || opts.career === '1' || opts.career === 1)
   // ★ LOGIC-01 修复:AI 页传入的起始级牌,若合法则作为默认 levelRank
   if (opts.initialLevelRank != null && typeof opts.initialLevelRank === 'number') {
     levelRank.value = opts.initialLevelRank
@@ -526,6 +530,29 @@ export function useGameLogic(opts = {}) {
   function isHinted(c) { return hintCards.value.includes(cardKey(c)) }
   function isLevel(c) { return E.isLevelCard(c, levelRank.value) }
   function rankColor(i) { return ['gold', 'silver', 'bronze', 'last'][i] }
+  // ★ v0.4.28 P0-4:自动金光 — 轮到自己且能压过/可领出时,可出牌呼吸发光。
+  //   与手动提示(hintCards)分离:只发光不选中、不弹 💡,避免过度打扰;
+  //   用 _glowSeq 防止异步竞态(手牌/lastPlay 快变时旧结果不覆盖新状态)。
+  const autoGlowKeys = ref([])
+  let _glowSeq = 0
+  watch([myTurn, phase, lastPlay, myHand], async () => {
+    if (!myTurn.value || phase.value !== 'playing' || myHand.value.length === 0) {
+      autoGlowKeys.value = []
+      return
+    }
+    const seq = ++_glowSeq
+    try {
+      const AI = await _loadAI()
+      if (seq !== _glowSeq) return
+      const diff = gameDifficulty.value
+      const r = lastPlay.value
+        ? AI.decide(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
+        : AI.autoPlayGrouped(myHand.value, lastPlay.value, levelRank.value, { isTeammateLast: false }, diff)
+      if (seq !== _glowSeq) return
+      autoGlowKeys.value = (r && r.type === 'play' && Array.isArray(r.cards)) ? r.cards.map(c => cardKey(c)) : []
+    } catch (e) { if (seq === _glowSeq) autoGlowKeys.value = [] }
+  })
+  function isGlowing(c) { return autoGlowKeys.value.includes(cardKey(c)) }
   // ★ HCI-04 修复:以头游所在队伍为胜方,而不是简单前两名
   const winningTeam = computed(() => {
     const headSeat = finishedOrder.value?.[0]
@@ -534,6 +561,16 @@ export function useGameLogic(opts = {}) {
   function isWinningSeat(seat) {
     return winningTeam.value !== null && seat % 2 === winningTeam.value
   }
+  // ★ v0.4.28 P0-3:结算战绩卡 — “我”是否赢(胜/负印章) + 双上亮点(头游二游同队)
+  const myWin = computed(() => {
+    const seat = (() => { try { return net.getSelfSeat ? net.getSelfSeat() : -1 } catch { return -1 } })()
+    return Number.isInteger(seat) && seat >= 0 && isWinningSeat(seat)
+  })
+  const doubleUp = computed(() => {
+    const fo = finishedOrder.value
+    return !!fo && fo.length >= 2 &&
+      Number.isInteger(fo[0]) && Number.isInteger(fo[1]) && fo[0] % 2 === fo[1] % 2
+  })
 
   // v3-2:按 rank 分组竖叠
   // ★ v0.4.25:理牌模式 — rank(点数分组,默认) / combo(牌型优先:顺子/同花顺/连对/钢板成列)
@@ -1035,6 +1072,29 @@ export function useGameLogic(opts = {}) {
           mySeat: selfSeat.value,
           myPlayerId: (() => { try { return net.getSelfInfo?.()?.uuid || selfSeat.value } catch { return selfSeat.value } })(),
         })
+        // ★ v0.4.28 P1-1:局末检查成就解锁 — 有新成就则弹金色提示(离线留存闭环)
+        try {
+          const fresh = checkNewUnlocks(storage.getHistory())
+          for (const a of fresh) showToast(`🏅 解锁成就「${a.name}」`)
+        } catch (e) { /* swallow */ }
+        // ★ v0.4.28 P2-3:胜负声音景观 — 赢播上行号角/输播下行低音,强化结算仪式感
+        try {
+          if (Array.isArray(ranks) && ranks.length > 0) {
+            const sfxSeat = (typeof selfSeat.value === 'number' && selfSeat.value >= 0) ? selfSeat.value : 0
+            if ((sfxSeat % 2) === (ranks[0] % 2)) audio.sfxWin(); else audio.sfxLose()
+          }
+        } catch (e) { /* swallow */ }
+        // ★ v0.4.28 P1-4:生涯模式局末记录 — 胜=升级/负=降级,弹金色晋级/惜败提示
+        if (careerMode.value && Array.isArray(ranks) && ranks.length > 0) {
+          try {
+            const mySeatNow = (typeof selfSeat.value === 'number' && selfSeat.value >= 0) ? selfSeat.value : 0
+            const win = (mySeatNow % 2) === (ranks[0] % 2)
+            const res = recordCareerResult(win)
+            if (res.champion) showToast('👑 登顶成功!你已打过 A,成为掼蛋之王!')
+            else if (res.promoted) showToast(`🎉 晋级!下一局打 ${careerLevelLabel(res.career)}`)
+            else if (res.demoted) showToast(`😤 惜败,降回 ${careerLevelLabel(res.career)},再战!`)
+          } catch (e) { /* swallow */ }
+        }
       }
     })
     // ★ Phase 4:复用已有实例且已发牌时不再重复 deal,避免覆盖状态
@@ -2207,8 +2267,8 @@ function commitPass(seat, source = 'manual') {
     // methods
     showNickToastBrief, onNickEditRequest, onChatSelect, onHostMigrated, refreshUiFromGameState,
     retryDeal,
-    playerName, formatCoins, cardKey, handCardKey, isHinted, isLevel, rankColor,
-    isWinningSeat,
+    playerName, formatCoins, cardKey, handCardKey, isHinted, isGlowing, isLevel, rankColor,
+    isWinningSeat, myWin, doubleUp,
     columnKey, colMinHeight, colRankLabel, toggleCol, toggleCard, toggleCardId, isCardSelected, onClear,
     selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
     setCardSelected, dragStart, dragOver, dragEnd, dragIsActive, consumeDragSuppress,

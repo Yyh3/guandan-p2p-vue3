@@ -11,6 +11,10 @@
     <!-- 背景层:深翡翠绿径向 + 菱形金色纹样(opacity 8-12%) -->
     <div class="bg app-half-table-bg"></div>
     <div class="bg-pattern" aria-hidden="true"></div>
+    <!-- ★ v0.4.28 P2-2:金色浮尘 — 光柱中缓缓上浮的微粒,让首页“活”起来(纯 CSS 动画) -->
+    <div class="dust-layer" aria-hidden="true">
+      <i v-for="n in 14" :key="n" class="dust" :style="dustStyle(n)"></i>
+    </div>
 
     <!-- 顶部 Logo:牌叠 + "掼蛋" 金色金属渐变 -->
     <header class="logo">
@@ -25,6 +29,21 @@
 
     <!-- 中部:主按钮 + 次级按钮 + 文字入口(按 UI 整改分级) -->
     <nav class="actions" aria-label="主菜单">
+      <!-- ★ v0.4.28 P0-2:回到上次的牌局(24h 内) — 回访用户一键直达,减少重走建房/加入流程 -->
+      <button
+        v-if="lastGame"
+        class="resume-banner"
+        data-testid="home-resume-banner"
+        @click="onResumeGame"
+      >
+        <span class="resume-spade" aria-hidden="true">♠</span>
+        <span class="resume-text">
+          <strong>{{ lastGame.role === 'host' ? '再开一桌' : '回到上次的牌局' }}</strong>
+          <em>房间 {{ lastGame.roomNo }} · {{ lastGame.role === 'host' ? '你开的房' : '你加入的房' }}</em>
+        </span>
+        <span class="resume-arrow" aria-hidden="true">›</span>
+      </button>
+
       <button
         class="glass-btn glass-btn-primary"
         data-testid="home-start-btn"
@@ -102,6 +121,31 @@
       @close="showNickEditor = false"
       @confirm="onNickConfirm"
     />
+
+    <!-- ★ v0.4.28 P0-1:首启引导 — 把“多标签联机”技术黑话换成 30 秒开局三步图卡 -->
+    <div v-if="showOnboarding" class="onboard-mask" data-testid="home-onboarding">
+      <div class="onboard-card">
+        <div class="onboard-suits" aria-hidden="true"><i>♠</i><i class="red">♥</i><i>♣</i><i class="red">♦</i></div>
+        <h2 class="onboard-title">30 秒，开一桌</h2>
+        <p class="onboard-sub">无需服务器 · 不耗流量 · 同一热点即可</p>
+        <ol class="onboard-steps">
+          <li class="onboard-step">
+            <span class="step-no">1</span>
+            <span class="step-body"><strong>一人开热点</strong><em>手机开个人热点，或连同一个 WiFi</em></span>
+          </li>
+          <li class="onboard-step">
+            <span class="step-no">2</span>
+            <span class="step-body"><strong>朋友加入</strong><em>扫码或输入 IP / 房间号进房</em></span>
+          </li>
+          <li class="onboard-step">
+            <span class="step-no">3</span>
+            <span class="step-body"><strong>开打</strong><em>4 人齐了自动开局，边聊边玩</em></span>
+          </li>
+        </ol>
+        <button class="onboard-cta" data-testid="home-onboard-cta" @click="onOnboardDone">马上开局</button>
+        <button class="onboard-skip" @click="onOnboardDone">先看看</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -126,6 +170,9 @@ const myName = ref('')
 const myAvatar = ref('🀄')
 const showNickEditor = ref(false)
 const isNative = ref(false)
+// ★ v0.4.28 P0-1/P0-2
+const showOnboarding = ref(false)
+const lastGame = ref(null)
 
 // ★ v2.1 P1 host 主动踢人:被踢的 joiner 跳到 /?force_disconnected=1 → 首页弹提示
 const kickedToast = ref('')
@@ -135,6 +182,11 @@ onMounted(() => {
   isNative.value = isNativeCapacitor()
   myName.value = storage.getNickname()
   myAvatar.value = storage.getAvatar()
+  // ★ v0.4.28 P0-1:首启引导(仅未标记过时弹)
+  try { if (!localStorage.getItem('guandan_onboarded')) showOnboarding.value = true } catch (e) {}
+  // ★ v0.4.28 P0-2:读最后 24h 内的牌局记录 → 展示「回到上次的牌局」横幅
+  const lg = storage.getLastGame()
+  if (lg && lg.roomNo && (Date.now() - (lg.time || 0)) < 24 * 3600 * 1000) lastGame.value = lg
   // ★ v2.1 P1 处理被踢提示
   if (route.query.force_disconnected === '1') {
     const reason = route.query.reason ? String(route.query.reason) : ''
@@ -161,10 +213,42 @@ function onNickConfirm({ nickname, avatar }) {
   showNickEditor.value = false
 }
 function onSettings() { haptics.click(); router.push('/settings') }
+// ★ v0.4.28 P2-2:浮尘粒子样式 — 由 n 生成确定性伪随机(避免每次渲染拖动)
+function dustStyle(n) {
+  const rand = (seed) => {
+    const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
+    return x - Math.floor(x)
+  }
+  const size = (2 + rand(n + 150) * 3).toFixed(1)
+  return {
+    left: (rand(n) * 100).toFixed(1) + '%',
+    width: size + 'px',
+    height: size + 'px',
+    animationDelay: (rand(n + 50) * 12).toFixed(1) + 's',
+    animationDuration: (9 + rand(n + 100) * 10).toFixed(1) + 's',
+  }
+}
 function goHost() { haptics.click(); router.push('/room?role=host') }
 function goJoin() { haptics.click(); router.push('/join') }
 function goAI() { haptics.click(); router.push('/ai') }
 function goGuide() { haptics.click(); router.push('/guide') }
+// ★ v0.4.28 P0-1:引导完成(CTA 或“先看看”)— 打标不再弹
+function onOnboardDone() {
+  haptics.click()
+  showOnboarding.value = false
+  try { localStorage.setItem('guandan_onboarded', '1') } catch (e) {}
+}
+// ★ v0.4.28 P0-2:回到上次的牌局 — host 重开一桌;joiner 带上 host 地址重进
+function onResumeGame() {
+  haptics.click()
+  const lg = lastGame.value
+  if (!lg) return goHost()
+  if (lg.role === 'joiner' && lg.host) {
+    router.push(`/room?role=joiner&roomNo=${lg.roomNo}&host=${encodeURIComponent(lg.host)}`)
+  } else {
+    router.push('/room?role=host')
+  }
+}
 </script>
 
 <style scoped>
@@ -198,6 +282,23 @@ function goGuide() { haptics.click(); router.push('/guide') }
   background-repeat: repeat;
   opacity: 0.08;
   mix-blend-mode: screen;
+}
+
+/* ★ v0.4.28 P2-2:金色浮尘 — 从底部缓缓上浮、轻微横移,营造光柱氛围 */
+.dust-layer { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.dust {
+  position: absolute;
+  bottom: -12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.85), rgba(255, 215, 0, 0));
+  opacity: 0;
+  animation: dustFloat linear infinite;
+}
+@keyframes dustFloat {
+  0%   { transform: translateY(0) translateX(0); opacity: 0; }
+  12%  { opacity: 0.65; }
+  85%  { opacity: 0.4; }
+  100% { transform: translateY(-105vh) translateX(28px); opacity: 0; }
 }
 
 /* 顶部内容上浮 */
@@ -258,6 +359,7 @@ function goGuide() { haptics.click(); router.push('/guide') }
 }
 .logo-title {
   font: var(--font-display);
+  font-family: var(--font-display-cn);
   font-size: 56px;
   font-weight: 900;
   letter-spacing: 12px;
@@ -613,4 +715,181 @@ function goGuide() { haptics.click(); router.push('/guide') }
   }
   .kicked-toast { top: 12px; }
 }
+
+/* ============================================================
+ * ★ v0.4.28 P0-2:「回到上次的牌局」金色横幅
+ * 金箔渐变底 + 黑桃水印,悬停微亮,与主 CTA 拉开层级(放在主按钮上方)
+ * ============================================================ */
+.resume-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(255, 215, 0, 0.55);
+  background:
+    linear-gradient(120deg, rgba(255, 215, 0, 0.16), rgba(255, 215, 0, 0.05) 55%, rgba(255, 215, 0, 0.14));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  text-align: left;
+  transition: transform var(--t-fast) var(--ease-out), box-shadow 200ms var(--ease-out), border-color 200ms var(--ease-out);
+  animation: resumeIn 420ms var(--ease-spring) both;
+}
+.resume-banner:hover {
+  transform: translateY(-2px);
+  border-color: var(--gold-bright);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4), 0 0 18px rgba(255, 215, 0, 0.28);
+}
+.resume-banner:active { transform: scale(0.98); }
+.resume-spade {
+  font-size: 26px;
+  color: var(--gold-bright);
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.5);
+  line-height: 1;
+}
+.resume-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.resume-text strong {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--gold-bright);
+}
+.resume-text em {
+  font-style: normal;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resume-arrow { font-size: 22px; color: var(--gold-primary); line-height: 1; }
+@keyframes resumeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+ * ★ v0.4.28 P0-1:首启引导图卡(30 秒开局三步)
+ * 翡翠绿玻璃面板 + 金边 + 四花色装饰 + 金色序号圆点
+ * ============================================================ */
+.onboard-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 10, 8, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: onboardFade 280ms var(--ease-out) both;
+}
+@keyframes onboardFade { from { opacity: 0; } to { opacity: 1; } }
+.onboard-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 28px 26px 22px;
+  border-radius: 22px;
+  border: 1.5px solid var(--gold-primary);
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(31, 122, 85, 0.55), rgba(10, 61, 44, 0.92) 60%),
+    var(--emerald-deep);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55), 0 0 40px rgba(212, 175, 55, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  text-align: center;
+  animation: onboardPop 420ms var(--ease-spring) both;
+}
+@keyframes onboardPop {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.onboard-suits { display: flex; justify-content: center; gap: 14px; margin-bottom: 10px; }
+.onboard-suits i {
+  font-style: normal;
+  font-size: 20px;
+  color: var(--gold-bright);
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.45);
+  animation: suitBob 2.4s ease-in-out infinite;
+}
+.onboard-suits i.red { color: #ff8a80; text-shadow: 0 0 10px rgba(229, 57, 53, 0.4); }
+.onboard-suits i:nth-child(2) { animation-delay: 0.3s; }
+.onboard-suits i:nth-child(3) { animation-delay: 0.6s; }
+.onboard-suits i:nth-child(4) { animation-delay: 0.9s; }
+@keyframes suitBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.onboard-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display-cn);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: var(--gold-metallic);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.onboard-sub {
+  margin: 0 0 20px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.onboard-steps { list-style: none; margin: 0 0 22px; padding: 0; display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.onboard-step {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.step-no {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 900;
+  color: #2a1d08;
+  background: var(--gold-metallic);
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
+}
+.step-body { display: flex; flex-direction: column; gap: 1px; }
+.step-body strong { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: 1px; }
+.step-body em { font-style: normal; font-size: 12px; color: rgba(255, 255, 255, 0.55); }
+.onboard-cta {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 26px;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #3a2308;
+  background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%);
+  box-shadow: 0 8px 22px rgba(233, 173, 63, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease-out), filter 160ms var(--ease-out);
+}
+.onboard-cta:hover { filter: brightness(1.06); }
+.onboard-cta:active { transform: scale(0.98); }
+.onboard-skip {
+  margin-top: 10px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 160ms var(--ease-out);
+}
+.onboard-skip:hover { color: rgba(255, 255, 255, 0.85); }
 </style>

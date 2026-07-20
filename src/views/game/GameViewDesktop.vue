@@ -114,6 +114,7 @@
               :is-level="isLevel(c)"
               :selected="isCardSelected(c)"
               :hinted="isHinted(c)"
+              :glow="isGlowing(c)"
               size="md"
             />
           </div>
@@ -197,12 +198,20 @@
       </div>
     </div>
 
-    <!-- 结算遮罩 -->
+    <!-- 结算遮罩 ★ v0.4.28 P0-3:战绩卡重做 — 翡翠绿玻璃卡 + 金箔胜/负印章 + 亮点徽章,值得截图发群 -->
     <div v-if="phase === 'finished'" class="result-mask">
-      <div class="result-card">
-        <h2 class="result-title">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
-        <p class="result-meta" v-if="!isRestartAfterA">升 {{ levelUp }} 级 → 下一局打 {{ nextLevelLabel }}</p>
-        <p class="result-meta" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局(levelRank 重置为 2)</p>
+      <div class="result-card" :class="myWin ? 'is-win' : 'is-lose'">
+        <div class="result-seal" aria-hidden="true"><span>{{ myWin ? '胜' : '负' }}</span></div>
+        <div class="result-head">
+          <h2 class="result-title">{{ isRestartAfterA ? '本轮过 A' : '本局结束' }}</h2>
+          <p class="result-meta" v-if="!isRestartAfterA">升 {{ levelUp }} 级 · 下一局打 {{ nextLevelLabel }}</p>
+          <p class="result-meta" v-else>本轮已从 A 过关,点击下方按钮开启新一轮对局</p>
+        </div>
+        <div class="result-badges">
+          <span v-if="doubleUp" class="r-badge r-badge-gold">双上</span>
+          <span v-if="myWin" class="r-badge r-badge-green">旗开得胜</span>
+          <span v-else class="r-badge r-badge-gray">惜败</span>
+        </div>
         <div class="result-list">
           <div
             v-for="(seat, i) in finishedOrder"
@@ -326,6 +335,8 @@ const props = defineProps({
   initialLevelRank: { type: Number, default: undefined },
   // ★ Phase3 同步切牌:首家座位
   firstSeat: { type: Number, default: undefined },
+  // ★ v0.4.28 P1-4:生涯模式
+  career: { type: Boolean, default: false },
 })
 
 // v2.4 task 1:纯逻辑抽到 useGameLogic.js composable
@@ -435,7 +446,7 @@ const {
   seatData, handColumns, selectedCount, selectedPreview, cardCounter,
   // methods
   onNickEditRequest, onChatSelect, onHostMigrated,
-  playerName, cardKey, isHinted, isLevel, rankColor, isWinningSeat,
+  playerName, cardKey, isHinted, isGlowing, isLevel, rankColor, isWinningSeat, myWin, doubleUp,
   columnKey, colMinHeight, colRankLabel, toggleCol, toggleCardId, isCardSelected, onClear,
   selectedCardsFromIds, selectedCardsFromColumns, onSortHand, onAutoFindBest, onSuitTab,
   dragStart, dragOver, dragEnd, consumeDragSuppress,
@@ -453,6 +464,7 @@ const {
   // ★ LOGIC-01 修复:AI 页传入的起始级牌
   initialLevelRank: props.initialLevelRank,
   firstSeat: props.firstSeat,
+  career: props.career,
 })
 
 // ★ v0.4.25:拖动连选(mouse)— mousedown 起拖,mouseenter 连选,mouseup 收尾;
@@ -940,6 +952,12 @@ function onNickEditorConfirmed(p) {
   height: 84px;
   transition: transform var(--t-fast) var(--ease-out);
 }
+/* ★ v0.4.28 P0-4:桌面手牌 hover 3D 抬升 — 轻浮起 + 微放大并提到最前,
+   给“这张牌能被点”以即时触觉反馈(纯 CSS,不影响选中/拖动逻辑) */
+.hand-card:hover {
+  transform: translateY(-10px) scale(1.05);
+  z-index: 999 !important;
+}
 /* v3-3:列底 ×N 标签,强化"列"的概念 */
 .col-count {
   position: absolute;
@@ -1305,41 +1323,115 @@ function onNickEditorConfirmed(p) {
 /* 结算遮罩 */
 .result-mask {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: rgba(2, 8, 6, 0.72);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: resultFade 260ms var(--ease-out) both;
 }
+@keyframes resultFade { from { opacity: 0; } to { opacity: 1; } }
+/* ★ v0.4.28 P0-3:翡翠绿玻璃战绩卡 + 金边,胜/负双色氛围 */
 .result-card {
+  position: relative;
   width: 90%; max-width: 400px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,244,255,0.94));
-  border: 1px solid rgba(255,255,255,0.55);
-  border-radius: 16px;
-  padding: 24px;
-  color: var(--text-on-card);
-  box-shadow: 0 24px 50px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.7);
+  padding: 40px 26px 24px;
+  border-radius: 22px;
+  border: 1.5px solid var(--gold-primary);
+  background:
+    radial-gradient(130% 90% at 50% 0%, rgba(31, 122, 85, 0.5), rgba(10, 61, 44, 0.94) 62%),
+    var(--emerald-deep);
+  color: #fff;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55), 0 0 44px rgba(212, 175, 55, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  animation: resultPop 460ms var(--ease-spring) both;
 }
-.result-title { font-size: 22px; font-weight: bold; text-align: center; }
-.result-meta { font-size: 14px; color: #ff7e3d; text-align: center; margin: 8px 0 16px; }
+@keyframes resultPop {
+  from { opacity: 0; transform: translateY(26px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 金箔胜/负印章 — 卡片右上角斜盖,胜=金红/负=灰蓝 */
+.result-seal {
+  position: absolute;
+  top: -20px; right: 22px;
+  width: 76px; height: 76px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  transform: rotate(12deg);
+  border: 3px double currentColor;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), inset 0 0 0 4px rgba(255, 255, 255, 0.08);
+  animation: sealStamp 520ms var(--ease-spring) 120ms both;
+}
+@keyframes sealStamp {
+  from { opacity: 0; transform: rotate(12deg) scale(1.7); }
+  to { opacity: 1; transform: rotate(12deg) scale(1); }
+}
+.result-seal span {
+  font-size: 38px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+}
+.result-card.is-win .result-seal { color: #ffd700; background: radial-gradient(circle at 35% 30%, #c62828, #8e1b1b); }
+.result-card.is-win .result-seal span { text-shadow: 0 0 12px rgba(255, 215, 0, 0.7); }
+.result-card.is-lose .result-seal { color: #b0bec5; background: radial-gradient(circle at 35% 30%, #455a64, #263238); }
+.result-head { text-align: center; margin-bottom: 14px; }
+.result-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display-cn);
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: var(--gold-metallic);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.result-meta { margin: 0; font-size: 13px; letter-spacing: 1px; color: rgba(255, 255, 255, 0.66); }
+/* 亮点徽章 */
+.result-badges { display: flex; justify-content: center; gap: 8px; margin-bottom: 16px; }
+.r-badge {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  border: 1px solid transparent;
+}
+.r-badge-gold {
+  color: #2a1d08;
+  background: var(--gold-metallic);
+  box-shadow: 0 2px 10px rgba(212, 175, 55, 0.45);
+}
+.r-badge-green { color: #e8f5e9; background: rgba(67, 160, 71, 0.28); border-color: rgba(102, 187, 106, 0.5); }
+.r-badge-gray { color: rgba(255, 255, 255, 0.7); background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.18); }
+/* 名次行 — 深色底 + 奖牌色左边条 */
+.result-list { border-radius: 14px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
 .result-list .result-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 0; border-bottom: 1px solid #eee;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.045);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
-.result-rank { font-size: 16px; font-weight: bold; width: 60px; }
-.result-name { flex: 1; font-size: 16px; }
-.result-team { font-size: 12px; opacity: 0.7; }
-.result-row.gold { border-left: 4px solid var(--gold); padding-left: 8px; }
-.result-row.gold .result-rank { color: var(--gold); }
-.result-row.silver { border-left: 4px solid #c0c0c0; padding-left: 8px; }
-.result-row.silver .result-rank { color: #c0c0c0; }
-.result-row.bronze { border-left: 4px solid #cd7f32; padding-left: 8px; }
-.result-row.bronze .result-rank { color: #cd7f32; }
-.result-row.last { border-left: 4px solid #666; padding-left: 8px; }
-.result-row.last .result-rank { color: #999; }
-.result-actions { display: flex; gap: 12px; margin-top: 16px; }
-.r-btn { flex: 1; height: 48px; border: none; border-radius: var(--radius-md); font-size: 15px; font-weight: bold; cursor: pointer; }
-.r-btn.primary { background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%); color: #3a2308; box-shadow: 0 8px 18px rgba(255, 178, 24, 0.32); }
-.r-btn.ghost { background: #eef0f5; color: #667; }
+.result-list .result-row:last-child { border-bottom: none; }
+.result-rank { font-size: 15px; font-weight: 900; width: 52px; letter-spacing: 2px; }
+.result-name { flex: 1; font-size: 15px; color: rgba(255, 255, 255, 0.92); }
+.result-team { font-size: 12px; color: rgba(255, 255, 255, 0.6); }
+.result-row.gold { border-left: 4px solid var(--gold-bright); }
+.result-row.gold .result-rank { color: var(--gold-bright); }
+.result-row.silver { border-left: 4px solid #cfd8dc; }
+.result-row.silver .result-rank { color: #cfd8dc; }
+.result-row.bronze { border-left: 4px solid #cd7f32; }
+.result-row.bronze .result-rank { color: #e0a06b; }
+.result-row.last { border-left: 4px solid #607d8b; }
+.result-row.last .result-rank { color: #90a4ae; }
+.result-actions { display: flex; gap: 12px; margin-top: 18px; }
+.r-btn { flex: 1; height: 48px; border: none; border-radius: 24px; font-size: 15px; font-weight: 800; letter-spacing: 2px; cursor: pointer; transition: transform var(--t-fast) var(--ease-out), filter 160ms var(--ease-out); }
+.r-btn:active:not(:disabled) { transform: scale(0.97); }
+.r-btn.primary { background: linear-gradient(180deg, #fff2a8 0%, #ffd24e 42%, #ce8e1b 100%); color: #3a2308; box-shadow: 0 8px 20px rgba(233, 173, 63, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.55); }
+.r-btn.primary:hover:not(:disabled) { filter: brightness(1.06); }
+.r-btn.ghost { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); border: 1px solid rgba(255, 255, 255, 0.18); }
+.r-btn.ghost:hover { background: rgba(255, 255, 255, 0.14); }
+.r-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 发牌中:手牌 + 座位牌背 隐藏
  * v2.5:加 transition: none 确保发牌完 .dealing class 移除时,手牌区"立刻"恢复 opacity 1,

@@ -15,6 +15,20 @@
 
 ## 当前任务记录
 
+- 2026-07-20：完成 v0.4.28 UI 留存功能落地（用户要求“完成 UI 修改建议并真实运行验证美观”，基于 `docs/UI-RETENTION-SUGGESTIONS.md`）：
+  - P0-1 首启引导：HomeView 一次性「30 秒开一桌」三步图卡（翡翠绿玻璃卡 + 四花色浮动 + 金色序号），localStorage `guandan_onboarded` 打标。
+  - P0-2 回到上次的牌局：storage 新增 `setLastGame/getLastGame/clearLastGame`；RoomView 进房记录（role/roomNo/host）；HomeView 24h 内展示金色横幅一键直达。
+  - P0-3 结算战绩卡：桌面/移动端结算遮罩重做为翡翠绿玻璃卡 + 金箔胜/负印章（sealStamp 动画）+ 双上/旗开得胜/惜败徽章；useGameLogic 新增 `myWin`/`doubleUp` computed；修正移动端 `.rank-0` 死代码为真实类名。
+  - P0-4 可出牌金光 + hover：CardPlay 新增 `glow` prop（`.is-glow` 呼吸金光，不带 💡）；useGameLogic `autoGlowKeys` watcher（轮到自己且能压过/可领出时自动发光，_glowSeq 防竞态）；桌面 `.hand-card:hover` 3D 抬升。
+  - P1-1 成就系统：新增 `achievements.js`（6 个掼蛋术语成就，纯函数从 history 推导 + 解锁持久化去重）；局末 `checkNewUnlocks` 弹金色提示；HistoryView 成就徽章墙（解锁金亮/未解锁置灰）。
+  - P1-2 牌风雷达：新增 `PlayStyleRadar.vue`（零依赖 SVG 四维：胜率/头游/稳健/升级）接入 HistoryView。
+  - P1-3 牌桌主题：新增 `table-themes.css`（经典/墨绿竹纹/绛红漆器/月白青花 4 套，覆盖 `--table-felt`/`--card-back-base`/`--card-back-svg`）；`.ellipse-table`/`.card-back-inner` 改用 var() 回落；App.vue 挂 theme class + 监听 `guandan:theme-change`；SettingsView 「牌桌主题」缩略选择器。
+  - P1-4 AI 生涯：新增 `career.js`（2→A 13 级爬梯，胜升负降，段位对手 flavor + 难度映射）；AIView 生涯卡（爬梯进度轨 + 对手 + 生涯对战按钮）；`?career=1` 透传 useGameLogic，局末 `recordCareerResult` 弹晋级/惜败提示；`guandan-engine.js` 重新导出 `LEVEL_SEQUENCE`。
+  - P2-1 字体：tokens 新增 `--font-display-cn`（系统楷/宋栈，离线无 CDN），用于首页 Logo/引导卡/结算标题。
+  - P2-2 氛围：HomeView 金色浮尘粒子（纯 CSS 动画，确定性伪随机布局）。
+  - P2-3 声音：audio.js 新增 `sfxWin`（上行大三和弦 fanfare）/`sfxLose`（下行小调），局末按胜负播放。
+  - 验证：dev server 真机截图逐页核对（首页引导/横幅/浮尘、AI 生涯卡、战绩页成就墙+雷达、对局页、结算卡 DOM）；新增 `v0428-features.test.js`（43 case）并注册；`guandan-engine.test.js` LEVEL_SEQUENCE 断言反转为“已导出”；版本断言对齐 0.4.28；`npm test` 全绿；`npm run build` 成功。
+
 - 2026-07-20：完成 v0.4.27 全项目对抗性审查修复 + web/安卓一致性 + UI 留存建议（用户要求“对抗性审查查出整个项目 bug”）：
   - 网络层 P0-1（换座×心跳检查器×解散三者叠加，任何一次换座必在 ~6-23s 内解散房间）：心跳检查器不跳过 `hostSeat`，换座后 host 新座位无心跳被收割 → RoomView `peer:leave` 命中 hostSeat 即解散。修复：真实/测试版心跳检查器均跳过 `hostSeat`（收割时补清 token/connAlive）；`swapSeats(a,b)` 同步互换 `lastHeartbeat`/`seatResumeTokens`/`seatConnAlive` 账目（顺带修二次换座 token 不匹配 P1-2）。
   - 网络层 P1-1：joiner 收到涉及自身的 `SEAT_SWAP_COMMITTED` 后不重绑 ws↔seat → 加 `scheduleJoinRetry()`。

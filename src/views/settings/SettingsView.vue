@@ -131,6 +131,28 @@
           </div>
           <p class="card-hint">隐藏牌桌花纹、桌面光效和牌面纹理,界面更干净,低配设备更省电</p>
         </div>
+
+        <!-- ★ v0.4.28 P1-3:牌桌/牌背主题切换(即时预览) -->
+        <div class="card">
+          <div class="row">
+            <span class="row-label">牌桌主题</span>
+          </div>
+          <div class="theme-grid">
+            <button
+              v-for="t in tableThemes"
+              :key="t.id"
+              class="theme-swatch"
+              :class="{ active: tableTheme === t.id }"
+              @click="setTableTheme(t.id)"
+            >
+              <span class="swatch-preview" :style="{ background: t.felt }">
+                <i class="swatch-back" :style="{ background: t.back }"></i>
+              </span>
+              <span class="swatch-name">{{ t.label }}</span>
+            </button>
+          </div>
+          <p class="card-hint">切换后立即生效,牌桌毡面与牌背一同换装</p>
+        </div>
       </div>
     </section>
 
@@ -243,6 +265,8 @@ const voiceEnabled = ref(true)
 const hapticsEnabled = ref(true)
 const animationEnabled = ref(true)
 const theme = ref('dark')
+// ★ v0.4.28 P1-3:牌桌主题
+const tableTheme = ref('classic')
 // v0.4.25:简洁模式(隐藏装饰纹理/光效)
 const simpleMode = ref(false)
 // ★ UI-P0-01 修复:aiDifficulty ref 未声明导致设置页初始化抛错
@@ -284,6 +308,13 @@ const themes = [
   { id: 'dark', label: '深色' },
   { id: 'light', label: '浅色' },
 ]
+// ★ v0.4.28 P1-3:牌桌主题选项(felt/back 仅用于设置页缩略预览,真实样式在 table-themes.css)
+const tableThemes = [
+  { id: 'classic', label: '经典', felt: 'radial-gradient(ellipse at center, #3a5a8a 0%, #1a2a4e 70%, #0a1233 100%)', back: 'linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%)' },
+  { id: 'bamboo', label: '墨绿竹纹', felt: 'radial-gradient(ellipse at center, #1f7a55 0%, #14533b 55%, #0a3d2c 100%)', back: 'linear-gradient(135deg, #1b5e20 0%, #0d3b16 100%)' },
+  { id: 'lacquer', label: '绛红漆器', felt: 'radial-gradient(ellipse at center, #8a3a3a 0%, #5e2a2a 55%, #3d1414 100%)', back: 'linear-gradient(135deg, #7a1f1f 0%, #4a0f0f 100%)' },
+  { id: 'porcelain', label: '月白青花', felt: 'radial-gradient(ellipse at center, #4a6fa5 0%, #33507e 55%, #1e3350 100%)', back: 'linear-gradient(135deg, #e8eef5 0%, #c9d6e8 100%)' },
+]
 
 onMounted(() => {
   const s = storage.getSettings()
@@ -301,6 +332,7 @@ onMounted(() => {
   hapticsEnabled.value = s.hapticsEnabled !== false
   animationEnabled.value = s.animationEnabled !== false
   theme.value = s.theme || 'dark'
+  tableTheme.value = s.tableTheme || 'classic'
   simpleMode.value = s.simpleMode === true
   // ★ v0.4.9:从 storage 灌入全局 AI 难度
   aiDifficulty.value = s.aiDifficulty === 'hard' ? 'hard' : 'medium'
@@ -325,6 +357,7 @@ function saveAll() {
     hapticsEnabled: hapticsEnabled.value,
     animationEnabled: animationEnabled.value,
     theme: theme.value,
+    tableTheme: tableTheme.value,
     simpleMode: simpleMode.value,
     aiDifficulty: aiDifficulty.value,
   })
@@ -343,6 +376,14 @@ function setStyle(id) {
   bgmStyle.value = id
   audio.setBgmStyle(id)
   saveAll()
+}
+
+// ★ v0.4.28 P1-3:切换牌桌主题 — 保存 + 广播给 App.vue 即时换装
+function setTableTheme(id) {
+  haptics.select()
+  tableTheme.value = id
+  saveAll()
+  window.dispatchEvent(new CustomEvent('guandan:theme-change', { detail: { theme: id } }))
 }
 
 // 试听当前风格(不保存,仅临时播放)
@@ -591,6 +632,41 @@ function onBack() {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ====== ★ v0.4.28 P1-3:牌桌主题缩略选择器 ====== */
+.theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+@media (max-width: 420px) { .theme-grid { grid-template-columns: repeat(2, 1fr); } }
+.theme-swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 8px 6px;
+  background: rgba(4, 8, 22, 0.3);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform var(--t-fast) var(--ease-out), border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
+}
+.theme-swatch:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.3); }
+.theme-swatch.active {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.swatch-preview {
+  position: relative;
+  width: 100%;
+  height: 44px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.4);
+}
+.swatch-back {
+  width: 22px; height: 32px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 215, 0, 0.6);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+.swatch-name { font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.8); letter-spacing: 0.5px; }
+.theme-swatch.active .swatch-name { color: var(--gold-bright); }
 
 /* ====== 清除按钮 ====== */
 .action-btn {

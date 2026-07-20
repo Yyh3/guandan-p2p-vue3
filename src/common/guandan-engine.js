@@ -870,7 +870,7 @@ function groupHandCombo(hand, levelRank) {
 // ============ 导出 ============
 export {
   // 常量
-  SUIT_NAMES, RANK_NAMES, TYPE, TYPE_ORDER,
+  SUIT_NAMES, RANK_NAMES, TYPE, TYPE_ORDER, LEVEL_SEQUENCE,
   // 牌组
   createDeck, shuffle, sortHand, sortHandGrouped, isLevelCard, deal,
   // PRNG(4-tab 联机用 seeded firstPlayer)

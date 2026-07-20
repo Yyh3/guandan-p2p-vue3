@@ -19,6 +19,7 @@
         'is-disabled': disabled,
         'selected': selected,
         'hinted': hinted,
+        'is-glow': glow,
         'face-down': faceDown,
       },
     ]"
@@ -116,6 +117,8 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
   // 是否高亮(提示)
   hinted: { type: Boolean, default: false },
+  // ★ v0.4.28 P0-4:自动金光(轮到自己且能压过时,可出牌呼吸发光,不带 💡 角标)
+  glow: { type: Boolean, default: false },
   // 是否级牌
   isLevel: { type: Boolean, default: false },
   // 是否禁用(灰态)— v3.x 新增
@@ -369,6 +372,13 @@ const sizeClass = computed(() => `size-${props.size}`)
   animation: card-hint-shine var(--card-hint-glow-period) ease-in-out infinite;
 }
 
+/* ----- ★ v0.4.28 P0-4:自动金光(轮到自己且能压过)-----
+   复用 card-hint-shine 呼吸金光,但周期略缓、不弹 💡 角标,
+   与手动提示(hinted)区分开,避免过度打扰 */
+.card-play.is-glow {
+  animation: card-hint-shine calc(var(--card-hint-glow-period) * 1.4) ease-in-out infinite;
+}
+
 /* ----- 不可打出:opacity 0.6 + 灰态 spec §5.5 ----- */
 .card-play.is-disabled {
   opacity: 0.6;
@@ -394,7 +404,8 @@ const sizeClass = computed(() => `size-${props.size}`)
 .card-back-inner {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%);
+  /* ★ v0.4.28 P1-3:牌背底色可主题化(默认深红漆器) */
+  background: var(--card-back-base, linear-gradient(135deg, #8B1A1A 0%, #5C0E0E 100%));
   display: flex;
   align-items: center;
   justify-content: center;

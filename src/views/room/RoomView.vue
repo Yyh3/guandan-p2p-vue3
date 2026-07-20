@@ -606,6 +606,15 @@ onMounted(() => {
   myAvatar.value = route.query.avatar ? String(route.query.avatar) : storage.getAvatar()
   isNative.value = isNativeCapacitor()
   initNetwork()
+  // ★ v0.4.28 P0-2:记录「上次的牌局」— 首页读到最后 24h 内的记录展示「回到上次的牌局」横幅。
+  //   joiner 记 host 地址(重进需要);host 记房号(重开一桌)。
+  try {
+    storage.setLastGame({
+      role: isHost.value ? 'host' : 'joiner',
+      roomNo: roomNo.value,
+      host: route.query.host ? String(route.query.host) : '',
+    })
+  } catch (e) { /* swallow */ }
   // ★ v0.4.25:息屏唤醒自动重连 — 息屏时 WebView/浏览器冻结 JS 定时器并可能断开
   //   WebSocket,心跳(2s)停发 6s 后被 host 释放座位(局域网没断,是客户端"睡着"了)。
   //   唤醒时在此发现断线则自动重进:JOIN 携带 uuid + resumeToken,

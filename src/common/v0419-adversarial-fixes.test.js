@@ -182,7 +182,7 @@ console.log('\n=== 5. requestPromoteToHost 集成 selectNextHostCandidate + canH
 // ============== 6. 版本号 + npm test 集成 ==============
 console.log('\n=== 6. v0.4.20 版本号与 npm test 集成 ===')
 {
-  check('package.json version === 0.4.27', pkg.version === '0.4.27')
+  check('package.json version === 0.4.28', pkg.version === '0.4.28')
   const pkgSrc = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
   const usesWrapper = /scripts\/run-all-tests\.js/.test(pkgSrc)
   const wrapperPath = path.join(repoRoot, 'scripts/run-all-tests.js')

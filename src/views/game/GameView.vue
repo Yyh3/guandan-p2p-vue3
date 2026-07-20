@@ -7,6 +7,7 @@
     :difficulty="difficulty"
     :initial-level-rank="initialLevelRank"
     :first-seat="firstSeat"
+    :career="career"
   />
 </template>
 
@@ -98,4 +99,6 @@ const firstSeat = computed(() => {
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 && n <= 3 ? n : undefined
 })
+// ★ v0.4.28 P1-4:生涯模式标志(?career=1)— 局末结算计入 2→A 爬梯
+const career = computed(() => route.query.career === '1' || route.query.career === 'true')
 </script>

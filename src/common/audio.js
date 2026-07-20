@@ -1028,6 +1028,55 @@ function sfxClick() {
 }
 
 /**
+ * ★ v0.4.28 P2-3:胜利号角 — 结算赢牌时的上行大三和弦短 fanfare(纯合成,零资源)
+ * C5→E5→G5→C6 快速琶音 + 尾音延长,明亮不刺耳
+ */
+function sfxWin() {
+  if (!sfxEnabled) return
+  if (!ctx) return
+  const now = ctx.currentTime + 0.01
+  const notes = [523.25, 659.25, 783.99, 1046.5]  // C5 E5 G5 C6
+  notes.forEach((f, i) => {
+    const t = now + i * 0.09
+    const osc = ctx.createOscillator()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(f, t)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.16, t + 0.015)
+    g.gain.exponentialRampToValueAtTime(0.001, t + (i === notes.length - 1 ? 0.5 : 0.18))
+    osc.connect(g)
+    g.connect(sfxGain)
+    osc.start(t)
+    osc.stop(t + (i === notes.length - 1 ? 0.55 : 0.2))
+  })
+}
+
+/**
+ * ★ v0.4.28 P2-3:惜败低音 — 结算输牌时的下行小调两音(安慰不沮丧)
+ */
+function sfxLose() {
+  if (!sfxEnabled) return
+  if (!ctx) return
+  const now = ctx.currentTime + 0.01
+  const notes = [392, 311.13]  // G4 → Eb4 下行
+  notes.forEach((f, i) => {
+    const t = now + i * 0.16
+    const osc = ctx.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(f, t)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.12, t + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.001, t + (i === notes.length - 1 ? 0.45 : 0.2))
+    osc.connect(g)
+    g.connect(sfxGain)
+    osc.start(t)
+    osc.stop(t + (i === notes.length - 1 ? 0.5 : 0.22))
+  })
+}
+
+/**
  * 根据牌型播放对应声效
  * ★ v0.4.9:优先尝试真实 MP3 采样(sfxMode === 'real'),失败/未启用降级 Web Audio 合成
  * @param {string} type - guandan-engine 的 TYPE 常量
@@ -1197,6 +1246,7 @@ export {
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
   sfxClick,
+  sfxWin, sfxLose,
   speakText,
   // ★ v0.4.9:SFX 模式切换(synth / real)
   setSfxMode, getSfxMode, isSfxModeReal,
@@ -1214,6 +1264,7 @@ const audio = {
   sfxBomb, sfxJokerBomb, sfxSuperBomb,
   sfxCountdownTick, sfxCountdownWarn, sfxUrgentBeep,
   sfxClick,
+  sfxWin, sfxLose,
   speakText,
   setSfxMode, getSfxMode, isSfxModeReal,
   setMasterVolume,

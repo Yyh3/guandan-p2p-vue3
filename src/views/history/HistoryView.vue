@@ -56,6 +56,32 @@
       </div>
     </div>
 
+    <!-- ★ v0.4.28 P1-1:成就徽章墙 — 离线收集欲,回访动力;未解锁置灰,已解锁金亮 -->
+    <div class="achv-card">
+      <div class="achv-head">
+        <h3 class="achv-title">成就徽章</h3>
+        <span class="achv-count">{{ unlockedCount }}/{{ ACHIEVEMENTS.length }}</span>
+      </div>
+      <div class="achv-grid">
+        <div
+          v-for="a in ACHIEVEMENTS"
+          :key="a.id"
+          class="achv-item"
+          :class="{ unlocked: isAchvUnlocked(a.id) }"
+        >
+          <span class="achv-icon" aria-hidden="true">{{ a.icon }}</span>
+          <span class="achv-name">{{ a.name }}</span>
+          <span class="achv-desc">{{ a.desc }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ★ v0.4.28 P1-2:牌风雷达 — 四维画像,给数字一个“我是什么风格”的谈资 -->
+    <div v-if="history.length >= 3" class="radar-card">
+      <h3 class="radar-card-title">我的牌风</h3>
+      <PlayStyleRadar :values="radarValues" />
+    </div>
+
     <!-- v3.7 P2:战绩图表(柱状 + 折线,零依赖 SVG) -->
     <HistoryChart :history="history" />
 
@@ -106,9 +132,15 @@ import { showConfirm, showToast } from '@/common/dialog-bus.js'
 const router = useRouter()
 import HistoryChart from '@/components/HistoryChart.vue'
 import LevelUpTrendChart from '@/components/LevelUpTrendChart.vue'
+import PlayStyleRadar from '@/components/PlayStyleRadar.vue'
 import { computeSummary, isMyTeamWin } from '@/common/history.js'
+import { ACHIEVEMENTS, getUnlockedIds } from '@/common/achievements.js'
 
 const history = ref([])
+// ★ v0.4.28 P1-1:成就解锁状态
+const unlockedIds = ref([])
+const unlockedCount = computed(() => unlockedIds.value.length)
+function isAchvUnlocked(id) { return unlockedIds.value.includes(id) }
 
 // ★ v0.4.9:用 computeSummary 一次拿全部统计
 // ★ v0.4.24:computeSummary 逐条按 rec.mySeat 计算(联机每局座位可能不同),
@@ -120,8 +152,22 @@ const streakClass = computed(() => {
   if (s < 0) return 'streak-lose'
   return ''
 })
+// ★ v0.4.28 P1-2:牌风雷达四维(0..1)— 胜率/头游力/稳健度/升级速度
+const radarValues = computed(() => {
+  const s = summary.value
+  const n = s.totalGames || 1
+  return [
+    s.winRate,
+    s.rankDistribution.first / n,
+    1 - s.rankDistribution.last / n,
+    Math.min(s.avgLevelUp / 3, 1),
+  ]
+})
 
-onMounted(() => { history.value = storage.getHistory() })
+onMounted(() => {
+  history.value = storage.getHistory()
+  unlockedIds.value = getUnlockedIds()
+})
 function rankColor(pos) { return ['gold','silver','bronze','last'][pos] }
 function formatTime(t) {
   const d = new Date(t)
@@ -218,6 +264,64 @@ function onClear() {
 .rank-tag.silver { background: rgba(192, 192, 192, 0.18); color: #c0c0c0; }
 .rank-tag.bronze { background: rgba(205, 127, 50, 0.18); color: #cd7f32; }
 .rank-tag.last { background: rgba(255, 255, 255, 0.1); color: #999; }
+
+/* ★ v0.4.28 P1-1:成就徽章墙 — 已解锁金亮/未解锁置灰,hover 微抬 */
+.achv-card {
+  position: relative; z-index: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+  color: #fff;
+}
+.achv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.achv-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 2px; }
+.achv-count {
+  font-size: 12px; font-weight: 800;
+  color: var(--gold-bright);
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  padding: 2px 10px; border-radius: 999px;
+}
+.achv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (max-width: 420px) { .achv-grid { grid-template-columns: repeat(2, 1fr); } }
+.achv-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  filter: grayscale(1);
+  opacity: 0.42;
+  transition: transform var(--t-fast) var(--ease-out), box-shadow 200ms var(--ease-out), filter 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.achv-item.unlocked {
+  filter: none;
+  opacity: 1;
+  background: linear-gradient(160deg, rgba(255, 215, 0, 0.14), rgba(255, 215, 0, 0.04));
+  border-color: rgba(255, 215, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(212, 175, 55, 0.18);
+}
+.achv-item.unlocked:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(212, 175, 55, 0.3); }
+.achv-icon { font-size: 26px; line-height: 1; }
+.achv-item.unlocked .achv-icon { text-shadow: 0 0 12px rgba(255, 215, 0, 0.5); }
+.achv-name { font-size: 13px; font-weight: 800; letter-spacing: 1px; }
+.achv-item.unlocked .achv-name { color: var(--gold-bright); }
+.achv-desc { font-size: 10px; color: rgba(255, 255, 255, 0.55); line-height: 1.4; }
+
+/* ★ v0.4.28 P1-2:牌风雷达卡片 */
+.radar-card {
+  position: relative; z-index: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+  color: #fff;
+}
+.radar-card-title { margin: 0 0 8px; font-size: 16px; font-weight: 800; letter-spacing: 2px; text-align: center; }
 
 /* ★ v0.4.9:升级速度趋势卡片 */
 .trend-card {
