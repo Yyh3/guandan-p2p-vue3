@@ -75,7 +75,7 @@
             <!-- 拉夫领(波浪粗线) -->
             <path class="jst-ruff" d="M31 77 Q35 85 39 78 Q43 87 47 79 Q50 89 53 79 Q57 87 61 78 Q65 85 69 77" />
           </svg>
-          <span class="joker-cn" aria-hidden="true"><i>{{ jokerLabel[0] }}</i><i>{{ jokerLabel[1] }}</i></span>
+          <!-- ★ v0.4.29:去除「大王/小王」汉字,仅保留 JOKER 竖排 + 小丑 SVG(用户反馈) -->
           <span class="joker-word joker-word-br" aria-hidden="true"><i v-for="ch in 'JOKER'" :key="ch">{{ ch }}</i></span>
         </template>
         <template v-else>
@@ -324,29 +324,11 @@ const sizeClass = computed(() => `size-${props.size}`)
 .is-small-joker .jst-nose { fill: #565b85; }
 .is-small-joker .jst-ruff { stroke: #8d94c9; }
 
-/* 「大王 / 小王」横排(小丑图下方,衬线粗体) */
-.joker-cn {
-  position: absolute;
-  left: 50%;
-  top: 62%;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  font-size: 1em;
-  font-weight: 900;
-  line-height: 1.25;
-  font-family: "Songti SC", "STSong", "KaiTi", serif;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
-  z-index: 1;
-  white-space: nowrap;
-}
-.joker-cn i { font-style: normal; }
+/* ★ v0.4.29:「大王/小王」汉字已移除(用户反馈),.joker-cn 样式不再需要 */
 
-/* 小尺寸(sm)精简:隐藏 JOKER 字母,小丑放大,王字贴底 */
+/* 小尺寸(sm)精简:隐藏 JOKER 字母,小丑放大 */
 .size-sm .joker-word { display: none; }
 .size-sm .joker-jester { top: 5%; width: 82%; }
-.size-sm .joker-cn { font-size: 0.62em; top: auto; bottom: 4%; }
 
 /* ----- 选中态(桌面端)spec §5.5 ----- */
 .card-play.selected {

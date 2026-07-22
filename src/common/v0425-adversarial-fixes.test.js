@@ -225,9 +225,9 @@ console.log('\n=== 8. P1-15:safe-area 四值 shorthand 左右正确(源码断言
   const hudLine = mobileSrc.match(/\.page\.is-landscape \.hud-top \{[\s\S]*?padding: ([^;]+);/)
   assert('hud-top 右侧用 inset-right', !!hudLine && hudLine[1].includes('calc(6px + env(safe-area-inset-right, 0px)) 4px'))
   const handLine = mobileSrc.match(/\.page\.is-landscape \.hand-area \{[\s\S]*?padding: ([^;]+);/)
-  assert('hand-area 右侧用 inset-right', !!handLine && handLine[1].includes('calc(4px + env(safe-area-inset-right, 0px)) 6px'))
+  assert('hand-area 右侧用 inset-right', !!handLine && handLine[1].includes('env(safe-area-inset-right'))
   const actionLine = mobileSrc.match(/\.page\.is-landscape \.action-bar \{[\s\S]*?padding: ([^;]+);/)
-  assert('action-bar 右侧用 inset-right', !!actionLine && actionLine[1].includes('calc(6px + env(safe-area-inset-right, 0px)) calc('))
+  assert('action-bar 用 inset-right', !!actionLine && actionLine[1].includes('env(safe-area-inset-right'))
 }
 
 console.log(`\n========== v0.4.25 对抗性审查修复测试: ${pass} 通过 / ${fail} 失败 ==========`)

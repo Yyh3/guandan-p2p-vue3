@@ -546,7 +546,7 @@ const handOverlap = computed(() => {
   const count = handColumns.value.length
   if (count <= 1) return 0
   const viewportW = viewportWidth.value
-  const leftPad = 16
+  const leftPad = 8   // ★ v0.4.29:与 .hand-inner padding-left 同步(16→8)
   const rightSafe = 74 // 70px 智能理牌胶囊 + 4px 缓冲
   const available = Math.max(0, viewportW - leftPad - rightSafe)
   const naturalWidth = count * 56
@@ -1242,13 +1242,15 @@ button {
 .hand-inner {
   display: flex;
   flex-direction: row;
-  justify-content: center;
+  /* ★ v0.4.29 修复竖屏左侧牌截断:center → flex-start,
+     内容超宽时只溢出右侧(有 padding 缓冲),左侧始终完整可见 */
+  justify-content: flex-start;
   align-items: flex-end;
   flex-wrap: nowrap;
   min-height: 110px;
   /* v2.5:左右 padding 4 → 16,加 12px 黑边(用户反馈"左右两侧留一些空间") */
   /* ★ P1-06 修复:右侧留出 ≥60px 安全区,避免智能理牌胶囊压住最右列 */
-  padding: 8px 70px 8px 16px;
+  padding: 8px 70px 8px 8px;
   gap: 0;
   /* v3.9:overflow-x auto + overflow-y visible 会被 CSS spec 强制升级为 auto
    *   (如果 overflow-x 不是 visible,overflow-y 必须也非 visible),导致竖叠多张同 rank
@@ -1656,27 +1658,28 @@ button {
   top: 110px;
 }
 
-/* 手牌:bottom 14vh → bottom 56px(操作栏之上)
- * v2.5 patch: overflow hidden 改成 visible + 加 padding-top 12 + max-height 110,
- *   否则 col-rank (top -10) 浮在 .hand-area 顶外的部分会被裁,用户看不到"级"badge */
+/* ★ v0.4.29 横屏大改:手牌区占满底部(右侧留出操作栏 72px),
+   不再悬浮在操作栏上方,彻底消除重叠 */
 .page.is-landscape .hand-area {
-  bottom: 56px;
-  /* ★ v0.4.25 P1-15 修复:右侧 inset-right / 左侧 inset-left(旧版写反) */
-  padding: 12px calc(4px + env(safe-area-inset-right, 0px)) 6px calc(4px + env(safe-area-inset-left, 0px));
-  max-height: 120px;
+  bottom: 0;
+  right: 72px;  /* 操作栏宽度 */
+  padding: 8px calc(4px + env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) calc(4px + env(safe-area-inset-left, 0px));
+  max-height: 130px;
   overflow: visible;
 }
 .page.is-landscape .hand-inner {
   min-height: 50px;
-  padding: 4px 16px 6px;
+  padding: 4px 8px 6px;
   gap: 0;
+  justify-content: center; /* 横屏宽度充裕,居中展示手牌 */
 }
 .page.is-landscape .hand-column {
-  width: 44px;
+  width: 40px;
   min-height: 44px;
-  margin-left: -6px;
+  margin-left: -4px;
   padding: 6px 0 2px;
 }
+.page.is-landscape .hand-column:first-child { margin-left: 0; }
 .page.is-landscape .hand-column .hand-card {
   left: 4px;
   width: 36px;
@@ -1717,23 +1720,34 @@ button {
   z-index: 6;
 }
 
-/* 操作栏:bottom 0,height 50px */
+/* ★ v0.4.29 横屏大改:操作栏从底部改为右侧纵向排列(卡牌游戏横屏标准布局),
+   手牌区占满底部全宽,不再与按钮重叠 */
 .page.is-landscape .action-bar {
-  bottom: 0;
-  height: 56px;
-  /* ★ v0.4.25 P1-15 修复:右侧 inset-right / 左侧 inset-left(旧版写反) */
-  padding: 4px calc(6px + env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-left, 0px));
-  grid-template-columns: 0.9fr 0.9fr 1.2fr; /* ★ UX-P1-01 修复:3 个按钮对应 3 列 */
-  gap: 6px;
+  left: auto;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  width: 72px;
+  height: auto;
+  padding: 8px 6px calc(8px + env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(270deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.4) 100%);
+  border-top: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px 0 0 12px;
 }
 .page.is-landscape .action-bar button {
-  height: 48px;
-  min-height: 44px;
-  font-size: 14px;
+  width: 100%;
+  height: 44px;
+  min-height: 40px;
+  font-size: 13px;
   letter-spacing: 0.5px;
 }
-.page.is-landscape .action-icon { font-size: 18px; }
-.page.is-landscape .action-text { font-size: 12px; }
+.page.is-landscape .action-icon { font-size: 16px; }
+.page.is-landscape .action-text { font-size: 11px; }
 
 /* toast 缩 */
 .page.is-landscape .nick-toast,
