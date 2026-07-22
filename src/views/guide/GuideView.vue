@@ -1,10 +1,8 @@
 <template>
   <div class="page">
     <div class="bg app-half-table-bg"></div>
-    <!-- ★ v0.4.24:补返回入口(原来是纯死端页面) -->
-    <button class="back-btn-top" aria-label="返回" @click="router.back()">← 返回</button>
-    <h1 class="title">新手引导</h1>
-    <p class="subtitle">3 步搞定,4 人高铁/隧道也能开局</p>
+    <!-- ★ v0.4.29 精简:页头改用 PageHeader 共享组件 -->
+    <PageHeader title="新手引导" subtitle="3 步搞定,4 人高铁/隧道也能开局" />
 
     <div v-for="(step, i) in steps" :key="i" class="step-card">
       <div class="step-num">{{ i + 1 }}</div>
@@ -27,8 +25,7 @@
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
-const router = useRouter()
+import PageHeader from '@/components/PageHeader.vue'
 const steps = [
   { title: '其中一人开手机热点', lines: [
     '· 选一个手机当"房主",打开系统设置',
@@ -66,17 +63,9 @@ const rules = [
 
 <style scoped>
 .page { position: relative; min-height: 100vh; background: #080b16; padding: 70px 20px 30px; overflow: hidden; }
-/* ★ v0.4.24:左上角返回按钮 */
-.back-btn-top {
-  position: absolute; top: 18px; left: 18px; z-index: 2;
-  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
-  color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
-}
-.back-btn-top:hover { background: rgba(255,255,255,0.18); }
 .bg { z-index: 0; }
-.title, .subtitle, .step-card, .rules-card { position: relative; z-index: 1; }
-.title { font-size: 28px; font-weight: 900; color: #fff; text-align: center; text-shadow: 0 3px 12px rgba(0,0,0,0.35); }
-.subtitle { font-size: 13px; color: rgba(255,255,255,0.7); text-align: center; margin-top: 6px; }
+/* ★ v0.4.29 精简:返回按钮/标题/副标题样式已移至 PageHeader.vue */
+.step-card, .rules-card { position: relative; z-index: 1; }
 .step-card {
   background: linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.07));
   border: 1px solid rgba(255,255,255,0.18);

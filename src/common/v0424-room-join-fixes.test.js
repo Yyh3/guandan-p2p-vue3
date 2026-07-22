@@ -173,9 +173,12 @@ console.log('\n=== 14. C-14:GuideView 对齐现 UI ===')
   check('步骤含「加入房间」扫码/IP', guideSrc.includes('扫码,或手动输入房主 IP:端口'))
   check('不再有「开热点建房」旧文案', !guideSrc.includes('开热点建房'))
   check('不再有「连热点加入」旧文案', !guideSrc.includes('连热点加入'))
-  check('GuideView 有返回按钮', guideSrc.includes('back-btn-top'))
-  check('AIView 有返回按钮', aiViewSrc.includes('back-btn-top'))
-  check('HistoryView 有返回按钮', historyViewSrc.includes('back-btn-top'))
+  // ★ v0.4.29 精简:返回按钮抽取到 PageHeader 共享组件,三页面改用 <PageHeader>
+  const pageHeaderSrc = fs.readFileSync(path.join(repoRoot, 'src/components/PageHeader.vue'), 'utf-8')
+  check('PageHeader 含返回按钮 back-btn-top', pageHeaderSrc.includes('back-btn-top'))
+  check('GuideView 用 PageHeader(含返回按钮)', guideSrc.includes('PageHeader'))
+  check('AIView 用 PageHeader(含返回按钮)', aiViewSrc.includes('PageHeader'))
+  check('HistoryView 用 PageHeader(含返回按钮)', historyViewSrc.includes('PageHeader'))
 }
 
 // ============== 15. C-15:SettingsView aria-expanded 动态绑定 ==============
