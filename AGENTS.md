@@ -15,118 +15,21 @@
 
 ## 当前任务记录
 
-- 2026-07-20：完成安卓/网页 UI 一致性 + 响应式验证 + 可复用模块精简（用户要求“确认安卓网页 UI 一致、安卓响应式适配横竖屏、可复用模块精简”）：
-  - 响应式架构核实：安卓手机（竖屏/横屏 h≤500）与平板竖屏（768×1024）走 GameViewMobile；平板横屏/桌面走 GameViewDesktop。两端均为同一份 Vue 代码，UI 天然一致；平台差异仅 isNativeCapacitor 门控功能（扫码/深链/BGM 解锁，有意为之）。
-  - 多视口验证：Playwright 脚本在 360×640 / 390×844 / 844×390 / 768×1024 / 1024×768 五个视口截图（首页/AI/对局页）+ DOM 包围盒测量；确认本人座位（桌面左下）与手牌/按钮无重叠（座位 right=198 < 手牌 left=240、< 按钮 left=279/341），AI-东贴右边缘不遮挡出牌区。
-  - 模块精简：结算战绩卡在桌面/移动端原本重复（各 ~50 行模板 + ~110 行样式），抽取为共享 `ResultOverlay.vue`（响应式：基础桌面尺寸 + @media≤768px 收紧），两端改用同一组件；保留 `.result-mask` 类名与「本局结束/返回首页/下一局」文案（E2E result-overlay.spec.js 依赖），`primary` 统一走 `onPrimaryResultAction`。共精简约 320 行重复代码。
-  - 验证：E2E result-overlay 通过；`npm test` 全绿；`npm run build` 成功。
-  - 暂缓：PageHeader（返回+标题+副标题，AIView/HistoryView/GuideView 重复）抽取被 v0424 源码断言锁定，需同步改测试，列为后续。
+> 详细变更见 `docs/CHANGELOG.md` 与 `git log`。此处只保留最近几轮的关键上下文与不变量。
 
-- 2026-07-20：修复对局页座位布局（用户反馈“AI-东遮挡 + 本人身份卡不见了”）：
-  - AI-东遮挡：`.seat-right` 旧定位 `right:240px` 侵入桌面出牌区,压住右侧飞入的牌(如 J♠);改贴右边缘 `right:24px`(与左侧对手 `left:24px` 对称),与记牌器(top:46%)/聊天(bottom:196px)纵向错开。
-  - 本人身份卡缺失：桌面端 `:deep(.seat-bottom)` 旧版 `display:none` 隐藏(原以为手牌可代表自己),玩家看不到自己的身份卡;改为显示并置于左下角(操作栏/手牌均居中,左下为空档),与右上队友/左右对手形成四角布局。
-  - 验证：DOM 测量确认无重叠(本人卡 x16-196 与最左按钮 x221 留白 25px;手牌 y415-591 在本人卡 y669 之上);截图核对四角布局;无测试锁定旧样式;`npm test` 全绿;`npm run build` 成功。
+- **v0.4.29（2026-07-20）座位布局 + 响应式验证 + 模块精简**：
+  - AI-东遮挡：`.seat-right` 由 `right:240px`（侵入出牌区压牌）改贴右边缘 `right:24px`，与左侧对手对称。
+  - 本人身份卡：桌面端 `:deep(.seat-bottom)` 旧版 `display:none` 隐藏，改为显示于左下角（与队友/对手成四角布局）；横屏仍隐藏（`.is-landscape`）。
+  - 响应式架构：安卓手机（竖/横屏 h≤500）+ 平板竖屏（768×1024）走 GameViewMobile；平板横屏/桌面走 GameViewDesktop。两端同一份 Vue 代码，UI 天然一致；平台差异仅 isNativeCapacitor 门控（扫码/深链/BGM 解锁，有意为之）。Playwright 五视口（360×640/390×844/844×390/768×1024/1024×768）截图 + DOM 包围盒测量确认无重叠。
+  - 模块精简：结算战绩卡抽取为共享 `ResultOverlay.vue`（响应式，保留 `.result-mask` 类名与「本局结束/返回首页/下一局」文案供 E2E，`primary` 走 `onPrimaryResultAction`）；页头（返回+标题+副标题）抽取为 `PageHeader.vue`（AIView/HistoryView/GuideView 复用）。
 
-- 2026-07-20：完成配色统一（用户反馈“蓝色牌桌与新增绿色元素不搭配”）：
-  - 根因：对局桌面（`.ellipse-table`）与大厅半桌背景（`app-half-table-bg`）还是 v3 前的**蓝紫色**，而品牌规范（UI-REDESIGN-V3-SPEC）与新增 UI（引导卡/生涯卡/结算卡/成就墙）均走翡翠绿 → 蓝桌成了“少数派”。
-  - 修复：`.ellipse-table` 桌毡改翡翠绿径向渐变（与房间页 `--felt-base` 同色），桌面环境光从蓝紫改翡翠深绿 + 金色外晕；`app-half-table-bg` 半桌桌毡同步改翡翠绿、氛围光改暖金顶光 + 深翡翠暗场。
-  - 主题重构：`table-themes.css` 经典款从蓝紫改为翡翠绿（品牌默认）；原蓝紫保留为新增「深海蓝」（`theme-ocean`）主题供怀旧；移除与经典重复的「墨绿竹纹」；SettingsView/App.vue 选项同步（翡翠绿/深海蓝/绛红漆器/月白青花）。
-  - 保留：队友=蓝/对手=红/自己=绿的身份三色不动（语义色，非背景冲突）。
-  - 验证：dev server 截图核对首页（深翡翠+金 casino 风）与对局页（绿色椭圆桌面）；无测试断言旧色值；`npm test` 全绿；`npm run build` 成功。
+- **配色统一（v0.4.29）**：对局桌面（`.ellipse-table`）+ 大厅半桌背景（`app-half-table-bg`）从 v3 前遗留的**蓝紫**改为**翡翠绿**（品牌色，与房间页 `--felt-base` 同色）；原蓝紫保留为「深海蓝」（`theme-ocean`）主题供怀旧。**不变量：队友=蓝/对手=红/自己=绿的身份三色是语义色，不随主题变。**
 
-- 2026-07-20：完成 v0.4.28 UI 留存功能落地（用户要求“完成 UI 修改建议并真实运行验证美观”，基于 `docs/UI-RETENTION-SUGGESTIONS.md`）：
-  - P0-1 首启引导：HomeView 一次性「30 秒开一桌」三步图卡（翡翠绿玻璃卡 + 四花色浮动 + 金色序号），localStorage `guandan_onboarded` 打标。
-  - P0-2 回到上次的牌局：storage 新增 `setLastGame/getLastGame/clearLastGame`；RoomView 进房记录（role/roomNo/host）；HomeView 24h 内展示金色横幅一键直达。
-  - P0-3 结算战绩卡：桌面/移动端结算遮罩重做为翡翠绿玻璃卡 + 金箔胜/负印章（sealStamp 动画）+ 双上/旗开得胜/惜败徽章；useGameLogic 新增 `myWin`/`doubleUp` computed；修正移动端 `.rank-0` 死代码为真实类名。
-  - P0-4 可出牌金光 + hover：CardPlay 新增 `glow` prop（`.is-glow` 呼吸金光，不带 💡）；useGameLogic `autoGlowKeys` watcher（轮到自己且能压过/可领出时自动发光，_glowSeq 防竞态）；桌面 `.hand-card:hover` 3D 抬升。
-  - P1-1 成就系统：新增 `achievements.js`（6 个掼蛋术语成就，纯函数从 history 推导 + 解锁持久化去重）；局末 `checkNewUnlocks` 弹金色提示；HistoryView 成就徽章墙（解锁金亮/未解锁置灰）。
-  - P1-2 牌风雷达：新增 `PlayStyleRadar.vue`（零依赖 SVG 四维：胜率/头游/稳健/升级）接入 HistoryView。
-  - P1-3 牌桌主题：新增 `table-themes.css`（经典/墨绿竹纹/绛红漆器/月白青花 4 套，覆盖 `--table-felt`/`--card-back-base`/`--card-back-svg`）；`.ellipse-table`/`.card-back-inner` 改用 var() 回落；App.vue 挂 theme class + 监听 `guandan:theme-change`；SettingsView 「牌桌主题」缩略选择器。
-  - P1-4 AI 生涯：新增 `career.js`（2→A 13 级爬梯，胜升负降，段位对手 flavor + 难度映射）；AIView 生涯卡（爬梯进度轨 + 对手 + 生涯对战按钮）；`?career=1` 透传 useGameLogic，局末 `recordCareerResult` 弹晋级/惜败提示；`guandan-engine.js` 重新导出 `LEVEL_SEQUENCE`。
-  - P2-1 字体：tokens 新增 `--font-display-cn`（系统楷/宋栈，离线无 CDN），用于首页 Logo/引导卡/结算标题。
-  - P2-2 氛围：HomeView 金色浮尘粒子（纯 CSS 动画，确定性伪随机布局）。
-  - P2-3 声音：audio.js 新增 `sfxWin`（上行大三和弦 fanfare）/`sfxLose`（下行小调），局末按胜负播放。
-  - 验证：dev server 真机截图逐页核对（首页引导/横幅/浮尘、AI 生涯卡、战绩页成就墙+雷达、对局页、结算卡 DOM）；新增 `v0428-features.test.js`（43 case）并注册；`guandan-engine.test.js` LEVEL_SEQUENCE 断言反转为“已导出”；版本断言对齐 0.4.28；`npm test` 全绿；`npm run build` 成功。
+- **v0.4.28（2026-07-20）UI 留存功能落地**（详见 `docs/UI-RETENTION-SUGGESTIONS.md`）：首启引导图卡、回到上次牌局横幅、结算战绩卡（金箔胜负印章+双上/旗开得胜徽章）、可出牌金光+hover、成就系统（`achievements.js` 6 个掼蛋术语成就）、牌风雷达（`PlayStyleRadar.vue`）、牌桌主题（`table-themes.css` 翡翠绿/深海蓝/绛红漆器/月白青花）、AI 生涯（`career.js` 2→A 爬梯）、展示字体栈、首页浮尘、胜负音效。
 
-- 2026-07-20：完成 v0.4.27 全项目对抗性审查修复 + web/安卓一致性 + UI 留存建议（用户要求“对抗性审查查出整个项目 bug”）：
-  - 网络层 P0-1（换座×心跳检查器×解散三者叠加，任何一次换座必在 ~6-23s 内解散房间）：心跳检查器不跳过 `hostSeat`，换座后 host 新座位无心跳被收割 → RoomView `peer:leave` 命中 hostSeat 即解散。修复：真实/测试版心跳检查器均跳过 `hostSeat`（收割时补清 token/connAlive）；`swapSeats(a,b)` 同步互换 `lastHeartbeat`/`seatResumeTokens`/`seatConnAlive` 账目（顺带修二次换座 token 不匹配 P1-2）。
-  - 网络层 P1-1：joiner 收到涉及自身的 `SEAT_SWAP_COMMITTED` 后不重绑 ws↔seat → 加 `scheduleJoinRetry()`。
-  - 网络层 P2-1：`relayFromClient` 三处 seat 0 硬编码改 `hostSeat`（换座后 host 不在 0 号位时转发全断）。
-  - 网络层 P2-2：`_scanHttpWsRooms` 加 `stopOnFirst` 提前终止；JoinView 输房号快扫接线（命中即选中）。
-  - 视图一致性（web/安卓，按用户友好取舍）：web 房主「邀请好友」弹窗不再被 `return` 拦死（落房间号分支）；web 输房号点加入自动扫描同网房主；JoinView 误导文案改引导式；`onNickConfirm` 加幽灵座位守卫（`selfSeat===-1` 不写 `peers.set(-1)`）。web 无扫码入口判为有意设计不强制对齐。
-  - 暂缓：P1-3（ws 瞬断即踢回首页 / AndroidWs 无重连）——需 transport 层重连状态机，架构改动大。
-  - 测试：新增 `v0427-adversarial-fixes.test.js`（29 case，含真 WS 链路换座收割场景）并注册；`v0425-joker-lastplay-ui.test.js` 字符窗口断言放宽（400→700 / 500→800，行为未变仅注释拉长）；`npm test` 全绿；`npm run build` 成功。
-  - 文档：`docs/UI-RETENTION-SUGGESTIONS.md`（UI 美化与留存建议，P0/P1/P2 三档 + 设计原则）。
+- **v0.4.27（2026-07-20）全项目对抗性审查**：核心 P0 = 换座×心跳检查器×解散三连 bug（心跳检查器跳过 `hostSeat` + `swapSeats` 同步 `lastHeartbeat`/`seatResumeTokens`/`seatConnAlive` 账目）；joiner 换座重绑（`scheduleJoinRetry`）；`relayFromClient` 去 seat0 硬编码改 `hostSeat`；扫描 `stopOnFirst` 提前终止；web/安卓一致性（邀请弹窗/输房号自扫/幽灵座位守卫）。**暂缓：ws 瞬断重连（需 transport 层状态机）。**
 
-- 2026-07-20：完成发牌稳定性加固 + 聊天配音（用户真机反馈）：
-  - 真机"AI 模式不自动发牌"：根因疑似真机 WebView 冻结/节流定时器链导致 `dealAnim` onComplete 永不到达；`startDealAnimation` 新增 3.2s 软兜底（动画理论时长 2.3s）——超时强制 `dealAnim.cancel()` + `isDealing=false` + `finishDeal`，不弹超时遮罩只留日志；新增 `[deal] anim start/complete` 面包屑日志便于现场诊断；8s 硬兜底保留。
-  - 聊天配音：`audio.js` 新增导出 `speakText`（与牌型播报同 `_speak` 通道，voiceEnabled 开关 + cancel 顶掉旧播报）；`onChatSelect` 发送时本地朗读、`onChatQuick` 收到对方快捷聊天也朗读（"打得不错"等两侧都有配音）。
-  - 测试：`audio.test.js` speakText 2 case（149 全过）；`v0425` 套件块 M（8 case，累计 124）；`npm run build` 成功。
-
-- 2026-07-20：完成体验五件套（用户真机/实机反馈）：
-  - 昵称/头像本地不刷新：`RoomView.onNickConfirm` 旧版只改 ref + 广播，`peers` 里自己没更新且未持久化；改为同步更新本地座位 + `storage.setNickname/setAvatar`。
-  - 进 App 自动 BGM：`main.js` 原生直接 `startBgm`，浏览器注册一次性 `pointerdown` 解锁 AudioContext 后启动（autoplay 策略）。
-  - 按钮轻音效：`audio.js` 新增 `sfxClick`（1250→900Hz triangle 50ms、音量 0.12 不吵）；`main.js` 全局 `pointerdown` 委托 `button/a/[role=button]` 触发。
-  - 二维码放大：生成宽度 180→320，展示 100→168px。
-  - 息屏掉线解析与修复：息屏后 WebView 冻结 JS/WebSocket，心跳停发 6s 被 host 释放（局域网没断）；`RoomView` 新增 `visibilitychange` 监听，唤醒发现断线自动 `joinRemoteRoom`（uuid+resumeToken 恢复原 seat，已释放则新分配）。
-  - 测试：`v0425` 套件块 L（12 case，累计 116）；`npm run build` 成功。
-
-- 2026-07-19：完成真机跨设备入房链路修复（用户真机反馈"多手机同热点进不了同一房间"）：
-  - 根因：浏览器版默认 BroadcastChannel（仅同机多标签），跨设备必须一台手机装 APK 当 host（AndroidWs 起真 WS server）；浏览器当 host 根本没法被加入。
-  - App 扫码自动进房：`JoinView` 扫码成功后直接 `router.push('/room?...')`（旧版只填地址还要手点加入）；`parseQrScanResult` 支持 `guandan://room|join` scheme。
-  - guandan:// 深链桥：`qr-fallback.js` 新增 `buildAppDeepLink`；`AndroidManifest.xml` 注册 `guandan` scheme；`main.js` 监听 `appUrlOpen` + `getLaunchUrl` 直达 `/room?role=joiner&host=...`；`QrFallbackCard` 展示「点此直接拉起 App 加入」链接；JoinView 浏览器页展示 App 深链桥。
-  - 测试：`qr-fallback.test.js` 深链 10 case（63 全过）；`v0425` 套件块 K（104 case）；`npm run build` 成功；`network-weaknet.test.js` kick 断言加固（KICKED/PEER_LEAVE 双路径任一 + 等待 600→1200ms）；v0410/v0417~v0421 版本断言随 0.4.25 刷新；v0424 扫码复查断言窗口放宽（自动进房回调变长）。
-  - APK 构建（国内镜像工具链）：JDK 21 `C:\dev\jdk-21`（TUNA）+ Android SDK `C:\dev\android-sdk`（腾讯，build-tools 35/36 + platform 36）+ Gradle `C:\dev\gradle-8.14.3` + 阿里云 maven 镜像（`~/.gradle/init.gradle`）；产物 `android/app/build/outputs/apk/debug/app-debug.apk`（约 18MB，已含 guandan:// 深链）。
-
-- 2026-07-19：完成四项体验修复（用户反馈）：
-  - 桌面出牌分不清几张 3：归属胶囊加牌型名（`lastPlayTypeName`，数字/字符串 type 双映射），TableCenter `lp-type` 高亮显示（"AI-西 · 顺子"）。
-  - AI 开局就扔炸弹：`chooseLead` 重排（对子→三张→顺子→残局炸弹（≤6 张）→单张→兜底炸），`chooseLeadHard` 保留阈值反转（>6 张保留、≤6 张才领炸）；单张选择不拆炸弹 rank（`nonBomb` 池优先）；`guandan-ai.test.js` 块 24/25 反转 + 25b 新增（80 case）。
-  - 一键理牌理顺子/同花顺：引擎新增 `groupHandCombo`（王→鬼→炸弹→同花顺→顺子→连对→钢板→三张→对子→单张，combo 列带中文 label）；`sortMode` 三模式循环（rank→combo→custom），理牌按钮循环 + toast；`guandan-engine.test.js` 块 13b（14 case）。
-  - 自定义理牌：`customOrder` 卡牌顺序 + `moveCustomCard` 换位；拖动=换位（桌面 mouse/移动 touch 命中检测）与拖动连选按模式分流；新牌兜底附加；单列隐藏 ×1 角标。
-  - 测试：`v0425` 套件加块 J（14 case，累计 97）；`npm run build` 成功；Playwright 截图核对三模式切换。
-  - 手牌布局三调（用户截图反馈）：绿色点数角标全删（仅保留牌型名列标）；`sortMode` 默认改 `combo`（炸弹/同花顺统一靠左）；桌面列负 margin -18px 横向重叠收紧、列底/分隔线去除、选中列 z-index 20；`groupHandCombo` 长顺/长连对/长钢板按 5 张/3 对/2 组切列（防 12 连张单列竖叠冲出屏幕）；`guandan-engine.test.js` 补切分用例（158 case）。
-
-- 2026-07-19：完成主流掼蛋手游对标 UX 六件套 + P1-16（用户调研驱动）：
-  - 选中牌型实时预览：`useGameLogic.selectedPreview`（`E.recognize` 识别 + `E.canBeat` 判可压），两端手牌区上方胶囊「顺子·5 张 ✓可压 / ✗压不过 / 无效牌型」。
-  - 拖动连选：`useGameLogic` 拖动状态机（`dragStart/dragOver/dragEnd/dragIsActive/consumeDragSuppress` + `setCardSelected`）；桌面 mousedown/mouseenter/mouseup，移动 touchstart/touchmove 命中检测（`data-card-key`）/touchend，与长按选列共存，拖动后合成 click 吞掉。
-  - 记牌器：`cardCounter` computed（总数 8/2 - playedHistory - 自己手牌），新组件 `CardCounter.vue`（右缘悬浮 + 折叠面板，级牌高亮、剩 0 置灰）。
-  - 飞牌轨迹：`lastPlayerPos` computed（lastPlay.who → bottom/top/left/right），TableCenter 牌堆按方位 class + `--fly-x/y` CSS 变量从出牌者方向飞入。
-  - 简洁模式：storage `simpleMode` + SettingsView 外观区开关 + 全局 `simple-mode.css`（隐藏牌桌花纹/光效/牌面纹理，收敛阴影），两端 `.page` 挂 class。
-  - 级牌进度轨：新组件 `LevelTrack.vue`（2→A 节点 + 双方队伍圆点），挂进 TableCenter 信息条下方（top:34px 避开座位遮挡）；`teamLevels` ref 在 refreshUiFromGameState 同步。
-  - P1-16：横屏 `.hand-card::before` 透明 hit area 扩到 44px（36px 牌不达触控标准）。
-  - 发牌音效时序修复（用户反馈"发牌动画没过完就有炸弹声"）：`useGameLogic._afterDeal`（`watch(isDealing)`，动画结束再执行）；'play' 事件的音效/特效/语音/报数全部经 `_afterDeal` 延迟；顺带修正特效触发窄条件（旧版只限炸弹系，顺子/连对/钢板/三带二的弹跳大字实际从未触发），统一交 `showBombFx` 按 `bombFxForType` 判定；`v0425` 测试块 H 锁定（80 case）。
-  - 橙色倍数卡解读：`HudTop` mult-card = ×N 倍数 + 房间号；AI 单机无房间概念，随机房号误导用户 → 新增 `showRoomCode` prop，桌面端按 `isP2PMode` 传入（AI 模式隐藏）；`v0425` 测试块 I 锁定（83 case）。
-  - 困难模式"不能自动发牌"排查结论：桌面（用户首家/AI 首家）+ 移动竖屏真实动画路径复现均正常发牌并推进，未能复现；疑似热更新期偶发 dealTimeout，如再出现需记录复现步骤。
-  - 测试：`v0425` 套件加块 G（23 case，累计 75）；`npm run build` 成功；Playwright 截图人工核对。
-
-- 2026-07-19：完成 55fb3cc 对抗性审查报告（`tmp/` 外文件，用户上传）第一阶段修复：
-  - P0-01 UUID 冒名：host 分配 seat 时生成不可预测 `resumeToken`，仅经 connId 单播（WS/AndroidWs）或 seat 定向 SYNC（BC）下发本人，广播 SYNC 绝不含 token；重连必须 uuid+token——token 不符 + 原连接活跃 → `DUPLICATE_SESSION` 拒绝且 peers 不动；原连接已断 → 不顶替按新玩家分配（原 seat 保留）；被踢/心跳释放/close 清理 token；joiner 端 token 存 sessionStorage 按 roomId 恢复。配套协议修复：加入阶段（selfSeat=-1）放行定向 SYNC（否则 token SYNC 被自身过滤）；joiner seat 解析优先 host 权威 `seat` 字段且分配后不再重扫（否则同 uuid 双 entry 时广播 SYNC 把 seat 误扫回旧 entry）；`network.test.js` 块 13 适配新协议。
-  - P0-05 RoomView 角色以 network 为准：进入房间页有活跃 session 时 `isHost` 取 `net.isHost()`，路由 query 仅作首次初始化（迁移后的新 host 返回房间不再被降级关 server）。
-  - P0-07 `cachePeerHostAddress` 放行 seat 0（换座后 seat 0 也可成候选）。
-  - P0-08 `validateHands` 增加四手牌间 card id 全局唯一校验（同一实体牌不得在两家）。
-  - P1-01/02 两端退出迁移候选选举统一走 `net.selectNextHostCandidate([selfSeat])`（确定性 + canHost 优先），兜底座位优先级后无候选则不迁移（旧版 `?? 2` 会对不存在的 seat 2 发起迁移）。
-  - P1-15 横屏 safe-area 四值 shorthand 左右写反修复：GameViewMobile hud-top/hand-area/action-bar 右侧改 `inset-right`；HomeView 横屏底部改 `inset-bottom`。
-  - 测试：新增 `v0425-adversarial-fixes.test.js`（31 case：3 个真 WS 链路攻击场景 + 全部源码断言）并注册；`network-weaknet.test.js` 修隐性竞态（并发 JOIN 按到达顺序分座，kick 改用 joiner 实际 seat 而非硬编码 3）；`network-multitab.test.js` 块 2 模拟刷新时迁移 resumeToken（sessionStorage 保留语义），SYNC 已分配 seat 的自愈路径保留（entry 消失/易主才重试 JOIN）。
-  - 暂缓（报告第二阶段起）：P0-02/03 迁移 await/ACK 状态机、P0-04 host 崩溃选举重发牌、P0-06 finished 控制权迁移、P0-09 横屏牌列展开、P0-10 大厅 grid、P1-03~14 协议硬化、UX-01~15。
-
-- 2026-07-19：完成 v0.4.25 大小王牌面重做 + 出牌归属标签（用户反馈驱动）：
-  - 大小王：`CardPlay.vue` 弃用 kawaii 卡通小丑 PNG（与传统奶油白+金边牌面风格冲突），改经典扑克设计——奶油白底 + 对角竖排 JOKER + 自绘卡通小丑 SVG（三尖铃铛帽+笑脸+拉夫领，大王红帽金球 / 小王蓝灰帽银球）+ 横排「大王/小王」；sm 尺寸精简；PNG 资产保留给 `ui-preview` 旧演示页。
-  - 出牌感知：`useGameLogic.js` 新增 `lastPlayerName`/`lastPlayerEmoji` computed（`lastPlay.who` → name/avatar）并导出；`TableCenter.vue` 牌堆正上方加 `last-play-tag` 金边胶囊（头像+名字+「出的牌」，`last-pop` 弹入动画，key 随出牌人+牌数变化重播）；桌面/移动两端接线。
-  - 测试：新增 `v0425-joker-lastplay-ui.test.js`（32 case）并注册；`npm run build` 成功。
-  - 音频：`audio.js` `sfxBomb` 重做真爆炸音（次声冲击 70→24Hz + 白噪声低通扫频 2600→120Hz + 碎裂高频 5kHz，替换旧"电子嘟"）；语音播报从仅炸弹/王炸扩展为全部特殊牌型（顺子/连对/钢板/三带二/同花顺，`TYPE_SPEECH_TEXT` 映射，单张/对子/三张不播报防吵）；新播报 `speechSynthesis.cancel()` 顶掉旧播报防排队；`speakBomb` 重构为通用 `_speak`/`speakType`；`audio.test.js` 块 15 扩展（147 case）。
-  - 手牌收紧：`GameViewDesktop.vue` 列宽 78→64、gap 4→2、牌保持 60px 不缩（手牌总宽缩 ~20%）；移动端已有动态重叠（40px/列）不动；`v0425` 测试块 E 锁定（37 case）。
-  - 特殊牌型特效：`effects.js` `bombFxForType` 扩展顺子/连对/钢板/三带二（新增 `shake` 字段，仅炸弹级 true）；`EffectLayer.vue` 新增四色弹跳大字（顺子蓝/连对青/钢板橙/三带二紫，字号为炸弹 0.72，`combo-pop` 弹簧动画不震屏）；`useGameLogic.showBombFx` 震屏按 `fx.shake` 门控；`v0425` 测试块 F 锁定（52 case）。
-
-- 2026-07-17：完成 v0.4.24 四路并行对抗性审查修复 + UI/HCI 改进（细节见 git log `HEAD`）：
-  - 3 个 P0：GameViewDesktop 补 `import * as haptics`（菜单/退出全灭）；host 主动退出迁移改 `game.getSnapshot()` + `net.close({broadcast,newHostSeat,newHostAddress})`（一退全房解散）；JoinView `parseHostAddress` 默认导出 + `{hostIp,hostPort}` 解构（真机加房全灭，network.js 迁移路径同源修复）。
-  - P1 对局：`'play'` 数字 type 统一映射牌型名（炸弹特效/语音/音效复活）；`scheduleAI` 仅 host + 兜底 pass；AI 鬼牌不压 rank17；`dealTimeout` 导出 + 快照清理；超时自动行动 `findMinBeat`/`commitPass`；`_broadcastPerSeatDeal` 遍历 0..3 跳过自己；URL `firstSeat` 只消费一次；`getSnapshot()` 重算 `handCounts`。
-  - P1 网络/房间：`smartReconnectToPeers` 三重修复；`_DISCONNECT` 读 `payload.seat`；`SEAT_SWAP_REQUEST` 先广播后应用；`ROOM_FULL` 走 `sendToConnection`；`RELAY_TYPES` 加 `CHAT_QUICK`；GAME_START 跳转带 `host`；RoomView 监听 `host:lost` + 加入 8s 超时 + 满房提示。
-  - UI/HCI：战绩 `computeSummary` 逐条 `rec.mySeat`；HistoryChart 补 `barGroupLabelX`；HudTop 删死按钮/假 25s；桌面 Esc/去假金币/聊天常显；移动端长按吞合成 click；`CHAT_QUICK` 跨端聊天；InviteDialog 复制兜底；GuideView 文案重写；三页面补返回按钮；SettingsView `aria-expanded` 动态化。
-  - 测试：新增 `v0424-game-fixes`（40）/ `v0424-gameview-fixes`（45）/ `v0424-room-join-fixes`（56）并注册；`network.test.js` 3 条、`history.test.js` 2 条断言按新正确行为反转。
-  - 测试基线：`npm test` 59 套件 / 2106 case 全绿；`npm run build` 成功。
-  - 暂缓（`tmp/v0424-progress.md`）：Android Java 侧 ROOM_PROBE 应答、uuid 复用 seat 防冒名、BC 模式伪造防线、mDNS playerCount、Windows 热点网段 192.168.137.x。
-
-> 更早的任务记录已精简移除，历史变更见 `git log` 与 `docs/CHANGELOG.md`。
+> 更早（v0.4.26 及以前：发牌软兜底/聊天配音/体验五件套/真机跨设备入房+深链/大小王重做/理牌三模式/UX 六件套/55fb3cc 对抗性审查/v0.4.24 四路审查等）见 `docs/CHANGELOG.md` 与 `git log`。
 
 ## 项目说明
 
@@ -145,7 +48,7 @@
 ```bash
 npm install          # 装依赖
 npm run dev          # 开发服务器（http://localhost:8848）
-npm test             # 全部测试（61 套件 / 2724 case，v0.4.25 基线）
+npm test             # 全部测试（57 套件 / 2633 case，v0.4.29 基线）
 npm run test:engine  # 单套：规则引擎（另有 test:ai / test:game / test:anim / test:ws / test:rotation / test:kick / test:room）
 npm run bench        # 性能基准
 npm run build        # 生产构建（产物在 dist/）
@@ -170,8 +73,10 @@ guandan-p2p-vue3/
 │   │   ├── network-transport-android-ws.js  # AndroidWsTransport（真机）
 │   │   └── ws-server.js / qr-fallback.js / seat-rotation.js / deal-animation.js
 │   │       / audio.js / storage.js / effects.js / history.js / dialog-bus.js / haptics.js
+│   │       / achievements.js（成就）/ career.js（AI 生涯爬梯）
 │   ├── components/             # Vue SFC（CardPlay / HudTop / PlayerSeat / TableCenter
-│   │                           #   / MainActions / ChatQuickPanel / icons/ 等）
+│   │                           #   / MainActions / ChatQuickPanel / ResultOverlay（结算卡,桌面/移动共享）
+│   │                           #   / PageHeader（页头）/ PlayStyleRadar / CardCounter / LevelTrack / icons/ 等）
 │   └── views/                  # 8 个路由页：index / room / join / game / ai / guide / history / settings
 └── .harness/                   # Mavis 多 agent 团队配置（不影响运行）
 ```
@@ -186,7 +91,7 @@ guandan-p2p-vue3/
 
 ## Testing instructions
 
-测试全是 **Node 原生 assert / console.log**，没用测试框架。**基线：61 套件 / 2724 case 全绿（v0.4.25）。**
+测试全是 **Node 原生 assert / console.log**，没用测试框架。**基线：57 套件 / 2633 case 全绿（v0.4.29）。**
 
 **测试文件规范**：
 - 文件名 `<name>.test.js`，与被测文件同目录；顶部 `import * as X from './<name>.js'`
@@ -263,6 +168,7 @@ __installFakeTimers(opts)                           // 测试 hook(生产 tree-s
 ```js
 getNickname() / setNickname(name)   getAvatar() / setAvatar(dataUrl)
 getSettings() / setSettings(obj)    getHistory() / addHistory(record) / clearHistory()
+setLastGame(info) / getLastGame() / clearLastGame()   // ★ v0.4.28:「回到上次牌局」用
 ```
 
 ## 6 个用户已确认的产品决策
