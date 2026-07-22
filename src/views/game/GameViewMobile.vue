@@ -549,7 +549,7 @@ const handOverlap = computed(() => {
   const leftPad = 8   // ★ v0.4.29:与 .hand-inner padding-left 同步(16→8)
   const rightSafe = 74 // 70px 智能理牌胶囊 + 4px 缓冲
   const available = Math.max(0, viewportW - leftPad - rightSafe)
-  const naturalWidth = count * 56
+  const naturalWidth = count * 52  // ★ v0.4.29:列宽 56→52 同步
   if (naturalWidth <= available) return 0
   return Math.min(28, Math.floor((naturalWidth - available) / (count - 1)))
 })
@@ -1191,11 +1191,11 @@ button {
 .hand-area {
   position: fixed;
   left: 0; right: 0;
-  bottom: clamp(76px, 14vh, 115px);   /* 操作栏上方 */
-  padding: 0 4px 6px;
+  /* ★ v0.4.29 响应式:用 clamp 适配不同手机高度(旧版 14vh 在矮屏手机上手牌被截断) */
+  bottom: clamp(62px, 10vh, 100px);   /* 操作栏上方(操作栏 ≈ 56px + safe-area) */
+  padding: 0 4px 4px;
   background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
   z-index: 5;
-  /* v2.5:发牌完手牌"立刻可见",去掉 opacity transition */
   transition: none;
 }
 .hand-area.disabled { opacity: 0.3; pointer-events: none; }
@@ -1251,7 +1251,7 @@ button {
   justify-content: flex-start;
   align-items: flex-end;
   flex-wrap: nowrap;
-  min-height: 110px;
+  min-height: 90px;  /* ★ v0.4.29:110→90 减少纵向占用 */
   /* v2.5:左右 padding 4 → 16,加 12px 黑边(用户反馈"左右两侧留一些空间") */
   /* ★ P1-06 修复:右侧留出 ≥60px 安全区,避免智能理牌胶囊压住最右列 */
   padding: 8px 70px 8px 8px;
@@ -1271,12 +1271,12 @@ button {
  *       同时 .hand-inner 左右 padding 加到 16 让两侧留 12px 黑边 */
 .hand-column {
   position: relative;
-  width: 56px;             /* 桌面 78 → 移动 56(每屏装 9 列) */
-  min-height: 84px;
+  width: 52px;             /* ★ v0.4.29:56→52 响应式收窄(每屏装更多列) */
+  min-height: 72px;        /* ★ v0.4.29:84→72 减少纵向占用 */
   flex-shrink: 0;
   margin: 0;
   margin-left: calc(-1 * var(--overlap, 16px)); /* v2.5: 动态重叠,列数多时自动收紧避免裁切 */
-  padding: 12px 0 2px;
+  padding: 10px 0 2px;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.04);
   border-right: 1.5px solid;
@@ -1316,7 +1316,8 @@ button {
    *   (hand-card 多张同 rank 牌用 inline top: i*-16px,i=2 时 top=-32
    *    让最上牌溢出 hand-column 顶部 32px,旧 -16 会跟最上牌角标重叠,
    *    z-index 5 反而把"3♥"角标下半遮住 → 用户看到"3 牌上半看不到") */
-  top: -52px;
+  /* ★ v0.4.29:top -52→-38px,减少纵向溢出(旧值在矮屏手机上牌顶被截断) */
+  top: -38px;
   left: 50%;
   transform: translateX(-50%);
   min-width: 18px;
@@ -1370,14 +1371,14 @@ button {
   box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
 }
 
-/* 单张手牌:56 列宽 → 牌 44×62 居中 */
+/* 单张手牌:52 列宽 → 牌 40×56 居中(★ v0.4.29 响应式缩小) */
 .hand-card {
   position: absolute;
-  left: 6px;               /* (56 - 44) / 2 = 6 居中 */
-  width: 44px;
-  height: 62px;
-  --hand-card-w: 44px;
-  --hand-card-h: 62px;
+  left: 6px;               /* (52 - 40) / 2 = 6 居中 */
+  width: 40px;
+  height: 56px;
+  --hand-card-w: 40px;
+  --hand-card-h: 56px;
   transition: transform var(--t-fast, 120ms) var(--ease-out, ease);
 }
 
@@ -1385,19 +1386,21 @@ button {
  * 6. 操作栏 14%(≤115px @812)
  * 4 大按钮:智能理牌 / 不出 / 提示 / 出牌
  * ============================================================ */
-/* v0.4.25:记牌器悬浮位(理牌按钮正上方) */
+/* ★ v0.4.29 响应式:浮动按钮定位同步新 hand-area bottom(clamp 62~100px) */
 .counter-fab-mobile {
   position: fixed;
-  right: 10px;
-  bottom: calc(clamp(76px, 14vh, 115px) + 68px);
+  right: 8px;
+  bottom: calc(clamp(62px, 10vh, 100px) + 56px);
   z-index: 70;
+  transform: scale(0.88);
+  transform-origin: bottom right;
 }
 
 /* 智能理牌悬浮按钮(手牌区右上角) */
 .smart-sort-float {
   position: fixed;
-  right: 10px;
-  bottom: calc(clamp(76px, 14vh, 115px) + 12px);
+  right: 8px;
+  bottom: calc(clamp(62px, 10vh, 100px) + 8px);
   z-index: 7;
   display: flex;
   align-items: center;
@@ -1439,11 +1442,12 @@ button {
 
 .action-bar button {
   pointer-events: auto;
-  height: 56px;
-  min-height: 44px;
+  /* ★ v0.4.29 响应式:按钮高度从固定 56px 改 clamp(矮屏手机不超出手牌区) */
+  height: clamp(44px, 7vh, 56px);
+  min-height: 40px;
   border: none;
   border-radius: 12px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   cursor: pointer;
   display: flex;
