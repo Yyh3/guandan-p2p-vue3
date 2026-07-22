@@ -4,6 +4,28 @@
 
 ---
 
+## v0.4.29 (2026-07-20) — 座位布局修复 + 安卓/网页响应式验证 + 结算弹层组件化精简
+
+### A. 座位布局修复
+
+- AI-东遮挡：`.seat-right` 旧 `right:240px` 侵入出牌区压住右侧飞入的牌，改贴右边缘 `right:24px`（与左侧对手对称）。
+- 本人身份卡：桌面端 `:deep(.seat-bottom)` 旧版 `display:none` 隐藏，改为显示并置于左下角，与队友/对手形成四角布局。
+
+### B. 安卓/网页一致性 + 响应式验证
+
+- 架构核实：安卓手机（竖/横屏）与平板竖屏走 GameViewMobile，平板横屏/桌面走 GameViewDesktop；两端同一份 Vue 代码，UI 天然一致（平台差异仅扫码/深链/BGM 门控）。
+- Playwright 五视口（360×640、390×844、844×390、768×1024、1024×768）截图 + DOM 包围盒测量，确认本人座位与手牌/按钮无重叠、AI-东不遮挡出牌区。
+
+### C. 可复用模块精简
+
+- 结算战绩卡抽取为共享 `ResultOverlay.vue`（响应式：桌面尺寸 + @media≤768px 收紧），桌面/移动端改用同一组件，精简约 320 行重复代码；保留 `.result-mask` 类名与文案（E2E 依赖），`primary` 统一走 `onPrimaryResultAction`。
+
+### D. 测试与基线
+
+- E2E `result-overlay.spec.js` 通过；`npm test` 全绿；`npm run build` 成功。
+
+---
+
 ## v0.4.28 (2026-07-20) — UI 留存功能落地（P0/P1/P2 全套，真实运行截图验证）
 
 > 基于 v0.4.27 产出的 `docs/UI-RETENTION-SUGGESTIONS.md`，将 P0/P1/P2 建议全部落地，并用 dev server 真机截图逐页验证美观。
