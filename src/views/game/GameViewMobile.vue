@@ -693,8 +693,12 @@ onUnmounted(() => {
 .page {
   position: relative;
   width: 100vw;
+  /* ★ v0.4.29:height 100% 强制撑满视口(不只是 min-height),
+     消除安卓 WebView 横屏时上/左白边(min-height 内容不足时不撑满) */
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
-  min-height: 100dvh;            /* iOS Safari 动态视口 */
+  min-height: 100dvh;
   overflow: hidden;
   color: #fff;
   /* 防止 iOS Safari 双击放大 */
@@ -1557,7 +1561,12 @@ button {
  * 用 .is-landscape class 钩子重新分配:50(顶HUD) / 80(队友+左右AI) / 100(桌面) / 110(手牌) / 50(操作栏)
  * ============================================================ */
 .page.is-landscape {
-  /* 重新分配高度:5 段堆叠 */
+  /* ★ v0.4.29 横屏全屏:强制 100% 宽高 + 背景铺满,消除白边 */
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  /* 横屏 safe-area(刘海/圆角屏) */
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
 }
 
 /* 顶 HUD 压缩到 50px
